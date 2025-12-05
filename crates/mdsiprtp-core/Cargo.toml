@@ -1,0 +1,11 @@
+[package]
+name = "mdsiprtp-core"
+description = "Core types, errors, and configuration for mdsiprtp SIP/RTP stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true

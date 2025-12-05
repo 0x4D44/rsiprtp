@@ -1,6 +1,64 @@
-[package]
-name = "mdsiprtp"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "2"
+members = [
+    "crates/mdsiprtp-core",
+    "crates/mdsiprtp-sip",
+    "crates/mdsiprtp-transaction",
+    "crates/mdsiprtp-dialog",
+    "crates/mdsiprtp-transport",
+    "crates/mdsiprtp-sdp",
+    "crates/mdsiprtp-rtp",
+    "crates/mdsiprtp-media",
+    "crates/mdsiprtp-session",
+    "crates/mdsiprtp",
+]
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["MD"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# SIP parsing
+rsip = "0.4"
+
+# RTP/RTCP (Phase 1 uses simplified custom impl, Phase 2+ uses these)
+# webrtc-rtp = "0.10"
+# webrtc-rtcp = "0.11"
+
+# Audio codecs
+audio-codec-algorithms = "2"
+
+# Audio processing
+dasp = { version = "0.11", features = ["signal", "slice", "ring_buffer"] }
+
+# Concurrency
+crossbeam = "0.8"
+
+# Error handling
+thiserror = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+
+# Utilities
+bytes = "1"
+uuid = { version = "1", features = ["v4"] }
+
+# Internal crates
+mdsiprtp-core = { path = "crates/mdsiprtp-core" }
+mdsiprtp-sip = { path = "crates/mdsiprtp-sip" }
+mdsiprtp-transaction = { path = "crates/mdsiprtp-transaction" }
+mdsiprtp-dialog = { path = "crates/mdsiprtp-dialog" }
+mdsiprtp-transport = { path = "crates/mdsiprtp-transport" }
+mdsiprtp-sdp = { path = "crates/mdsiprtp-sdp" }
+mdsiprtp-rtp = { path = "crates/mdsiprtp-rtp" }
+mdsiprtp-media = { path = "crates/mdsiprtp-media" }
+mdsiprtp-session = { path = "crates/mdsiprtp-session" }
