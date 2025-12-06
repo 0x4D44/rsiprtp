@@ -22,5 +22,13 @@ pub use auth::{
     DigestResponse, Qop,
 };
 
+// Re-export header types
+pub use headers::{
+    Via, Contact, RecordRoute, Route, RouteSet,
+};
+
+// Re-export URI types
+pub use uri::{SipUri, SipUriBuilder};
+
 // Re-export rsip types for convenience
-pub use rsip::Uri;
+pub use rsip::Uri as RsipUri;

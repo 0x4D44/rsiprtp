@@ -184,6 +184,30 @@ impl SipRequest {
         None
     }
 
+    /// Get Record-Route headers as string values.
+    ///
+    /// Returns a vector of Record-Route header values for extracting route set.
+    pub fn record_routes(&self) -> Vec<String> {
+        let mut routes = Vec::new();
+        for header in self.inner.headers.iter() {
+            if let rsip::Header::RecordRoute(rr) = header {
+                routes.push(rr.to_string());
+            }
+        }
+        routes
+    }
+
+    /// Get Via headers as string values.
+    pub fn via_headers_raw(&self) -> Vec<String> {
+        let mut vias = Vec::new();
+        for header in self.inner.headers.iter() {
+            if let rsip::Header::Via(v) = header {
+                vias.push(v.to_string());
+            }
+        }
+        vias
+    }
+
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
         Bytes::from(self.inner.to_string())
@@ -325,6 +349,30 @@ impl SipResponse {
             }
         }
         None
+    }
+
+    /// Get Record-Route headers as string values.
+    ///
+    /// Returns a vector of Record-Route header values for extracting route set.
+    pub fn record_routes(&self) -> Vec<String> {
+        let mut routes = Vec::new();
+        for header in self.inner.headers.iter() {
+            if let rsip::Header::RecordRoute(rr) = header {
+                routes.push(rr.to_string());
+            }
+        }
+        routes
+    }
+
+    /// Get Via headers as string values.
+    pub fn via_headers_raw(&self) -> Vec<String> {
+        let mut vias = Vec::new();
+        for header in self.inner.headers.iter() {
+            if let rsip::Header::Via(v) = header {
+                vias.push(v.to_string());
+            }
+        }
+        vias
     }
 
     /// Get the WWW-Authenticate header value.

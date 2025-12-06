@@ -4,7 +4,7 @@
 //! for some time. It facilitates sequencing of messages between the UAs and
 //! proper routing of requests between both of them.
 
-use mdsiprtp_sip::{SipRequest, SipResponse};
+use mdsiprtp_sip::{SipRequest, SipResponse, Via, RecordRoute as SipRecordRoute};
 
 /// Dialog identifier per RFC 3261.
 ///
@@ -86,25 +86,47 @@ pub enum DialogState {
     Terminated,
 }
 
-/// Route set for in-dialog requests.
+/// Route set for in-dialog requests (RFC 3261 Section 12.2).
 #[derive(Debug, Clone, Default)]
 pub struct RouteSet {
     /// List of Route URIs (derived from Record-Route headers).
     routes: Vec<String>,
+    /// Whether routes use loose routing (have ;lr parameter).
+    loose_routing: bool,
 }
 
 impl RouteSet {
     /// Create an empty route set.
     pub fn new() -> Self {
-        Self { routes: Vec::new() }
+        Self {
+            routes: Vec::new(),
+            loose_routing: false,
+        }
     }
 
-    /// Create a route set from Record-Route headers.
-    pub fn from_record_routes(routes: Vec<String>) -> Self {
-        Self { routes }
+    /// Create a route set from Record-Route header values.
+    ///
+    /// For UAC (caller), the routes should be reversed (top Record-Route becomes last route).
+    /// For UAS (callee), the routes are used in order as received.
+    pub fn from_record_route_values(record_route_values: &[String], reverse: bool) -> Self {
+        let record_routes = SipRecordRoute::parse_all(record_route_values);
+
+        let mut routes: Vec<String> = record_routes
+            .iter()
+            .map(|rr| rr.to_header_value())
+            .collect();
+
+        if reverse {
+            routes.reverse();
+        }
+
+        // Check if first route uses loose routing
+        let loose_routing = record_routes.first().map(|rr| rr.lr).unwrap_or(false);
+
+        Self { routes, loose_routing }
     }
 
-    /// Get the routes.
+    /// Get the routes as string values.
     pub fn routes(&self) -> &[String] {
         &self.routes
     }
@@ -112,6 +134,16 @@ impl RouteSet {
     /// Check if the route set is empty.
     pub fn is_empty(&self) -> bool {
         self.routes.is_empty()
+    }
+
+    /// Check if the route set uses loose routing.
+    pub fn is_loose_routing(&self) -> bool {
+        self.loose_routing
+    }
+
+    /// Get the number of routes.
+    pub fn len(&self) -> usize {
+        self.routes.len()
     }
 }
 
@@ -151,9 +183,12 @@ impl DialogInfo {
         let remote_target = response.contact_uri()?.to_string();
         let local_seq = request.cseq().ok()?;
 
-        // Record-Route handling would go here - for now use empty route set
-        // TODO: Add record_routes() method to SipResponse
-        let route_set = RouteSet::new();
+        // Extract Record-Route headers and reverse for UAC (RFC 3261 Section 12.1.2)
+        let record_routes = response.record_routes();
+        let route_set = RouteSet::from_record_route_values(&record_routes, true);
+
+        // Detect if dialog is secure from transport (TLS/SIPS)
+        let secure = Self::detect_secure_transport(request);
 
         Some(Self {
             id,
@@ -164,7 +199,7 @@ impl DialogInfo {
             remote_uri,
             remote_target,
             route_set,
-            secure: false, // TODO: detect from transport
+            secure,
         })
     }
 
@@ -181,9 +216,12 @@ impl DialogInfo {
         let remote_target = request.contact_uri()?.to_string();
         let remote_seq = request.cseq().ok()?;
 
-        // Record-Route handling would go here - for now use empty route set
-        // TODO: Add record_routes() method to SipRequest
-        let route_set = RouteSet::new();
+        // Extract Record-Route headers (not reversed for UAS per RFC 3261 Section 12.1.1)
+        let record_routes = request.record_routes();
+        let route_set = RouteSet::from_record_route_values(&record_routes, false);
+
+        // Detect if dialog is secure from transport
+        let secure = Self::detect_secure_transport(request);
 
         let _ = local_contact; // Will be used when sending responses
 
@@ -196,8 +234,19 @@ impl DialogInfo {
             remote_uri,
             remote_target,
             route_set,
-            secure: false,
+            secure,
         })
+    }
+
+    /// Detect if the transport is secure (TLS) from the Via header.
+    fn detect_secure_transport(request: &SipRequest) -> bool {
+        let via_values = request.via_headers_raw();
+        if let Some(first_via) = via_values.first() {
+            if let Ok(via) = Via::parse(first_via) {
+                return via.protocol.eq_ignore_ascii_case("TLS");
+            }
+        }
+        false
     }
 
     /// Get the next local CSeq number.

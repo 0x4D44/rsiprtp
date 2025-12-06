@@ -1,3 +1,538 @@
 //! SIP header types and utilities.
+//!
+//! This module provides typed wrappers for common SIP headers,
+//! making it easier to extract and manipulate header values.
 
-// TODO: Implement header wrappers
+use crate::uri::SipUri;
+use mdsiprtp_core::SipError;
+use std::fmt;
+
+/// Typed wrapper for Via header (RFC 3261 Section 20.42).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Via {
+    /// Transport protocol (e.g., "UDP", "TCP", "TLS").
+    pub protocol: String,
+    /// Host address.
+    pub host: String,
+    /// Port number.
+    pub port: u16,
+    /// Branch parameter (transaction identifier).
+    pub branch: String,
+    /// Received parameter (actual source IP).
+    pub received: Option<String>,
+    /// rport parameter (actual source port).
+    pub rport: Option<u16>,
+}
+
+impl Via {
+    /// Parse a Via header value string.
+    ///
+    /// Format: "SIP/2.0/UDP host:port;branch=xxx[;received=ip][;rport=port]"
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        // Parse format: "SIP/2.0/UDP host:port;params"
+        let value = value.trim();
+
+        // Split protocol and the rest
+        let parts: Vec<&str> = value.splitn(2, ' ').collect();
+        if parts.len() < 2 {
+            return Err(SipError::Parse("Invalid Via header format".to_string()));
+        }
+
+        // Parse protocol (e.g., "SIP/2.0/UDP")
+        let protocol_parts: Vec<&str> = parts[0].split('/').collect();
+        let protocol = protocol_parts.last()
+            .ok_or_else(|| SipError::Parse("Missing transport protocol".to_string()))?
+            .to_string();
+
+        // Parse host:port and parameters
+        let rest = parts[1];
+        let (host_port, params) = if let Some(idx) = rest.find(';') {
+            (&rest[..idx], Some(&rest[idx + 1..]))
+        } else {
+            (rest, None)
+        };
+
+        // Parse host and port
+        let (host, port) = if let Some(idx) = host_port.rfind(':') {
+            let port_str = &host_port[idx + 1..];
+            // Check if it's actually a port (all digits) or part of IPv6
+            if port_str.chars().all(|c| c.is_ascii_digit()) && !host_port.contains('[') {
+                (host_port[..idx].to_string(), port_str.parse().unwrap_or(5060))
+            } else {
+                (host_port.to_string(), 5060)
+            }
+        } else {
+            (host_port.to_string(), 5060)
+        };
+
+        // Parse parameters
+        let mut branch = String::new();
+        let mut received = None;
+        let mut rport = None;
+
+        if let Some(params_str) = params {
+            for param in params_str.split(';') {
+                let param = param.trim();
+                if let Some(value) = param.strip_prefix("branch=") {
+                    branch = value.to_string();
+                } else if let Some(value) = param.strip_prefix("received=") {
+                    received = Some(value.to_string());
+                } else if let Some(value) = param.strip_prefix("rport=") {
+                    rport = value.parse().ok();
+                } else if param == "rport" {
+                    // rport without value (client requesting rport)
+                    rport = None;
+                }
+            }
+        }
+
+        if branch.is_empty() {
+            return Err(SipError::Parse("Via header missing branch parameter".to_string()));
+        }
+
+        Ok(Via {
+            protocol,
+            host,
+            port,
+            branch,
+            received,
+            rport,
+        })
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        let mut result = format!(
+            "SIP/2.0/{} {}:{};branch={}",
+            self.protocol, self.host, self.port, self.branch
+        );
+
+        if let Some(ref received) = self.received {
+            result.push_str(&format!(";received={}", received));
+        }
+
+        if let Some(rport) = self.rport {
+            result.push_str(&format!(";rport={}", rport));
+        }
+
+        result
+    }
+}
+
+impl fmt::Display for Via {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for Contact header (RFC 3261 Section 20.10).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contact {
+    /// Contact URI.
+    pub uri: SipUri,
+    /// Display name (optional).
+    pub display_name: Option<String>,
+    /// Expires parameter (optional).
+    pub expires: Option<u32>,
+    /// q-value for priority (optional, 0.0-1.0).
+    pub q: Option<f32>,
+}
+
+impl Contact {
+    /// Parse a Contact header value string.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let value = value.trim();
+
+        let (display_name, uri_part) = if value.starts_with('"') {
+            // Has display name in quotes
+            if let Some(end_quote) = value[1..].find('"') {
+                let name = value[1..end_quote + 1].to_string();
+                let rest = value[end_quote + 2..].trim();
+                (Some(name), rest)
+            } else {
+                (None, value)
+            }
+        } else if let Some(lt_pos) = value.find('<') {
+            // Display name without quotes before <
+            let name = value[..lt_pos].trim();
+            let rest = &value[lt_pos..];
+            if name.is_empty() {
+                (None, rest)
+            } else {
+                (Some(name.to_string()), rest)
+            }
+        } else {
+            (None, value)
+        };
+
+        // Extract URI from angle brackets
+        let (uri_str, params) = if uri_part.starts_with('<') {
+            if let Some(gt_pos) = uri_part.find('>') {
+                let uri = &uri_part[1..gt_pos];
+                let params = if gt_pos + 1 < uri_part.len() {
+                    Some(&uri_part[gt_pos + 1..])
+                } else {
+                    None
+                };
+                (uri, params)
+            } else {
+                return Err(SipError::Parse("Contact URI missing closing >".to_string()));
+            }
+        } else {
+            // URI without angle brackets
+            if let Some(semi_pos) = uri_part.find(';') {
+                (&uri_part[..semi_pos], Some(&uri_part[semi_pos..]))
+            } else {
+                (uri_part, None)
+            }
+        };
+
+        let uri = SipUri::parse(uri_str)?;
+
+        // Parse parameters
+        let mut expires = None;
+        let mut q = None;
+
+        if let Some(params_str) = params {
+            for param in params_str.split(';') {
+                let param = param.trim();
+                if let Some(value) = param.strip_prefix("expires=") {
+                    expires = value.parse().ok();
+                } else if let Some(value) = param.strip_prefix("q=") {
+                    q = value.parse().ok();
+                }
+            }
+        }
+
+        Ok(Contact {
+            uri,
+            display_name,
+            expires,
+            q,
+        })
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        let mut result = String::new();
+
+        if let Some(ref name) = self.display_name {
+            result.push_str(&format!("\"{}\" ", name));
+        }
+
+        result.push('<');
+        result.push_str(&self.uri.to_string());
+        result.push('>');
+
+        if let Some(expires) = self.expires {
+            result.push_str(&format!(";expires={}", expires));
+        }
+
+        if let Some(q) = self.q {
+            result.push_str(&format!(";q={:.1}", q));
+        }
+
+        result
+    }
+}
+
+impl fmt::Display for Contact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for Record-Route header (RFC 3261 Section 20.30).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordRoute {
+    /// Record-Route URI.
+    pub uri: SipUri,
+    /// Whether the lr (loose routing) parameter is present.
+    pub lr: bool,
+}
+
+impl RecordRoute {
+    /// Parse a Record-Route header value string.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let value = value.trim();
+
+        // Extract URI from angle brackets
+        let (uri_str, params) = if value.starts_with('<') {
+            if let Some(gt_pos) = value.find('>') {
+                let uri = &value[1..gt_pos];
+                let params = if gt_pos + 1 < value.len() {
+                    Some(&value[gt_pos + 1..])
+                } else {
+                    None
+                };
+                (uri, params)
+            } else {
+                return Err(SipError::Parse("Record-Route URI missing closing >".to_string()));
+            }
+        } else {
+            return Err(SipError::Parse("Record-Route must have URI in angle brackets".to_string()));
+        };
+
+        let uri = SipUri::parse(uri_str)?;
+
+        // Check for lr parameter
+        let lr = params.map(|p| p.contains("lr")).unwrap_or(false);
+
+        Ok(RecordRoute { uri, lr })
+    }
+
+    /// Parse multiple Record-Route headers from a comma-separated value or multiple values.
+    pub fn parse_all(values: &[String]) -> Vec<Self> {
+        let mut routes = Vec::new();
+
+        for value in values {
+            // Record-Route can be comma-separated
+            for part in value.split(',') {
+                if let Ok(rr) = Self::parse(part) {
+                    routes.push(rr);
+                }
+            }
+        }
+
+        routes
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        if self.lr {
+            format!("<{}>;lr", self.uri)
+        } else {
+            format!("<{}>", self.uri)
+        }
+    }
+}
+
+impl fmt::Display for RecordRoute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for Route header (RFC 3261 Section 20.34).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Route {
+    /// Route URI.
+    pub uri: SipUri,
+    /// Whether the lr (loose routing) parameter is present.
+    pub lr: bool,
+}
+
+impl Route {
+    /// Parse a Route header value string.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let value = value.trim();
+
+        // Extract URI from angle brackets
+        let (uri_str, params) = if value.starts_with('<') {
+            if let Some(gt_pos) = value.find('>') {
+                let uri = &value[1..gt_pos];
+                let params = if gt_pos + 1 < value.len() {
+                    Some(&value[gt_pos + 1..])
+                } else {
+                    None
+                };
+                (uri, params)
+            } else {
+                return Err(SipError::Parse("Route URI missing closing >".to_string()));
+            }
+        } else {
+            return Err(SipError::Parse("Route must have URI in angle brackets".to_string()));
+        };
+
+        let uri = SipUri::parse(uri_str)?;
+
+        // Check for lr parameter
+        let lr = params.map(|p| p.contains("lr")).unwrap_or(false);
+
+        Ok(Route { uri, lr })
+    }
+
+    /// Parse multiple Route headers from a comma-separated value or multiple values.
+    pub fn parse_all(values: &[String]) -> Vec<Self> {
+        let mut routes = Vec::new();
+
+        for value in values {
+            for part in value.split(',') {
+                if let Ok(r) = Self::parse(part) {
+                    routes.push(r);
+                }
+            }
+        }
+
+        routes
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        if self.lr {
+            format!("<{}>;lr", self.uri)
+        } else {
+            format!("<{}>", self.uri)
+        }
+    }
+}
+
+impl fmt::Display for Route {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Route set for dialog routing (RFC 3261 Section 12.2).
+#[derive(Debug, Clone, Default)]
+pub struct RouteSet {
+    routes: Vec<Route>,
+}
+
+impl RouteSet {
+    /// Create an empty route set.
+    pub fn new() -> Self {
+        Self { routes: Vec::new() }
+    }
+
+    /// Create a route set from Record-Route headers.
+    ///
+    /// For UAC (caller), reverse should be true (routes are reversed).
+    /// For UAS (callee), reverse should be false.
+    pub fn from_record_routes(record_routes: Vec<RecordRoute>, reverse: bool) -> Self {
+        let mut routes: Vec<Route> = record_routes
+            .into_iter()
+            .map(|rr| Route {
+                uri: rr.uri,
+                lr: rr.lr,
+            })
+            .collect();
+
+        if reverse {
+            routes.reverse();
+        }
+
+        Self { routes }
+    }
+
+    /// Check if the route set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.routes.is_empty()
+    }
+
+    /// Get the number of routes.
+    pub fn len(&self) -> usize {
+        self.routes.len()
+    }
+
+    /// Get the routes.
+    pub fn routes(&self) -> &[Route] {
+        &self.routes
+    }
+
+    /// Get the first route (for determining request URI in loose routing).
+    pub fn first(&self) -> Option<&Route> {
+        self.routes.first()
+    }
+
+    /// Add a route to the set.
+    pub fn push(&mut self, route: Route) {
+        self.routes.push(route);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_via_parse() {
+        let via = Via::parse("SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK776").unwrap();
+        assert_eq!(via.protocol, "UDP");
+        assert_eq!(via.host, "192.168.1.1");
+        assert_eq!(via.port, 5060);
+        assert_eq!(via.branch, "z9hG4bK776");
+        assert!(via.received.is_none());
+        assert!(via.rport.is_none());
+    }
+
+    #[test]
+    fn test_via_parse_with_received() {
+        let via = Via::parse("SIP/2.0/TCP proxy.example.com:5060;branch=z9hG4bK123;received=10.0.0.1;rport=12345").unwrap();
+        assert_eq!(via.protocol, "TCP");
+        assert_eq!(via.host, "proxy.example.com");
+        assert_eq!(via.received, Some("10.0.0.1".to_string()));
+        assert_eq!(via.rport, Some(12345));
+    }
+
+    #[test]
+    fn test_via_to_string() {
+        let via = Via {
+            protocol: "UDP".to_string(),
+            host: "192.168.1.1".to_string(),
+            port: 5060,
+            branch: "z9hG4bK776".to_string(),
+            received: Some("10.0.0.1".to_string()),
+            rport: Some(12345),
+        };
+
+        let s = via.to_string();
+        assert!(s.contains("SIP/2.0/UDP"));
+        assert!(s.contains("192.168.1.1:5060"));
+        assert!(s.contains("branch=z9hG4bK776"));
+        assert!(s.contains("received=10.0.0.1"));
+        assert!(s.contains("rport=12345"));
+    }
+
+    #[test]
+    fn test_contact_parse() {
+        let contact = Contact::parse("<sip:alice@192.168.1.1:5060>").unwrap();
+        assert_eq!(contact.uri.to_string(), "sip:alice@192.168.1.1:5060");
+        assert!(contact.display_name.is_none());
+    }
+
+    #[test]
+    fn test_contact_parse_with_display_name() {
+        let contact = Contact::parse("\"Alice\" <sip:alice@example.com>;expires=3600").unwrap();
+        assert_eq!(contact.display_name, Some("Alice".to_string()));
+        assert_eq!(contact.expires, Some(3600));
+    }
+
+    #[test]
+    fn test_record_route_parse() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>;lr").unwrap();
+        assert!(rr.lr);
+        assert!(rr.uri.to_string().contains("proxy.example.com"));
+    }
+
+    #[test]
+    fn test_record_route_parse_no_lr() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>").unwrap();
+        assert!(!rr.lr);
+    }
+
+    #[test]
+    fn test_route_set_from_record_routes() {
+        let rrs = vec![
+            RecordRoute::parse("<sip:p1.example.com;lr>").unwrap(),
+            RecordRoute::parse("<sip:p2.example.com;lr>").unwrap(),
+        ];
+
+        // UAC reverses
+        let route_set = RouteSet::from_record_routes(rrs.clone(), true);
+        assert_eq!(route_set.len(), 2);
+        assert!(route_set.routes()[0].uri.to_string().contains("p2"));
+        assert!(route_set.routes()[1].uri.to_string().contains("p1"));
+
+        // UAS doesn't reverse
+        let route_set = RouteSet::from_record_routes(rrs, false);
+        assert!(route_set.routes()[0].uri.to_string().contains("p1"));
+        assert!(route_set.routes()[1].uri.to_string().contains("p2"));
+    }
+
+    #[test]
+    fn test_route_parse() {
+        let route = Route::parse("<sip:proxy.example.com:5060>;lr").unwrap();
+        assert!(route.lr);
+    }
+}
