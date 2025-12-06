@@ -1,0 +1,11 @@
+[package]
+name = "mdsiprtp-sdp"
+description = "SDP parsing and offer/answer model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mdsiprtp-core.workspace = true
+thiserror.workspace = true

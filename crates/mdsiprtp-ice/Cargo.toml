@@ -1,0 +1,15 @@
+[package]
+name = "mdsiprtp-ice"
+description = "STUN/ICE implementation for NAT traversal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mdsiprtp-core.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+rand.workspace = true

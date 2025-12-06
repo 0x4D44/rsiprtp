@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 /// Main configuration for the SIP/RTP stack.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StackConfig {
     /// Identity configuration (who we are).
     pub identity: IdentityConfig,
@@ -13,16 +13,6 @@ pub struct StackConfig {
     pub transport: TransportConfig,
     /// Media configuration (audio settings).
     pub media: MediaConfig,
-}
-
-impl Default for StackConfig {
-    fn default() -> Self {
-        Self {
-            identity: IdentityConfig::default(),
-            transport: TransportConfig::default(),
-            media: MediaConfig::default(),
-        }
-    }
 }
 
 /// Identity configuration.

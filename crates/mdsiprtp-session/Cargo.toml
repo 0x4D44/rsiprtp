@@ -1,0 +1,21 @@
+[package]
+name = "mdsiprtp-session"
+description = "High-level call and session management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+mdsiprtp-core.workspace = true
+mdsiprtp-sip.workspace = true
+mdsiprtp-transaction.workspace = true
+mdsiprtp-dialog.workspace = true
+mdsiprtp-transport.workspace = true
+mdsiprtp-sdp.workspace = true
+mdsiprtp-rtp.workspace = true
+mdsiprtp-media.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true

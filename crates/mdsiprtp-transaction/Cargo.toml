@@ -11,3 +11,4 @@ mdsiprtp-core.workspace = true
 mdsiprtp-sip.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+bytes.workspace = true

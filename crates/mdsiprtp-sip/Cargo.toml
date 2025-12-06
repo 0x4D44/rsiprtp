@@ -11,3 +11,7 @@ mdsiprtp-core.workspace = true
 rsip.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
+uuid.workspace = true
+md5.workspace = true
+hex.workspace = true
+rand.workspace = true

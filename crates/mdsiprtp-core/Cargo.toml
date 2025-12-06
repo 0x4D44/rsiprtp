@@ -9,3 +9,4 @@ authors.workspace = true
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
+rand.workspace = true

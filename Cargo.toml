@@ -8,6 +8,8 @@ members = [
     "crates/mdsiprtp-transport",
     "crates/mdsiprtp-sdp",
     "crates/mdsiprtp-rtp",
+    "crates/mdsiprtp-srtp",
+    "crates/mdsiprtp-ice",
     "crates/mdsiprtp-media",
     "crates/mdsiprtp-session",
     "crates/mdsiprtp",
@@ -31,7 +33,9 @@ rsip = "0.4"
 # webrtc-rtcp = "0.11"
 
 # Audio codecs
-audio-codec-algorithms = "2"
+audio-codec-algorithms = "0.7"
+ezk-g722 = "0.1"
+audiopus = "0.3.0-rc.0"
 
 # Audio processing
 dasp = { version = "0.11", features = ["signal", "slice", "ring_buffer"] }
@@ -51,6 +55,22 @@ tracing = "0.1"
 # Utilities
 bytes = "1"
 uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+md5 = "0.7"
+hex = "0.4"
+
+# TLS
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+
+# Cryptography
+aes = "0.8"
+ctr = "0.9"
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
 
 # Internal crates
 mdsiprtp-core = { path = "crates/mdsiprtp-core" }
@@ -60,5 +80,7 @@ mdsiprtp-dialog = { path = "crates/mdsiprtp-dialog" }
 mdsiprtp-transport = { path = "crates/mdsiprtp-transport" }
 mdsiprtp-sdp = { path = "crates/mdsiprtp-sdp" }
 mdsiprtp-rtp = { path = "crates/mdsiprtp-rtp" }
+mdsiprtp-srtp = { path = "crates/mdsiprtp-srtp" }
+mdsiprtp-ice = { path = "crates/mdsiprtp-ice" }
 mdsiprtp-media = { path = "crates/mdsiprtp-media" }
 mdsiprtp-session = { path = "crates/mdsiprtp-session" }
