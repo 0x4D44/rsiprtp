@@ -988,8 +988,11 @@ name = "mdsiprtp-ice"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "hmac",
+ "md5",
  "mdsiprtp-core",
  "rand",
+ "sha1",
  "thiserror",
  "tokio",
  "tracing",
@@ -1018,6 +1021,7 @@ dependencies = [
  "mdsiprtp-core",
  "rand",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

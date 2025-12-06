@@ -4,6 +4,7 @@
 
 use crate::packet::{RtpPacket, sequence_diff};
 use mdsiprtp_core::{random_u16, random_u32};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 /// RTP session for managing a media stream.
@@ -50,6 +51,263 @@ pub struct ReceiverState {
     pub jitter: u32,
     /// Last arrival time.
     pub last_arrival: Option<Instant>,
+}
+
+// =============================================================================
+// Congestion Control (AIMD-based)
+// =============================================================================
+
+/// Congestion controller state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CongestionState {
+    /// Slow start - exponential increase.
+    SlowStart,
+    /// Congestion avoidance - additive increase.
+    CongestionAvoidance,
+    /// Rate reduction after loss.
+    Recovery,
+}
+
+/// Simple AIMD (Additive Increase Multiplicative Decrease) congestion controller.
+///
+/// This provides basic congestion control based on:
+/// - NACK feedback (packet loss detected)
+/// - REMB feedback (receiver bandwidth estimate)
+/// - RTT measurements
+///
+/// The controller maintains a target bitrate that can be queried by the encoder
+/// or pacer to adjust sending rate.
+#[derive(Debug)]
+pub struct CongestionController {
+    /// Current congestion state.
+    state: CongestionState,
+    /// Current target bitrate (bps).
+    target_bitrate: u64,
+    /// Minimum bitrate (bps).
+    min_bitrate: u64,
+    /// Maximum bitrate (bps).
+    max_bitrate: u64,
+    /// Slow start threshold (bps).
+    ssthresh: u64,
+    /// Last time we increased the rate.
+    last_increase: Instant,
+    /// Last time we decreased the rate (for rate limiting decreases).
+    last_decrease: Instant,
+    /// Recent RTT samples (for smoothing).
+    rtt_samples: VecDeque<Duration>,
+    /// Smoothed RTT.
+    smoothed_rtt: Duration,
+    /// RTT variance.
+    rtt_var: Duration,
+    /// Number of NACKs received in current interval.
+    nacks_in_interval: u32,
+    /// Packets sent in current interval.
+    packets_in_interval: u32,
+    /// Last REMB bitrate received.
+    last_remb: Option<u64>,
+}
+
+impl Default for CongestionController {
+    fn default() -> Self {
+        Self::new(500_000, 50_000, 5_000_000) // 500kbps start, 50kbps min, 5Mbps max
+    }
+}
+
+impl CongestionController {
+    /// Create a new congestion controller.
+    ///
+    /// # Arguments
+    /// * `initial_bitrate` - Starting bitrate in bps
+    /// * `min_bitrate` - Minimum bitrate in bps
+    /// * `max_bitrate` - Maximum bitrate in bps
+    pub fn new(initial_bitrate: u64, min_bitrate: u64, max_bitrate: u64) -> Self {
+        Self {
+            state: CongestionState::SlowStart,
+            target_bitrate: initial_bitrate,
+            min_bitrate,
+            max_bitrate,
+            ssthresh: max_bitrate / 2,
+            last_increase: Instant::now(),
+            last_decrease: Instant::now(),
+            rtt_samples: VecDeque::with_capacity(10),
+            smoothed_rtt: Duration::from_millis(100),
+            rtt_var: Duration::from_millis(50),
+            nacks_in_interval: 0,
+            packets_in_interval: 0,
+            last_remb: None,
+        }
+    }
+
+    /// Get the current target bitrate in bps.
+    pub fn target_bitrate(&self) -> u64 {
+        self.target_bitrate
+    }
+
+    /// Get the current congestion state.
+    pub fn state(&self) -> CongestionState {
+        self.state
+    }
+
+    /// Get the smoothed RTT.
+    pub fn smoothed_rtt(&self) -> Duration {
+        self.smoothed_rtt
+    }
+
+    /// Record that a packet was sent.
+    pub fn on_packet_sent(&mut self) {
+        self.packets_in_interval += 1;
+    }
+
+    /// Handle NACK feedback (packet loss detected).
+    ///
+    /// This triggers multiplicative decrease of the target bitrate.
+    pub fn on_nack(&mut self, lost_packets: u32) {
+        self.nacks_in_interval += lost_packets;
+
+        // Rate limit decreases to at most once per RTT
+        if self.last_decrease.elapsed() < self.smoothed_rtt {
+            return;
+        }
+
+        // Multiplicative decrease (halve the rate)
+        self.target_bitrate = (self.target_bitrate / 2).max(self.min_bitrate);
+        self.ssthresh = self.target_bitrate;
+        self.state = CongestionState::Recovery;
+        self.last_decrease = Instant::now();
+
+        tracing::debug!(
+            "NACK: Reduced bitrate to {} bps (lost {} packets)",
+            self.target_bitrate,
+            lost_packets
+        );
+    }
+
+    /// Handle REMB feedback (receiver estimated maximum bitrate).
+    ///
+    /// The REMB value is used as a ceiling for the target bitrate.
+    pub fn on_remb(&mut self, bitrate: u64) {
+        self.last_remb = Some(bitrate);
+
+        // If REMB is significantly lower than our target, reduce immediately
+        if bitrate < self.target_bitrate * 90 / 100 {
+            self.target_bitrate = bitrate.max(self.min_bitrate);
+            self.ssthresh = self.target_bitrate;
+            self.state = CongestionState::CongestionAvoidance;
+            self.last_decrease = Instant::now();
+
+            tracing::debug!("REMB: Reduced bitrate to {} bps", self.target_bitrate);
+        }
+
+        // Clamp max bitrate to REMB
+        if bitrate < self.max_bitrate {
+            self.max_bitrate = bitrate;
+        }
+    }
+
+    /// Handle RTT measurement from RTCP.
+    ///
+    /// Updates the smoothed RTT using exponential weighted moving average.
+    pub fn on_rtt(&mut self, rtt: Duration) {
+        // Add to sample history
+        if self.rtt_samples.len() >= 10 {
+            self.rtt_samples.pop_front();
+        }
+        self.rtt_samples.push_back(rtt);
+
+        // Update smoothed RTT (RFC 6298-like algorithm)
+        if self.rtt_samples.len() == 1 {
+            self.smoothed_rtt = rtt;
+            self.rtt_var = rtt / 2;
+        } else {
+            // rttvar = (1 - 1/4) * rttvar + 1/4 * |srtt - rtt|
+            let diff = self.smoothed_rtt.abs_diff(rtt);
+            self.rtt_var = self.rtt_var * 3 / 4 + diff / 4;
+
+            // srtt = (1 - 1/8) * srtt + 1/8 * rtt
+            self.smoothed_rtt = self.smoothed_rtt * 7 / 8 + rtt / 8;
+        }
+    }
+
+    /// Periodic update - call this regularly (e.g., every 100ms).
+    ///
+    /// Handles additive increase when no congestion is detected.
+    pub fn update(&mut self) {
+        let now = Instant::now();
+
+        // Calculate loss ratio in current interval
+        let loss_ratio = if self.packets_in_interval > 0 {
+            self.nacks_in_interval as f64 / self.packets_in_interval as f64
+        } else {
+            0.0
+        };
+
+        // Reset interval counters
+        self.nacks_in_interval = 0;
+        self.packets_in_interval = 0;
+
+        // If significant loss, don't increase
+        if loss_ratio > 0.02 {
+            return;
+        }
+
+        // Rate increase logic
+        let increase_interval = Duration::from_millis(100);
+        if now.duration_since(self.last_increase) < increase_interval {
+            return;
+        }
+
+        match self.state {
+            CongestionState::SlowStart => {
+                // Exponential increase (double every RTT)
+                let increase = self.target_bitrate / 10; // ~10% per interval
+                self.target_bitrate = (self.target_bitrate + increase).min(self.max_bitrate);
+
+                if self.target_bitrate >= self.ssthresh {
+                    self.state = CongestionState::CongestionAvoidance;
+                    tracing::debug!("Entering congestion avoidance at {} bps", self.target_bitrate);
+                }
+            }
+            CongestionState::CongestionAvoidance | CongestionState::Recovery => {
+                // Additive increase (fixed increment per RTT)
+                // Increase by approximately 1 packet per RTT
+                let packet_size_bits = 1200 * 8; // ~1200 byte packets
+                let packets_per_second = self.target_bitrate / packet_size_bits as u64;
+                let increase = (packets_per_second / 10).max(10_000); // At least 10kbps
+
+                self.target_bitrate = (self.target_bitrate + increase).min(self.max_bitrate);
+
+                // Respect REMB ceiling
+                if let Some(remb) = self.last_remb {
+                    self.target_bitrate = self.target_bitrate.min(remb);
+                }
+            }
+        }
+
+        self.last_increase = now;
+    }
+
+    /// Get the recommended packet pacing interval.
+    ///
+    /// Returns the interval between packets to achieve the target bitrate
+    /// for a given packet size.
+    pub fn pacing_interval(&self, packet_size_bytes: u32) -> Duration {
+        let packet_size_bits = packet_size_bytes as u64 * 8;
+        if self.target_bitrate == 0 {
+            return Duration::from_millis(20);
+        }
+        let interval_secs = packet_size_bits as f64 / self.target_bitrate as f64;
+        Duration::from_secs_f64(interval_secs)
+    }
+
+    /// Reset the controller to initial state.
+    pub fn reset(&mut self, initial_bitrate: u64) {
+        self.state = CongestionState::SlowStart;
+        self.target_bitrate = initial_bitrate;
+        self.ssthresh = self.max_bitrate / 2;
+        self.nacks_in_interval = 0;
+        self.packets_in_interval = 0;
+        self.last_remb = None;
+    }
 }
 
 impl RtpSession {
@@ -397,5 +655,90 @@ mod tests {
         // Should detect 1 lost packet
         assert_eq!(session.receiver_stats().packets_lost, 1);
         assert_eq!(session.receiver_stats().expected_packets, 3);
+    }
+
+    // ==========================================================================
+    // Congestion Controller Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_congestion_controller_creation() {
+        let cc = CongestionController::default();
+        assert_eq!(cc.target_bitrate(), 500_000);
+        assert_eq!(cc.state(), CongestionState::SlowStart);
+    }
+
+    #[test]
+    fn test_congestion_controller_custom() {
+        let cc = CongestionController::new(1_000_000, 100_000, 10_000_000);
+        assert_eq!(cc.target_bitrate(), 1_000_000);
+    }
+
+    #[test]
+    fn test_nack_reduces_bitrate() {
+        let mut cc = CongestionController::new(1_000_000, 100_000, 10_000_000);
+
+        // Force decrease to be allowed
+        std::thread::sleep(Duration::from_millis(150));
+
+        cc.on_nack(5);
+
+        // Bitrate should be halved
+        assert_eq!(cc.target_bitrate(), 500_000);
+        assert_eq!(cc.state(), CongestionState::Recovery);
+    }
+
+    #[test]
+    fn test_remb_caps_bitrate() {
+        let mut cc = CongestionController::new(1_000_000, 100_000, 10_000_000);
+
+        // REMB says we should only use 500kbps
+        cc.on_remb(500_000);
+
+        // Bitrate should be reduced to match REMB
+        assert!(cc.target_bitrate() <= 500_000);
+    }
+
+    #[test]
+    fn test_rtt_smoothing() {
+        let mut cc = CongestionController::default();
+
+        // Add several RTT samples
+        cc.on_rtt(Duration::from_millis(100));
+        cc.on_rtt(Duration::from_millis(120));
+        cc.on_rtt(Duration::from_millis(90));
+
+        // Smoothed RTT should be close to the average
+        let srtt = cc.smoothed_rtt();
+        assert!(srtt > Duration::from_millis(80));
+        assert!(srtt < Duration::from_millis(130));
+    }
+
+    #[test]
+    fn test_pacing_interval() {
+        let cc = CongestionController::new(1_000_000, 100_000, 10_000_000);
+
+        // 1Mbps = 1,000,000 bps
+        // 1200 byte packet = 9600 bits
+        // Interval = 9600 / 1,000,000 = 9.6ms
+        let interval = cc.pacing_interval(1200);
+        assert!(interval > Duration::from_millis(9));
+        assert!(interval < Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_congestion_controller_reset() {
+        let mut cc = CongestionController::new(1_000_000, 100_000, 10_000_000);
+
+        // Trigger some state changes
+        std::thread::sleep(Duration::from_millis(150));
+        cc.on_nack(5);
+        cc.on_remb(800_000);
+
+        // Reset
+        cc.reset(500_000);
+
+        assert_eq!(cc.target_bitrate(), 500_000);
+        assert_eq!(cc.state(), CongestionState::SlowStart);
     }
 }

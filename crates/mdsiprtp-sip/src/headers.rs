@@ -143,11 +143,11 @@ impl Contact {
     pub fn parse(value: &str) -> Result<Self, SipError> {
         let value = value.trim();
 
-        let (display_name, uri_part) = if value.starts_with('"') {
+        let (display_name, uri_part) = if let Some(stripped) = value.strip_prefix('"') {
             // Has display name in quotes
-            if let Some(end_quote) = value[1..].find('"') {
-                let name = value[1..end_quote + 1].to_string();
-                let rest = value[end_quote + 2..].trim();
+            if let Some(end_quote) = stripped.find('"') {
+                let name = stripped[..end_quote].to_string();
+                let rest = stripped[end_quote + 1..].trim();
                 (Some(name), rest)
             } else {
                 (None, value)

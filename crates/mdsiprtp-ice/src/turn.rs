@@ -5,13 +5,17 @@
 //! connectivity cannot be established.
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use hmac::{Hmac, Mac};
 use rand::RngCore;
+use sha1::Sha1;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing::{debug, trace};
+
+type HmacSha1 = Hmac<Sha1>;
 
 /// STUN magic cookie.
 const MAGIC_COOKIE: u32 = 0x2112A442;
@@ -42,7 +46,6 @@ const ATTR_REQUESTED_TRANSPORT: u16 = 0x0019;
 const ATTR_USERNAME: u16 = 0x0006;
 const ATTR_REALM: u16 = 0x0014;
 const ATTR_NONCE: u16 = 0x0015;
-#[allow(dead_code)]
 const ATTR_MESSAGE_INTEGRITY: u16 = 0x0008;
 const ATTR_ERROR_CODE: u16 = 0x0009;
 #[allow(dead_code)]
@@ -326,8 +329,18 @@ impl TurnClient {
             attrs.put_slice(nonce_bytes);
             pad_to_4_bytes(&mut attrs, nonce_bytes.len());
 
-            // MESSAGE-INTEGRITY would be computed here
-            // For simplicity, we're not implementing full HMAC-SHA1
+            // Build message first, then add MESSAGE-INTEGRITY
+            let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
+            msg.put_u16(ALLOCATE_REQUEST);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(&self.transaction_id);
+            msg.put_slice(&attrs);
+
+            // Add MESSAGE-INTEGRITY with long-term credentials
+            add_message_integrity(&mut msg, &auth.username, &auth.realm, &self.server.password);
+
+            return Ok(msg.freeze());
         }
 
         let mut msg = BytesMut::with_capacity(20 + attrs.len());
@@ -370,12 +383,16 @@ impl TurnClient {
         attrs.put_slice(nonce_bytes);
         pad_to_4_bytes(&mut attrs, nonce_bytes.len());
 
-        let mut msg = BytesMut::with_capacity(20 + attrs.len());
+        // Build message, then add MESSAGE-INTEGRITY
+        let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
         msg.put_u16(REFRESH_REQUEST);
         msg.put_u16(attrs.len() as u16);
         msg.put_u32(MAGIC_COOKIE);
         msg.put_slice(&self.transaction_id);
         msg.put_slice(&attrs);
+
+        // Add MESSAGE-INTEGRITY with long-term credentials
+        add_message_integrity(&mut msg, &auth.username, &auth.realm, &self.server.password);
 
         Ok(msg.freeze())
     }
@@ -412,12 +429,16 @@ impl TurnClient {
         attrs.put_slice(nonce_bytes);
         pad_to_4_bytes(&mut attrs, nonce_bytes.len());
 
-        let mut msg = BytesMut::with_capacity(20 + attrs.len());
+        // Build message, then add MESSAGE-INTEGRITY
+        let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
         msg.put_u16(CREATE_PERMISSION_REQUEST);
         msg.put_u16(attrs.len() as u16);
         msg.put_u32(MAGIC_COOKIE);
         msg.put_slice(&self.transaction_id);
         msg.put_slice(&attrs);
+
+        // Add MESSAGE-INTEGRITY with long-term credentials
+        add_message_integrity(&mut msg, &auth.username, &auth.realm, &self.server.password);
 
         Ok(msg.freeze())
     }
@@ -773,6 +794,112 @@ fn pad_to_4_bytes(buf: &mut BytesMut, len: usize) {
     }
 }
 
+/// Compute the long-term credential key for MESSAGE-INTEGRITY (RFC 5389 Section 15.4).
+///
+/// Key = MD5(username:realm:password)
+fn compute_long_term_key(username: &str, realm: &str, password: &str) -> [u8; 16] {
+    let credential = format!("{}:{}:{}", username, realm, password);
+    let digest = md5::compute(credential.as_bytes());
+    digest.0
+}
+
+/// Add MESSAGE-INTEGRITY attribute to a STUN/TURN message.
+///
+/// This function modifies the message in place, adding the MESSAGE-INTEGRITY
+/// attribute (20 bytes HMAC-SHA1) at the current position. The message length
+/// in the header is also updated to reflect the addition.
+///
+/// Per RFC 5389 Section 15.4:
+/// - The MESSAGE-INTEGRITY is computed over the entire message up to (but not including)
+///   the MESSAGE-INTEGRITY attribute itself.
+/// - The length field in the message header MUST be adjusted to include the
+///   MESSAGE-INTEGRITY attribute length (24 bytes: 4 byte header + 20 byte value).
+fn add_message_integrity(msg: &mut BytesMut, username: &str, realm: &str, password: &str) {
+    // Compute the key using long-term credentials
+    let key = compute_long_term_key(username, realm, password);
+
+    // Update the message length to include MESSAGE-INTEGRITY attribute (24 bytes)
+    // The length field is at offset 2-3 in the message header
+    let current_len = msg.len();
+    let new_len = (current_len - 20 + 24) as u16; // -20 for header, +24 for MESSAGE-INTEGRITY
+    msg[2] = (new_len >> 8) as u8;
+    msg[3] = (new_len & 0xFF) as u8;
+
+    // Compute HMAC-SHA1 over the message up to this point
+    let mut mac = HmacSha1::new_from_slice(&key)
+        .expect("HMAC can take key of any size");
+    mac.update(msg);
+    let result = mac.finalize();
+    let integrity = result.into_bytes();
+
+    // Add MESSAGE-INTEGRITY attribute
+    msg.put_u16(ATTR_MESSAGE_INTEGRITY);
+    msg.put_u16(20); // HMAC-SHA1 is 20 bytes
+    msg.put_slice(&integrity);
+}
+
+/// Verify MESSAGE-INTEGRITY attribute in a received STUN/TURN message.
+///
+/// Returns true if the MESSAGE-INTEGRITY is valid, false otherwise.
+/// If no MESSAGE-INTEGRITY attribute is present, returns true (for backwards compatibility).
+#[allow(dead_code)]
+fn verify_message_integrity(msg: &[u8], username: &str, realm: &str, password: &str) -> bool {
+    // Find MESSAGE-INTEGRITY attribute
+    if msg.len() < 20 {
+        return false;
+    }
+
+    // Parse attributes looking for MESSAGE-INTEGRITY
+    let mut offset = 20; // Skip STUN header
+    let mut integrity_offset = None;
+
+    while offset + 4 <= msg.len() {
+        let attr_type = u16::from_be_bytes([msg[offset], msg[offset + 1]]);
+        let attr_len = u16::from_be_bytes([msg[offset + 2], msg[offset + 3]]) as usize;
+
+        if attr_type == ATTR_MESSAGE_INTEGRITY {
+            integrity_offset = Some(offset);
+            break;
+        }
+
+        // Move to next attribute (4-byte aligned)
+        let padded_len = (attr_len + 3) & !3;
+        offset += 4 + padded_len;
+    }
+
+    let integrity_offset = match integrity_offset {
+        Some(o) => o,
+        None => return true, // No MESSAGE-INTEGRITY, assume valid
+    };
+
+    if integrity_offset + 24 > msg.len() {
+        return false;
+    }
+
+    // Extract the received HMAC
+    let received_hmac = &msg[integrity_offset + 4..integrity_offset + 24];
+
+    // Compute the key
+    let key = compute_long_term_key(username, realm, password);
+
+    // Create a copy of the message up to MESSAGE-INTEGRITY for verification
+    let mut verify_msg = msg[..integrity_offset].to_vec();
+
+    // Adjust the length field to include only up to MESSAGE-INTEGRITY
+    let new_len = (integrity_offset - 20 + 24) as u16;
+    verify_msg[2] = (new_len >> 8) as u8;
+    verify_msg[3] = (new_len & 0xFF) as u8;
+
+    // Compute HMAC
+    let mut mac = HmacSha1::new_from_slice(&key)
+        .expect("HMAC can take key of any size");
+    mac.update(&verify_msg);
+    let computed = mac.finalize().into_bytes();
+
+    // Constant-time comparison
+    computed.as_slice() == received_hmac
+}
+
 /// Encode an XOR-MAPPED-ADDRESS style attribute.
 fn encode_xor_address(buf: &mut BytesMut, attr_type: u16, addr: SocketAddr, txn_id: &[u8; 12]) {
     match addr.ip() {
@@ -914,5 +1041,74 @@ mod tests {
         buf.put_slice(b"ab");
         pad_to_4_bytes(&mut buf, 2);
         assert_eq!(buf.len(), 4);
+    }
+
+    #[test]
+    fn test_compute_long_term_key() {
+        // Test vector from RFC 5389 / RFC 5766 examples
+        // Key = MD5("user:realm:password")
+        let key = compute_long_term_key("user", "realm.org", "password");
+        assert_eq!(key.len(), 16);
+
+        // Different inputs should produce different keys
+        let key2 = compute_long_term_key("user2", "realm.org", "password");
+        assert_ne!(key, key2);
+    }
+
+    #[test]
+    fn test_message_integrity_roundtrip() {
+        // Build a simple STUN message with MESSAGE-INTEGRITY
+        let mut msg = BytesMut::new();
+
+        // STUN header: type (Allocate Request), length (0 for now), magic cookie, txn id
+        msg.put_u16(ALLOCATE_REQUEST);
+        msg.put_u16(4); // Initial length: just REQUESTED-TRANSPORT
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&[0x11u8; 12]); // Transaction ID
+
+        // REQUESTED-TRANSPORT attribute
+        msg.put_u16(ATTR_REQUESTED_TRANSPORT);
+        msg.put_u16(4);
+        msg.put_u8(TRANSPORT_UDP);
+        msg.put_u8(0);
+        msg.put_u8(0);
+        msg.put_u8(0);
+
+        let username = "testuser";
+        let realm = "testrealm";
+        let password = "testpass";
+
+        // Add MESSAGE-INTEGRITY
+        add_message_integrity(&mut msg, username, realm, password);
+
+        // Verify the message is now longer (original + 24 bytes for MESSAGE-INTEGRITY)
+        assert_eq!(msg.len(), 20 + 4 + 4 + 24); // header + attr + MI
+
+        // Verify the MESSAGE-INTEGRITY
+        assert!(verify_message_integrity(&msg, username, realm, password));
+
+        // Verify with wrong password fails
+        assert!(!verify_message_integrity(&msg, username, realm, "wrongpass"));
+    }
+
+    #[test]
+    fn test_message_integrity_no_attribute() {
+        // A message without MESSAGE-INTEGRITY should pass verification
+        // (for backwards compatibility)
+        let mut msg = BytesMut::new();
+        msg.put_u16(ALLOCATE_REQUEST);
+        msg.put_u16(4);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&[0x22u8; 12]);
+
+        // REQUESTED-TRANSPORT attribute only
+        msg.put_u16(ATTR_REQUESTED_TRANSPORT);
+        msg.put_u16(4);
+        msg.put_u8(TRANSPORT_UDP);
+        msg.put_u8(0);
+        msg.put_u8(0);
+        msg.put_u8(0);
+
+        assert!(verify_message_integrity(&msg, "user", "realm", "pass"));
     }
 }

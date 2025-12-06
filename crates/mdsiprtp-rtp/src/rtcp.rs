@@ -27,6 +27,10 @@ pub enum RtcpType {
     Goodbye = 203,
     /// Application-defined
     ApplicationDefined = 204,
+    /// Transport-layer Feedback (RTPFB) - RFC 4585
+    TransportFeedback = 205,
+    /// Payload-specific Feedback (PSFB) - RFC 4585
+    PayloadFeedback = 206,
 }
 
 impl TryFrom<u8> for RtcpType {
@@ -39,6 +43,8 @@ impl TryFrom<u8> for RtcpType {
             202 => Ok(RtcpType::SourceDescription),
             203 => Ok(RtcpType::Goodbye),
             204 => Ok(RtcpType::ApplicationDefined),
+            205 => Ok(RtcpType::TransportFeedback),
+            206 => Ok(RtcpType::PayloadFeedback),
             _ => Err(RtcpParseError::UnknownPacketType(value)),
         }
     }
@@ -547,6 +553,530 @@ impl Goodbye {
     }
 }
 
+// =============================================================================
+// RTCP Feedback Messages (RFC 4585, RFC 5104)
+// =============================================================================
+
+/// Feedback Message Type (FMT) for Transport-layer Feedback (RTPFB).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TransportFeedbackType {
+    /// Generic NACK - RFC 4585
+    Nack = 1,
+    /// Transport-wide Congestion Control - RFC 8888 (reserved for future)
+    TransportCC = 15,
+}
+
+/// Feedback Message Type (FMT) for Payload-specific Feedback (PSFB).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PayloadFeedbackType {
+    /// Picture Loss Indication - RFC 4585
+    Pli = 1,
+    /// Slice Loss Indication - RFC 4585
+    Sli = 2,
+    /// Reference Picture Selection Indication - RFC 4585
+    Rpsi = 3,
+    /// Full Intra Request - RFC 5104
+    Fir = 4,
+    /// Temporal-Spatial Trade-off Request - RFC 5104
+    Tstr = 5,
+    /// Temporal-Spatial Trade-off Notification - RFC 5104
+    Tstn = 6,
+    /// Video Back Channel Message - RFC 5104
+    Vbcm = 7,
+    /// Application-layer Feedback (for REMB) - RFC 4585
+    Afb = 15,
+}
+
+/// Generic NACK (Negative ACKnowledgement) - RFC 4585.
+///
+/// Used to request retransmission of lost RTP packets.
+///
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |            PID                |             BLP               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// ```
+#[derive(Debug, Clone)]
+pub struct Nack {
+    /// SSRC of the packet sender.
+    pub sender_ssrc: u32,
+    /// SSRC of the media source being NACKed.
+    pub media_ssrc: u32,
+    /// NACK entries (PID + BLP pairs).
+    pub nacks: Vec<NackEntry>,
+}
+
+/// A single NACK entry (PID + BLP).
+#[derive(Debug, Clone, Copy)]
+pub struct NackEntry {
+    /// Packet ID of the lost packet.
+    pub pid: u16,
+    /// Bitmask of following lost packets (bit N set = PID+N+1 is lost).
+    pub blp: u16,
+}
+
+impl NackEntry {
+    /// Create a NACK entry for a single packet.
+    pub fn single(seq: u16) -> Self {
+        Self { pid: seq, blp: 0 }
+    }
+
+    /// Create a NACK entry from a list of sequence numbers.
+    /// The first sequence number becomes PID, subsequent ones set BLP bits.
+    pub fn from_sequences(seqs: &[u16]) -> Option<Self> {
+        let pid = *seqs.first()?;
+        let mut blp = 0u16;
+        for &seq in seqs.iter().skip(1) {
+            let diff = seq.wrapping_sub(pid).wrapping_sub(1);
+            if diff < 16 {
+                blp |= 1 << diff;
+            }
+        }
+        Some(Self { pid, blp })
+    }
+
+    /// Get all lost sequence numbers represented by this entry.
+    pub fn lost_sequences(&self) -> Vec<u16> {
+        let mut seqs = vec![self.pid];
+        for i in 0..16 {
+            if (self.blp >> i) & 1 == 1 {
+                seqs.push(self.pid.wrapping_add(i + 1));
+            }
+        }
+        seqs
+    }
+}
+
+impl Nack {
+    /// Create a NACK for a single lost packet.
+    pub fn new(sender_ssrc: u32, media_ssrc: u32, lost_seq: u16) -> Self {
+        Self {
+            sender_ssrc,
+            media_ssrc,
+            nacks: vec![NackEntry::single(lost_seq)],
+        }
+    }
+
+    /// Create a NACK from a list of lost sequence numbers.
+    pub fn from_lost_packets(sender_ssrc: u32, media_ssrc: u32, lost_seqs: &[u16]) -> Self {
+        // Group sequences into NACK entries (each entry covers up to 17 packets)
+        let mut nacks = Vec::new();
+        let mut remaining: Vec<u16> = lost_seqs.to_vec();
+        remaining.sort();
+
+        while !remaining.is_empty() {
+            let pid = remaining[0];
+            let mut group = vec![pid];
+            let mut new_remaining = Vec::new();
+
+            for &seq in remaining.iter().skip(1) {
+                let diff = seq.wrapping_sub(pid);
+                if diff > 0 && diff <= 16 {
+                    group.push(seq);
+                } else {
+                    new_remaining.push(seq);
+                }
+            }
+
+            if let Some(entry) = NackEntry::from_sequences(&group) {
+                nacks.push(entry);
+            }
+            remaining = new_remaining;
+        }
+
+        Self {
+            sender_ssrc,
+            media_ssrc,
+            nacks,
+        }
+    }
+
+    /// Parse a NACK packet from bytes.
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::TransportFeedback || header.count != 1 {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        if rest.len() < 8 {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+
+        let mut buf = rest;
+        let sender_ssrc = buf.get_u32();
+        let media_ssrc = buf.get_u32();
+
+        let mut nacks = Vec::new();
+        while buf.remaining() >= 4 {
+            let pid = buf.get_u16();
+            let blp = buf.get_u16();
+            nacks.push(NackEntry { pid, blp });
+        }
+
+        Ok(Nack {
+            sender_ssrc,
+            media_ssrc,
+            nacks,
+        })
+    }
+
+    /// Build the NACK packet to bytes.
+    pub fn build(&self) -> Bytes {
+        let nack_count = self.nacks.len();
+        let length = (2 + nack_count) as u16; // In 32-bit words minus 1
+
+        let mut buf = BytesMut::with_capacity(12 + nack_count * 4);
+
+        let header = RtcpHeader {
+            version: 2,
+            padding: false,
+            count: TransportFeedbackType::Nack as u8,
+            packet_type: RtcpType::TransportFeedback,
+            length,
+        };
+        header.build(&mut buf);
+
+        buf.put_u32(self.sender_ssrc);
+        buf.put_u32(self.media_ssrc);
+
+        for nack in &self.nacks {
+            buf.put_u16(nack.pid);
+            buf.put_u16(nack.blp);
+        }
+
+        buf.freeze()
+    }
+
+    /// Get all lost sequence numbers from all NACK entries.
+    pub fn all_lost_sequences(&self) -> Vec<u16> {
+        self.nacks
+            .iter()
+            .flat_map(|n| n.lost_sequences())
+            .collect()
+    }
+}
+
+/// Picture Loss Indication (PLI) - RFC 4585.
+///
+/// Requests a full intra-frame from the encoder when decoder
+/// has lost synchronization and needs a keyframe.
+#[derive(Debug, Clone)]
+pub struct Pli {
+    /// SSRC of the packet sender.
+    pub sender_ssrc: u32,
+    /// SSRC of the media source.
+    pub media_ssrc: u32,
+}
+
+impl Pli {
+    /// Create a new PLI request.
+    pub fn new(sender_ssrc: u32, media_ssrc: u32) -> Self {
+        Self {
+            sender_ssrc,
+            media_ssrc,
+        }
+    }
+
+    /// Parse a PLI packet from bytes.
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::PayloadFeedback || header.count != 1 {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        if rest.len() < 8 {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+
+        let mut buf = rest;
+        let sender_ssrc = buf.get_u32();
+        let media_ssrc = buf.get_u32();
+
+        Ok(Pli {
+            sender_ssrc,
+            media_ssrc,
+        })
+    }
+
+    /// Build the PLI packet to bytes.
+    pub fn build(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(12);
+
+        let header = RtcpHeader {
+            version: 2,
+            padding: false,
+            count: PayloadFeedbackType::Pli as u8,
+            packet_type: RtcpType::PayloadFeedback,
+            length: 2, // 2 32-bit words after header
+        };
+        header.build(&mut buf);
+
+        buf.put_u32(self.sender_ssrc);
+        buf.put_u32(self.media_ssrc);
+
+        buf.freeze()
+    }
+}
+
+/// Full Intra Request (FIR) - RFC 5104.
+///
+/// A more specific keyframe request that includes a sequence number
+/// to distinguish between multiple requests.
+#[derive(Debug, Clone)]
+pub struct Fir {
+    /// SSRC of the packet sender.
+    pub sender_ssrc: u32,
+    /// SSRC of the media source (unused, must be 0).
+    pub media_ssrc: u32,
+    /// FIR entries.
+    pub entries: Vec<FirEntry>,
+}
+
+/// A single FIR entry.
+#[derive(Debug, Clone, Copy)]
+pub struct FirEntry {
+    /// SSRC of the target encoder.
+    pub ssrc: u32,
+    /// Sequence number (to detect duplicates).
+    pub seq_nr: u8,
+}
+
+impl Fir {
+    /// Create a FIR for a single target.
+    pub fn new(sender_ssrc: u32, target_ssrc: u32, seq_nr: u8) -> Self {
+        Self {
+            sender_ssrc,
+            media_ssrc: 0,
+            entries: vec![FirEntry {
+                ssrc: target_ssrc,
+                seq_nr,
+            }],
+        }
+    }
+
+    /// Parse a FIR packet from bytes.
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::PayloadFeedback || header.count != 4 {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        if rest.len() < 8 {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+
+        let mut buf = rest;
+        let sender_ssrc = buf.get_u32();
+        let media_ssrc = buf.get_u32();
+
+        let mut entries = Vec::new();
+        while buf.remaining() >= 8 {
+            let ssrc = buf.get_u32();
+            let seq_nr = buf.get_u8();
+            let _ = buf.get_u8(); // Reserved
+            let _ = buf.get_u16(); // Reserved
+            entries.push(FirEntry { ssrc, seq_nr });
+        }
+
+        Ok(Fir {
+            sender_ssrc,
+            media_ssrc,
+            entries,
+        })
+    }
+
+    /// Build the FIR packet to bytes.
+    pub fn build(&self) -> Bytes {
+        let entry_count = self.entries.len();
+        let length = (2 + entry_count * 2) as u16; // Each entry is 2 32-bit words
+
+        let mut buf = BytesMut::with_capacity(12 + entry_count * 8);
+
+        let header = RtcpHeader {
+            version: 2,
+            padding: false,
+            count: PayloadFeedbackType::Fir as u8,
+            packet_type: RtcpType::PayloadFeedback,
+            length,
+        };
+        header.build(&mut buf);
+
+        buf.put_u32(self.sender_ssrc);
+        buf.put_u32(self.media_ssrc);
+
+        for entry in &self.entries {
+            buf.put_u32(entry.ssrc);
+            buf.put_u8(entry.seq_nr);
+            buf.put_u8(0); // Reserved
+            buf.put_u16(0); // Reserved
+        }
+
+        buf.freeze()
+    }
+}
+
+/// Receiver Estimated Maximum Bitrate (REMB) - draft-alvestrand-rmcat-remb.
+///
+/// Used to communicate estimated available bandwidth from receiver to sender.
+/// This is a Google extension carried in an Application-layer Feedback message.
+///
+/// ```text
+///  0                   1                   2                   3
+///  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |V=2|P| FMT=15  |   PT=206      |             length            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                  SSRC of packet sender                        |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |                  SSRC of media source                         |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Unique identifier 'R' 'E' 'M' 'B'                            |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  Num SSRC     | BR Exp    |  BR Mantissa                      |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |   SSRC feedback                                               |
+/// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+/// |  ...                                                          |
+/// ```
+#[derive(Debug, Clone)]
+pub struct Remb {
+    /// SSRC of the packet sender.
+    pub sender_ssrc: u32,
+    /// SSRC of the media source (unused in REMB, often 0).
+    pub media_ssrc: u32,
+    /// Estimated bitrate in bits per second.
+    pub bitrate: u64,
+    /// SSRCs this estimation applies to.
+    pub ssrcs: Vec<u32>,
+}
+
+impl Remb {
+    /// REMB unique identifier: "REMB"
+    const UNIQUE_ID: [u8; 4] = [b'R', b'E', b'M', b'B'];
+
+    /// Create a new REMB message.
+    pub fn new(sender_ssrc: u32, bitrate: u64, ssrcs: Vec<u32>) -> Self {
+        Self {
+            sender_ssrc,
+            media_ssrc: 0,
+            bitrate,
+            ssrcs,
+        }
+    }
+
+    /// Parse a REMB packet from bytes.
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::PayloadFeedback || header.count != 15 {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        if rest.len() < 16 {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+
+        let mut buf = rest;
+        let sender_ssrc = buf.get_u32();
+        let media_ssrc = buf.get_u32();
+
+        // Check unique identifier
+        let mut unique_id = [0u8; 4];
+        buf.copy_to_slice(&mut unique_id);
+        if unique_id != Self::UNIQUE_ID {
+            return Err(RtcpParseError::UnknownPacketType(206));
+        }
+
+        let num_ssrc = buf.get_u8();
+        let br_exp = (buf.get_u8() & 0xFC) >> 2;
+        // Get mantissa from remaining bits + next 2 bytes
+        let mantissa_high = (rest[13] & 0x03) as u32;
+        let mantissa_mid = rest[14] as u32;
+        let mantissa_low = rest[15] as u32;
+        let mantissa = (mantissa_high << 16) | (mantissa_mid << 8) | mantissa_low;
+        buf.advance(2);
+
+        let bitrate = (mantissa as u64) << br_exp;
+
+        let mut ssrcs = Vec::with_capacity(num_ssrc as usize);
+        for _ in 0..num_ssrc {
+            if buf.remaining() < 4 {
+                break;
+            }
+            ssrcs.push(buf.get_u32());
+        }
+
+        Ok(Remb {
+            sender_ssrc,
+            media_ssrc,
+            bitrate,
+            ssrcs,
+        })
+    }
+
+    /// Build the REMB packet to bytes.
+    pub fn build(&self) -> Bytes {
+        let ssrc_count = self.ssrcs.len().min(255);
+        let length = (4 + ssrc_count) as u16; // 4 32-bit words + SSRCs
+
+        let mut buf = BytesMut::with_capacity(16 + ssrc_count * 4);
+
+        let header = RtcpHeader {
+            version: 2,
+            padding: false,
+            count: PayloadFeedbackType::Afb as u8,
+            packet_type: RtcpType::PayloadFeedback,
+            length,
+        };
+        header.build(&mut buf);
+
+        buf.put_u32(self.sender_ssrc);
+        buf.put_u32(self.media_ssrc);
+
+        // Unique identifier
+        buf.put_slice(&Self::UNIQUE_ID);
+
+        // Encode bitrate as mantissa * 2^exp
+        let (mantissa, exp) = Self::encode_bitrate(self.bitrate);
+
+        buf.put_u8(ssrc_count as u8);
+        buf.put_u8((exp << 2) | ((mantissa >> 16) as u8 & 0x03));
+        buf.put_u16((mantissa & 0xFFFF) as u16);
+
+        for &ssrc in self.ssrcs.iter().take(ssrc_count) {
+            buf.put_u32(ssrc);
+        }
+
+        buf.freeze()
+    }
+
+    /// Encode bitrate as mantissa * 2^exp (18-bit mantissa, 6-bit exp).
+    fn encode_bitrate(bitrate: u64) -> (u32, u8) {
+        if bitrate == 0 {
+            return (0, 0);
+        }
+
+        // Find the highest set bit
+        let bits = 64 - bitrate.leading_zeros();
+
+        // Mantissa is 18 bits
+        if bits <= 18 {
+            (bitrate as u32, 0)
+        } else {
+            let exp = (bits - 18) as u8;
+            let mantissa = (bitrate >> exp) as u32;
+            (mantissa & 0x3FFFF, exp)
+        }
+    }
+}
+
 /// RTCP compound packet (typically SR/RR + SDES).
 #[derive(Debug, Clone)]
 pub struct RtcpCompound {
@@ -561,6 +1091,14 @@ pub enum RtcpPacket {
     ReceiverReport(ReceiverReport),
     SourceDescription(SourceDescription),
     Goodbye(Goodbye),
+    /// Generic NACK feedback.
+    Nack(Nack),
+    /// Picture Loss Indication.
+    Pli(Pli),
+    /// Full Intra Request.
+    Fir(Fir),
+    /// Receiver Estimated Maximum Bitrate.
+    Remb(Remb),
 }
 
 impl RtcpCompound {
@@ -596,10 +1134,34 @@ impl RtcpCompound {
                 RtcpPacket::ReceiverReport(rr) => buf.extend_from_slice(&rr.build()),
                 RtcpPacket::SourceDescription(sdes) => buf.extend_from_slice(&sdes.build()),
                 RtcpPacket::Goodbye(bye) => buf.extend_from_slice(&bye.build()),
+                RtcpPacket::Nack(nack) => buf.extend_from_slice(&nack.build()),
+                RtcpPacket::Pli(pli) => buf.extend_from_slice(&pli.build()),
+                RtcpPacket::Fir(fir) => buf.extend_from_slice(&fir.build()),
+                RtcpPacket::Remb(remb) => buf.extend_from_slice(&remb.build()),
             }
         }
 
         buf.freeze()
+    }
+
+    /// Add a NACK to the compound packet.
+    pub fn add_nack(&mut self, nack: Nack) {
+        self.packets.push(RtcpPacket::Nack(nack));
+    }
+
+    /// Add a PLI to the compound packet.
+    pub fn add_pli(&mut self, pli: Pli) {
+        self.packets.push(RtcpPacket::Pli(pli));
+    }
+
+    /// Add a FIR to the compound packet.
+    pub fn add_fir(&mut self, fir: Fir) {
+        self.packets.push(RtcpPacket::Fir(fir));
+    }
+
+    /// Add a REMB to the compound packet.
+    pub fn add_remb(&mut self, remb: Remb) {
+        self.packets.push(RtcpPacket::Remb(remb));
     }
 }
 
@@ -742,5 +1304,140 @@ mod tests {
         assert_eq!(parsed.fraction_lost, 128);
         assert_eq!(parsed.extended_seq, 65536 + 1000);
         assert_eq!(parsed.jitter, 320);
+    }
+
+    // ==========================================================================
+    // RTCP Feedback Message Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_nack_single_packet() {
+        let nack = Nack::new(111111, 222222, 1000);
+        let bytes = nack.build();
+
+        assert_eq!(bytes[1], RtcpType::TransportFeedback as u8);
+        assert_eq!(bytes[0] & 0x1F, TransportFeedbackType::Nack as u8);
+
+        let parsed = Nack::parse(&bytes).unwrap();
+        assert_eq!(parsed.sender_ssrc, 111111);
+        assert_eq!(parsed.media_ssrc, 222222);
+        assert_eq!(parsed.nacks.len(), 1);
+        assert_eq!(parsed.nacks[0].pid, 1000);
+        assert_eq!(parsed.nacks[0].blp, 0);
+    }
+
+    #[test]
+    fn test_nack_multiple_packets() {
+        // Lost packets: 100, 101, 103, 105, 200
+        let lost = vec![100, 101, 103, 105, 200];
+        let nack = Nack::from_lost_packets(111111, 222222, &lost);
+
+        // Should create 2 NACK entries (one group starting at 100, one at 200)
+        assert_eq!(nack.nacks.len(), 2);
+
+        let all_lost = nack.all_lost_sequences();
+        assert!(all_lost.contains(&100));
+        assert!(all_lost.contains(&101));
+        assert!(all_lost.contains(&103));
+        assert!(all_lost.contains(&105));
+        assert!(all_lost.contains(&200));
+    }
+
+    #[test]
+    fn test_nack_entry_blp() {
+        // Test BLP encoding
+        let entry = NackEntry::from_sequences(&[1000, 1001, 1002, 1016]).unwrap();
+        assert_eq!(entry.pid, 1000);
+        // BLP should have bits 0, 1, 15 set (for 1001, 1002, 1016)
+        assert_eq!(entry.blp & 1, 1); // 1001
+        assert_eq!((entry.blp >> 1) & 1, 1); // 1002
+        assert_eq!((entry.blp >> 15) & 1, 1); // 1016
+
+        let seqs = entry.lost_sequences();
+        assert_eq!(seqs.len(), 4);
+        assert!(seqs.contains(&1000));
+        assert!(seqs.contains(&1001));
+        assert!(seqs.contains(&1002));
+        assert!(seqs.contains(&1016));
+    }
+
+    #[test]
+    fn test_pli_build_parse() {
+        let pli = Pli::new(111111, 222222);
+        let bytes = pli.build();
+
+        assert_eq!(bytes[1], RtcpType::PayloadFeedback as u8);
+        assert_eq!(bytes[0] & 0x1F, PayloadFeedbackType::Pli as u8);
+
+        let parsed = Pli::parse(&bytes).unwrap();
+        assert_eq!(parsed.sender_ssrc, 111111);
+        assert_eq!(parsed.media_ssrc, 222222);
+    }
+
+    #[test]
+    fn test_fir_build_parse() {
+        let fir = Fir::new(111111, 222222, 5);
+        let bytes = fir.build();
+
+        assert_eq!(bytes[1], RtcpType::PayloadFeedback as u8);
+        assert_eq!(bytes[0] & 0x1F, PayloadFeedbackType::Fir as u8);
+
+        let parsed = Fir::parse(&bytes).unwrap();
+        assert_eq!(parsed.sender_ssrc, 111111);
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].ssrc, 222222);
+        assert_eq!(parsed.entries[0].seq_nr, 5);
+    }
+
+    #[test]
+    fn test_remb_build() {
+        let remb = Remb::new(111111, 1_500_000, vec![222222, 333333]);
+        let bytes = remb.build();
+
+        assert_eq!(bytes[1], RtcpType::PayloadFeedback as u8);
+        assert_eq!(bytes[0] & 0x1F, PayloadFeedbackType::Afb as u8);
+
+        // Check REMB identifier
+        assert_eq!(&bytes[12..16], b"REMB");
+
+        // SSRC count
+        assert_eq!(bytes[16], 2);
+    }
+
+    #[test]
+    fn test_remb_bitrate_encoding() {
+        // Test various bitrates
+        for &bitrate in &[0u64, 1000, 100_000, 1_000_000, 10_000_000, 100_000_000] {
+            let (mantissa, exp) = Remb::encode_bitrate(bitrate);
+            let decoded = (mantissa as u64) << exp;
+            // Should be within 1% or exact for small values
+            if bitrate > 0 {
+                let error = ((decoded as i64 - bitrate as i64).abs() as f64) / (bitrate as f64);
+                assert!(error < 0.01 || decoded == bitrate,
+                    "Bitrate {} encoded as {}*2^{} = {}, error = {}",
+                    bitrate, mantissa, exp, decoded, error);
+            }
+        }
+    }
+
+    #[test]
+    fn test_compound_with_feedback() {
+        let sr = SenderReport {
+            ssrc: 12345,
+            ntp_timestamp: NtpTimestamp::now(),
+            rtp_timestamp: 160000,
+            sender_packet_count: 100,
+            sender_octet_count: 16000,
+            report_blocks: vec![],
+        };
+
+        let mut compound = RtcpCompound::sender_compound(sr, "user@example.com");
+        compound.add_nack(Nack::new(12345, 67890, 500));
+        compound.add_pli(Pli::new(12345, 67890));
+
+        let bytes = compound.build();
+
+        // Should contain SR + SDES + NACK + PLI
+        assert!(bytes.len() > 60);
     }
 }

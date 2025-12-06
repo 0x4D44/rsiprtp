@@ -156,6 +156,9 @@ pub struct IceAgent {
     candidate_pairs: Arc<RwLock<Vec<CandidatePair>>>,
     selected_pair: Arc<RwLock<Option<CandidatePair>>>,
     sockets: Arc<RwLock<HashMap<SocketAddr, Arc<UdpSocket>>>>,
+    /// Remote ICE credentials.
+    remote_ufrag: Arc<RwLock<Option<String>>>,
+    remote_pwd: Arc<RwLock<Option<String>>>,
 }
 
 impl IceAgent {
@@ -170,7 +173,23 @@ impl IceAgent {
             candidate_pairs: Arc::new(RwLock::new(Vec::new())),
             selected_pair: Arc::new(RwLock::new(None)),
             sockets: Arc::new(RwLock::new(HashMap::new())),
+            remote_ufrag: Arc::new(RwLock::new(None)),
+            remote_pwd: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Set remote ICE credentials.
+    pub async fn set_remote_credentials(&self, ufrag: &str, pwd: &str) {
+        *self.remote_ufrag.write().await = Some(ufrag.to_string());
+        *self.remote_pwd.write().await = Some(pwd.to_string());
+        debug!("Set remote credentials: ufrag={}", ufrag);
+    }
+
+    /// Get remote ICE credentials.
+    pub async fn remote_credentials(&self) -> Option<(String, String)> {
+        let ufrag = self.remote_ufrag.read().await.clone()?;
+        let pwd = self.remote_pwd.read().await.clone()?;
+        Some((ufrag, pwd))
     }
 
     /// Get the ICE credentials.
@@ -433,40 +452,315 @@ impl IceAgent {
     }
 
     /// Start connectivity checks.
+    ///
+    /// Performs STUN connectivity checks on candidate pairs according to RFC 8445.
+    /// Each check sends a STUN Binding Request to the remote candidate and waits
+    /// for a response to validate the path.
     pub async fn start_checks(&self) -> Result<(), IceError> {
         *self.state.write().await = IceState::Checking;
         info!("Starting ICE connectivity checks");
 
-        // For now, just select the highest priority pair with matching addresses
-        // A full implementation would perform STUN binding requests
-        let pairs = self.candidate_pairs.read().await;
+        // Get credentials for STUN requests
+        let remote_creds = self.remote_credentials().await;
+        let (remote_ufrag, remote_pwd) = match remote_creds {
+            Some((u, p)) => (u, p),
+            None => {
+                warn!("Remote credentials not set, falling back to simple selection");
+                return self.fallback_selection().await;
+            }
+        };
 
-        for pair in pairs.iter() {
-            if pair.state == PairState::Waiting {
-                // In a full implementation, we would:
-                // 1. Send STUN binding request to remote candidate
-                // 2. Wait for response
-                // 3. Mark pair as succeeded/failed
+        // Get pairs to check (copy to avoid holding lock during async operations)
+        let pairs_to_check: Vec<(usize, CandidatePair)> = {
+            let pairs = self.candidate_pairs.read().await;
+            pairs
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.state == PairState::Waiting)
+                .map(|(i, p)| (i, p.clone()))
+                .collect()
+        };
 
-                // For now, assume host-to-host works
-                if pair.local.candidate_type == CandidateType::Host
-                    && pair.remote.candidate_type == CandidateType::Host
-                {
-                    let mut selected = self.selected_pair.write().await;
-                    *selected = Some(pair.clone());
-                    *self.state.write().await = IceState::Connected;
-                    info!("Selected candidate pair: {} <-> {}",
-                          pair.local.address, pair.remote.address);
-                    return Ok(());
+        // Perform connectivity checks
+        for (idx, pair) in pairs_to_check {
+            // Mark as in-progress
+            {
+                let mut pairs = self.candidate_pairs.write().await;
+                if let Some(p) = pairs.get_mut(idx) {
+                    p.state = PairState::InProgress;
+                }
+            }
+
+            debug!(
+                "Checking pair {} <-> {}",
+                pair.local.address, pair.remote.address
+            );
+
+            // Find the socket for this local candidate
+            let socket = {
+                let sockets = self.sockets.read().await;
+                // For host candidates, use the candidate's address
+                // For srflx/relay, use the related address (base)
+                let socket_addr = pair.local.related_address.unwrap_or(pair.local.address);
+                sockets.get(&socket_addr).cloned()
+            };
+
+            let check_result = match socket {
+                Some(sock) => {
+                    self.perform_connectivity_check(
+                        &sock,
+                        &pair,
+                        &remote_ufrag,
+                        &remote_pwd,
+                    )
+                    .await
+                }
+                None => {
+                    warn!("No socket for local candidate {}", pair.local.address);
+                    false
+                }
+            };
+
+            // Update pair state
+            {
+                let mut pairs = self.candidate_pairs.write().await;
+                if let Some(p) = pairs.get_mut(idx) {
+                    if check_result {
+                        p.state = PairState::Succeeded;
+                        info!(
+                            "Connectivity check succeeded: {} <-> {}",
+                            pair.local.address, pair.remote.address
+                        );
+
+                        // If controlling, nominate this pair
+                        if self.role == IceRole::Controlling {
+                            p.nominated = true;
+                        }
+
+                        // Select this pair
+                        let mut selected = self.selected_pair.write().await;
+                        *selected = Some(p.clone());
+                        *self.state.write().await = IceState::Connected;
+
+                        // Unfreeze other pairs with same foundation (for triggered checks)
+                        self.unfreeze_related_pairs(idx, &pair).await;
+
+                        return Ok(());
+                    } else {
+                        p.state = PairState::Failed;
+                        debug!(
+                            "Connectivity check failed: {} <-> {}",
+                            pair.local.address, pair.remote.address
+                        );
+                    }
                 }
             }
         }
 
-        // Try any remaining pair
+        // No successful checks, try to find any valid pair
+        self.fallback_selection().await
+    }
+
+    /// Perform a single connectivity check on a candidate pair.
+    ///
+    /// Sends a STUN Binding Request with ICE credentials (USERNAME, MESSAGE-INTEGRITY)
+    /// and validates the response.
+    async fn perform_connectivity_check(
+        &self,
+        socket: &UdpSocket,
+        pair: &CandidatePair,
+        remote_ufrag: &str,
+        remote_pwd: &str,
+    ) -> bool {
+        use bytes::{Buf, BufMut, BytesMut};
+        use hmac::{Hmac, Mac};
+        use rand::RngCore;
+        use sha1::Sha1;
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        const MAGIC_COOKIE: u32 = 0x2112A442;
+        const BINDING_REQUEST: u16 = 0x0001;
+        const BINDING_RESPONSE: u16 = 0x0101;
+        const ATTR_USERNAME: u16 = 0x0006;
+        const ATTR_MESSAGE_INTEGRITY: u16 = 0x0008;
+        const ATTR_PRIORITY: u16 = 0x0024;
+        const ATTR_ICE_CONTROLLING: u16 = 0x802A;
+        const ATTR_ICE_CONTROLLED: u16 = 0x8029;
+
+        type HmacSha1 = Hmac<Sha1>;
+
+        // Generate transaction ID
+        let mut txn_id = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut txn_id);
+
+        // Build ICE username: remote_ufrag:local_ufrag
+        let username = format!("{}:{}", remote_ufrag, self.config.local_ufrag);
+
+        // Build attributes
+        let mut attrs = BytesMut::new();
+
+        // USERNAME attribute
+        let username_bytes = username.as_bytes();
+        attrs.put_u16(ATTR_USERNAME);
+        attrs.put_u16(username_bytes.len() as u16);
+        attrs.put_slice(username_bytes);
+        // Pad to 4-byte boundary
+        let padding = (4 - (username_bytes.len() % 4)) % 4;
+        for _ in 0..padding {
+            attrs.put_u8(0);
+        }
+
+        // PRIORITY attribute (our priority for this candidate)
+        attrs.put_u16(ATTR_PRIORITY);
+        attrs.put_u16(4);
+        attrs.put_u32(pair.local.priority);
+
+        // ICE-CONTROLLING or ICE-CONTROLLED with tie-breaker
+        let mut tie_breaker = [0u8; 8];
+        rand::thread_rng().fill_bytes(&mut tie_breaker);
+
+        match self.role {
+            IceRole::Controlling => {
+                attrs.put_u16(ATTR_ICE_CONTROLLING);
+                attrs.put_u16(8);
+                attrs.put_slice(&tie_breaker);
+            }
+            IceRole::Controlled => {
+                attrs.put_u16(ATTR_ICE_CONTROLLED);
+                attrs.put_u16(8);
+                attrs.put_slice(&tie_breaker);
+            }
+        }
+
+        // Build message header (length will be updated for MESSAGE-INTEGRITY)
+        let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
+        msg.put_u16(BINDING_REQUEST);
+        msg.put_u16(attrs.len() as u16);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+        msg.put_slice(&attrs);
+
+        // Add MESSAGE-INTEGRITY using remote password as key (short-term credential)
+        // For ICE, the key is the remote password directly (not MD5 hashed)
+        {
+            let current_len = msg.len();
+            let new_len = (current_len - 20 + 24) as u16;
+            msg[2] = (new_len >> 8) as u8;
+            msg[3] = (new_len & 0xFF) as u8;
+
+            let mut mac =
+                HmacSha1::new_from_slice(remote_pwd.as_bytes()).expect("HMAC can take any key size");
+            mac.update(&msg);
+            let integrity = mac.finalize().into_bytes();
+
+            msg.put_u16(ATTR_MESSAGE_INTEGRITY);
+            msg.put_u16(20);
+            msg.put_slice(&integrity);
+        }
+
+        // Send the request
+        let target_addr = pair.remote.address;
+        if let Err(e) = socket.send_to(&msg, target_addr).await {
+            warn!("Failed to send connectivity check to {}: {}", target_addr, e);
+            return false;
+        }
+
+        // Wait for response with timeout
+        let check_timeout = Duration::from_millis(self.config.check_timeout_ms);
+        let mut buf = vec![0u8; 1024];
+
+        for _attempt in 0..3 {
+            match timeout(check_timeout, socket.recv_from(&mut buf)).await {
+                Ok(Ok((len, from))) => {
+                    // Validate response
+                    let data = &buf[..len];
+                    if data.len() < 20 {
+                        continue;
+                    }
+
+                    let mut rbuf = data;
+                    let msg_type = rbuf.get_u16();
+                    if msg_type != BINDING_RESPONSE {
+                        continue;
+                    }
+
+                    let _msg_len = rbuf.get_u16();
+                    let cookie = rbuf.get_u32();
+                    if cookie != MAGIC_COOKIE {
+                        continue;
+                    }
+
+                    // Verify transaction ID matches
+                    let mut resp_txn = [0u8; 12];
+                    rbuf.copy_to_slice(&mut resp_txn);
+                    if resp_txn != txn_id {
+                        continue;
+                    }
+
+                    debug!(
+                        "Received valid STUN response from {} for check to {}",
+                        from, target_addr
+                    );
+                    return true;
+                }
+                Ok(Err(e)) => {
+                    warn!("Error receiving connectivity check response: {}", e);
+                }
+                Err(_) => {
+                    // Timeout, retry
+                    debug!("Connectivity check to {} timed out, retrying...", target_addr);
+                    // Retransmit
+                    let _ = socket.send_to(&msg, target_addr).await;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Unfreeze candidate pairs with the same foundation after a successful check.
+    async fn unfreeze_related_pairs(&self, succeeded_idx: usize, succeeded: &CandidatePair) {
+        let mut pairs = self.candidate_pairs.write().await;
+        for (i, pair) in pairs.iter_mut().enumerate() {
+            if i != succeeded_idx
+                && pair.state == PairState::Frozen
+                && pair.local.foundation == succeeded.local.foundation
+            {
+                pair.state = PairState::Waiting;
+            }
+        }
+    }
+
+    /// Fallback selection when connectivity checks aren't possible.
+    async fn fallback_selection(&self) -> Result<(), IceError> {
+        let pairs = self.candidate_pairs.read().await;
+
+        // Try host-to-host first
+        for pair in pairs.iter() {
+            if pair.local.candidate_type == CandidateType::Host
+                && pair.remote.candidate_type == CandidateType::Host
+            {
+                let mut selected = self.selected_pair.write().await;
+                *selected = Some(pair.clone());
+                *self.state.write().await = IceState::Connected;
+                info!(
+                    "Fallback: Selected host-to-host pair: {} <-> {}",
+                    pair.local.address, pair.remote.address
+                );
+                return Ok(());
+            }
+        }
+
+        // Try any pair
         if let Some(pair) = pairs.first() {
             let mut selected = self.selected_pair.write().await;
             *selected = Some(pair.clone());
             *self.state.write().await = IceState::Connected;
+            info!(
+                "Fallback: Selected first available pair: {} <-> {}",
+                pair.local.address, pair.remote.address
+            );
             return Ok(());
         }
 
@@ -569,5 +863,85 @@ mod tests {
         let pairs = agent.candidate_pairs.read().await;
         assert_eq!(pairs.len(), 1);
         assert_eq!(pairs[0].state, PairState::Waiting);
+    }
+
+    #[tokio::test]
+    async fn test_set_remote_credentials() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Initially no remote credentials
+        assert!(agent.remote_credentials().await.is_none());
+
+        // Set credentials
+        agent.set_remote_credentials("abc123", "password456").await;
+
+        // Verify they're set
+        let creds = agent.remote_credentials().await;
+        assert!(creds.is_some());
+        let (ufrag, pwd) = creds.unwrap();
+        assert_eq!(ufrag, "abc123");
+        assert_eq!(pwd, "password456");
+    }
+
+    #[tokio::test]
+    async fn test_fallback_selection() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Add local candidate
+        let local = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)), 5001),
+            1,
+        );
+        agent.local_candidates.write().await.push(local.clone());
+
+        // Create socket for the local candidate
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        agent.sockets.write().await.insert(local.address, Arc::new(socket));
+
+        // Add remote candidate
+        let remote = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)), 5000),
+            1,
+        );
+        agent.add_remote_candidates(vec![remote]).await;
+
+        // Without remote credentials, should use fallback
+        let result = agent.start_checks().await;
+        assert!(result.is_ok());
+
+        // Should have selected the host-to-host pair
+        let selected = agent.selected_pair().await;
+        assert!(selected.is_some());
+        let pair = selected.unwrap();
+        assert_eq!(pair.local.candidate_type, CandidateType::Host);
+        assert_eq!(pair.remote.candidate_type, CandidateType::Host);
+    }
+
+    #[tokio::test]
+    async fn test_ice_state_transitions() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Initial state
+        assert_eq!(agent.state().await, IceState::New);
+
+        // After gathering
+        let _ = agent.gather_candidates().await;
+        assert_eq!(agent.state().await, IceState::Gathering);
+
+        // Close
+        agent.close().await;
+        assert_eq!(agent.state().await, IceState::Closed);
     }
 }

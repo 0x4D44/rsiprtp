@@ -13,3 +13,6 @@ thiserror.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 rand.workspace = true
+hmac.workspace = true
+sha1.workspace = true
+md5.workspace = true

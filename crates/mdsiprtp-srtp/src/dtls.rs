@@ -1,13 +1,43 @@
 //! DTLS-SRTP key exchange (RFC 5764).
 //!
-//! Provides DTLS handshake for WebRTC-style SRTP key derivation.
-//! This module supports DTLS 1.2 with SRTP key export.
+//! This module provides types and utilities for DTLS-SRTP key exchange,
+//! including fingerprint handling, role negotiation, and key extraction.
 //!
-//! # Overview
+//! # Current Status: Partial Implementation
 //!
-//! DTLS-SRTP performs a DTLS handshake over the media path, then exports
-//! keying material to create SRTP session keys. This provides mutual
-//! authentication and perfect forward secrecy.
+//! **Note:** This module provides the foundational types for DTLS-SRTP but does NOT
+//! include a full DTLS handshake implementation. The actual DTLS transport layer
+//! would require integration with a TLS library (e.g., rustls, openssl, or ring).
+//!
+//! ## What IS implemented:
+//! - [`Fingerprint`] - Certificate fingerprint parsing and generation for SDP
+//! - [`DtlsRole`] - DTLS client/server role from SDP setup attribute
+//! - [`SrtpProfile`] - SRTP protection profile negotiation
+//! - [`DtlsSrtpKeys`] - Key material structure for SRTP session creation
+//! - [`extract_srtp_keys`] - Extract SRTP keys from exported DTLS material
+//! - [`parse_use_srtp_extension`] / [`build_use_srtp_extension`] - DTLS extension handling
+//!
+//! ## What is NOT implemented (future work):
+//! - Full DTLS handshake state machine
+//! - Certificate generation and management
+//! - TLS record layer for UDP (DTLS)
+//! - Retransmission handling for lost handshake messages
+//! - Cookie exchange for DoS protection
+//!
+//! # Implementation Options
+//!
+//! To add full DTLS support, consider:
+//!
+//! 1. **rustls + webrtc-rs approach**: Use rustls with custom datagram transport
+//! 2. **openssl**: Use the openssl crate's DTLS support
+//! 3. **ring**: Lower-level crypto primitives with custom DTLS implementation
+//!
+//! # For SIP without WebRTC
+//!
+//! Traditional SIP applications typically use SDES (Session Description Exchange)
+//! for SRTP key exchange rather than DTLS. See the [`crate::sdes`] module for
+//! SDES-based key exchange which is fully implemented and works with most
+//! SIP infrastructure.
 //!
 //! # SDP Attributes
 //!
@@ -17,7 +47,7 @@
 //! a=setup:actpass
 //! ```
 //!
-//! # Example
+//! # Example (with hypothetical full implementation)
 //!
 //! ```rust,ignore
 //! use mdsiprtp_srtp::dtls::{DtlsRole, Fingerprint, FingerprintHash};
