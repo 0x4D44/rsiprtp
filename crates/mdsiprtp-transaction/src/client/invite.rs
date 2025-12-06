@@ -38,7 +38,7 @@
 //! ```
 
 use std::time::Duration;
-use mdsiprtp_sip::{SipRequest, SipResponse, Method};
+use mdsiprtp_sip::{SipRequest, SipResponse, Method, Via};
 use crate::timer::{Timer, TimerValues};
 
 /// Transaction ID for matching responses to requests.
@@ -327,10 +327,23 @@ fn build_ack_for_non_2xx(invite: &SipRequest) -> Option<SipRequest> {
     let from_tag = invite.from_tag().ok()?;
     let call_id = invite.call_id().ok()?;
 
+    // Extract Via header information from original INVITE
+    let via_raw = invite.via_headers_raw();
+    let via = via_raw.first()
+        .and_then(|v| Via::parse(v).ok())
+        .unwrap_or_else(|| Via {
+            protocol: "UDP".to_string(),
+            host: "0.0.0.0".to_string(),
+            port: 5060,
+            branch: branch.clone(),
+            received: None,
+            rport: None,
+        });
+
     let ack = SipRequest::builder()
         .method(Method::Ack)
         .uri(&invite.uri().to_string())
-        .via("placeholder", 5060, "UDP", &branch) // Will need proper via
+        .via(&via.host, via.port, &via.protocol, &branch)
         .from(&invite.from_uri().ok()?.to_string(), &from_tag)
         .to(&invite.to_uri().ok()?.to_string())
         .call_id(&call_id)

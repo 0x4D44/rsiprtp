@@ -11,10 +11,6 @@ use mdsiprtp_dialog::DialogId;
 use mdsiprtp_sdp::negotiation::{create_answer, process_answer, Codec};
 use mdsiprtp_sdp::parser::SessionDescription;
 
-/// Default URI placeholder when the remote URI cannot be extracted.
-/// This is used for incoming calls when the From header is not available.
-const UNKNOWN_URI: &str = "sip:unknown@unknown";
-
 /// Manager event for the application layer.
 #[derive(Debug)]
 pub enum ManagerEvent {
@@ -132,7 +128,8 @@ impl CallManager {
         dialog: Dialog,
         offer_sdp: &SessionDescription,
     ) -> Option<(CallId, SessionDescription, u16)> {
-        let remote_uri = UNKNOWN_URI.to_string(); // Would extract from From header
+        // Extract remote URI from the dialog (set when dialog was created from INVITE)
+        let remote_uri = dialog.remote_uri().to_string();
 
         let call = Call::new_inbound(self.call_config.clone(), remote_uri, dialog);
         let call_id = call.id().clone();
