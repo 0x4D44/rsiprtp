@@ -3,8 +3,7 @@
 //! Implements the offer/answer model for SDP session negotiation.
 
 use crate::parser::{
-    Attribute, Direction, MediaDescription, MediaType, RtpMap,
-    SessionDescription,
+    Attribute, Direction, MediaDescription, MediaType, RtpMap, SessionDescription,
 };
 
 /// Codec information for negotiation.
@@ -192,12 +191,14 @@ fn negotiate_media(
         };
 
         if let Some(codec) = static_codec {
-            if local_codecs.iter().any(|c| c.matches(&RtpMap {
-                payload_type: pt,
-                encoding: codec.encoding.clone(),
-                clock_rate: codec.clock_rate,
-                params: None,
-            })) {
+            if local_codecs.iter().any(|c| {
+                c.matches(&RtpMap {
+                    payload_type: pt,
+                    encoding: codec.encoding.clone(),
+                    clock_rate: codec.clock_rate,
+                    params: None,
+                })
+            }) {
                 return Some(NegotiatedMedia {
                     codec,
                     remote_port: offer_media.port,
@@ -257,9 +258,7 @@ fn create_media_attributes(codec: &Codec, direction: Direction) -> Vec<Attribute
 /// Process an answer to our offer.
 ///
 /// Returns the negotiated media or None if rejected.
-pub fn process_answer(
-    answer: &SessionDescription,
-) -> Vec<NegotiatedMedia> {
+pub fn process_answer(answer: &SessionDescription) -> Vec<NegotiatedMedia> {
     let mut negotiated = Vec::new();
     let session_addr = answer.connection.as_ref().map(|c| c.address.clone());
 
@@ -408,5 +407,368 @@ a=sendonly
 
         let audio = answer.audio_media().unwrap();
         assert_eq!(audio.direction(), Direction::RecvOnly);
+    }
+
+    // Codec tests
+    #[test]
+    fn test_codec_new() {
+        let codec = Codec::new(96, "opus", 48000);
+        assert_eq!(codec.payload_type, 96);
+        assert_eq!(codec.encoding, "opus");
+        assert_eq!(codec.clock_rate, 48000);
+        assert_eq!(codec.channels, 1);
+        assert!(codec.fmtp.is_none());
+    }
+
+    #[test]
+    fn test_codec_with_channels() {
+        let codec = Codec::new(96, "opus", 48000).with_channels(2);
+        assert_eq!(codec.channels, 2);
+    }
+
+    #[test]
+    fn test_codec_with_fmtp() {
+        let codec = Codec::new(101, "telephone-event", 8000).with_fmtp("0-16");
+        assert_eq!(codec.fmtp, Some("0-16".to_string()));
+    }
+
+    #[test]
+    fn test_codec_pcmu() {
+        let codec = Codec::pcmu();
+        assert_eq!(codec.payload_type, 0);
+        assert_eq!(codec.encoding, "PCMU");
+        assert_eq!(codec.clock_rate, 8000);
+    }
+
+    #[test]
+    fn test_codec_pcma() {
+        let codec = Codec::pcma();
+        assert_eq!(codec.payload_type, 8);
+        assert_eq!(codec.encoding, "PCMA");
+        assert_eq!(codec.clock_rate, 8000);
+    }
+
+    #[test]
+    fn test_codec_g722() {
+        let codec = Codec::g722();
+        assert_eq!(codec.payload_type, 9);
+        assert_eq!(codec.encoding, "G722");
+        assert_eq!(codec.clock_rate, 8000);
+    }
+
+    #[test]
+    fn test_codec_matches_case_insensitive() {
+        let codec = Codec::new(0, "pcmu", 8000);
+        let rtpmap = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        assert!(codec.matches(&rtpmap));
+    }
+
+    #[test]
+    fn test_codec_no_match_clock_rate() {
+        let codec = Codec::new(0, "PCMU", 8000);
+        let rtpmap = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 16000,
+            params: None,
+        };
+        assert!(!codec.matches(&rtpmap));
+    }
+
+    #[test]
+    fn test_codec_debug() {
+        let codec = Codec::pcmu();
+        let debug = format!("{:?}", codec);
+        assert!(debug.contains("Codec"));
+        assert!(debug.contains("PCMU"));
+    }
+
+    #[test]
+    fn test_codec_clone() {
+        let codec = Codec::pcmu();
+        let cloned = codec.clone();
+        assert_eq!(codec, cloned);
+    }
+
+    #[test]
+    fn test_codec_eq() {
+        let c1 = Codec::pcmu();
+        let c2 = Codec::pcmu();
+        let c3 = Codec::pcma();
+        assert_eq!(c1, c2);
+        assert_ne!(c1, c3);
+    }
+
+    // NegotiatedMedia tests
+    #[test]
+    fn test_negotiated_media_debug() {
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 5000,
+            remote_addr: Some("10.0.0.1".to_string()),
+            direction: Direction::SendRecv,
+        };
+        let debug = format!("{:?}", media);
+        assert!(debug.contains("NegotiatedMedia"));
+    }
+
+    #[test]
+    fn test_negotiated_media_clone() {
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 5000,
+            remote_addr: Some("10.0.0.1".to_string()),
+            direction: Direction::SendRecv,
+        };
+        let cloned = media.clone();
+        assert_eq!(cloned.remote_port, 5000);
+    }
+
+    // Direction swap tests
+    #[test]
+    fn test_direction_recvonly_to_sendonly() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=recvonly
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcmu()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        assert_eq!(negotiated[0].direction, Direction::SendOnly);
+    }
+
+    #[test]
+    fn test_direction_inactive() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=inactive
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcmu()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        assert_eq!(negotiated[0].direction, Direction::Inactive);
+    }
+
+    // Video media rejection test
+    #[test]
+    fn test_video_media_rejected() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=video 49170 RTP/AVP 96
+a=rtpmap:96 H264/90000
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcmu()];
+
+        let result = create_answer(&offer, &local_codecs, 5000);
+        assert!(result.is_none());
+    }
+
+    // Static payload type matching
+    #[test]
+    fn test_static_pcma_without_rtpmap() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 8
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcma()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        assert_eq!(negotiated[0].codec.encoding, "PCMA");
+        assert_eq!(negotiated[0].codec.payload_type, 8);
+    }
+
+    #[test]
+    fn test_static_g722_without_rtpmap() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 9
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::g722()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        assert_eq!(negotiated[0].codec.encoding, "G722");
+    }
+
+    // Media-level connection address
+    #[test]
+    fn test_media_level_connection() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+t=0 0
+m=audio 49170 RTP/AVP 0
+c=IN IP4 10.0.0.100
+a=rtpmap:0 PCMU/8000
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcmu()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        assert_eq!(negotiated[0].remote_addr, Some("10.0.0.100".to_string()));
+    }
+
+    // Multi-codec matching with fmtp
+    #[test]
+    fn test_codec_with_fmtp_negotiation() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        // Codec with fmtp set
+        let local_codecs = vec![Codec::pcmu().with_fmtp("ptime=20")];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        // The negotiated codec should have the fmtp from local codec
+        assert_eq!(negotiated[0].codec.fmtp, Some("ptime=20".to_string()));
+    }
+
+    // process_answer edge cases
+    #[test]
+    fn test_process_answer_with_channels() {
+        let answer_sdp = r#"v=0
+o=- 123 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 6000 RTP/AVP 96
+a=rtpmap:96 opus/48000/2
+a=sendrecv
+"#;
+        let answer = SessionDescription::parse(answer_sdp).unwrap();
+        let negotiated = process_answer(&answer);
+
+        assert_eq!(negotiated.len(), 1);
+        assert_eq!(negotiated[0].codec.encoding, "opus");
+        assert_eq!(negotiated[0].codec.channels, 2);
+    }
+
+    #[test]
+    fn test_process_answer_static_pt() {
+        let answer_sdp = r#"v=0
+o=- 123 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 6000 RTP/AVP 0
+a=sendrecv
+"#;
+        let answer = SessionDescription::parse(answer_sdp).unwrap();
+        let negotiated = process_answer(&answer);
+
+        assert_eq!(negotiated.len(), 1);
+        assert_eq!(negotiated[0].codec.encoding, "PCMU");
+        assert_eq!(negotiated[0].codec.payload_type, 0);
+    }
+
+    #[test]
+    fn test_process_answer_video_rejected() {
+        let answer_sdp = r#"v=0
+o=- 123 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=video 0 RTP/AVP 96
+a=rtpmap:96 H264/90000
+"#;
+        let answer = SessionDescription::parse(answer_sdp).unwrap();
+        let negotiated = process_answer(&answer);
+
+        // Video should be ignored
+        assert!(negotiated.is_empty());
+    }
+
+    #[test]
+    fn test_process_answer_audio_rejected() {
+        let answer_sdp = r#"v=0
+o=- 123 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 0 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+"#;
+        let answer = SessionDescription::parse(answer_sdp).unwrap();
+        let negotiated = process_answer(&answer);
+
+        // Port 0 means rejected
+        assert!(negotiated.is_empty());
+    }
+
+    #[test]
+    fn test_process_answer_no_rtpmap() {
+        let answer_sdp = r#"v=0
+o=- 123 1 IN IP4 10.0.0.1
+s=-
+c=IN IP4 10.0.0.1
+t=0 0
+m=audio 6000 RTP/AVP 100
+a=sendrecv
+"#;
+        let answer = SessionDescription::parse(answer_sdp).unwrap();
+        let negotiated = process_answer(&answer);
+
+        // No rtpmap and not a static PT - should be empty
+        assert!(negotiated.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_media_streams() {
+        let offer_sdp = r#"v=0
+o=- 123 1 IN IP4 192.168.1.1
+s=-
+c=IN IP4 192.168.1.1
+t=0 0
+m=audio 49170 RTP/AVP 0
+a=rtpmap:0 PCMU/8000
+a=sendrecv
+m=audio 49172 RTP/AVP 8
+a=rtpmap:8 PCMA/8000
+a=sendrecv
+"#;
+        let offer = SessionDescription::parse(offer_sdp).unwrap();
+        let local_codecs = vec![Codec::pcmu(), Codec::pcma()];
+
+        let (_answer, negotiated) = create_answer(&offer, &local_codecs, 5000).unwrap();
+        // Both audio streams should be negotiated
+        assert_eq!(negotiated.len(), 2);
     }
 }

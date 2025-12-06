@@ -266,12 +266,8 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 14];
 
-        let keys = SessionKeys::derive(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let keys = SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt)
+            .unwrap();
 
         // Check key lengths
         assert_eq!(keys.srtp_enc_key.len(), 16);
@@ -291,11 +287,8 @@ mod tests {
         let master_key = [0u8; 8]; // Too short
         let master_salt = [0u8; 14];
 
-        let result = SessionKeys::derive(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        );
+        let result =
+            SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt);
         assert!(result.is_err());
     }
 
@@ -304,11 +297,8 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 8]; // Too short
 
-        let result = SessionKeys::derive(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        );
+        let result =
+            SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt);
         assert!(result.is_err());
     }
 }

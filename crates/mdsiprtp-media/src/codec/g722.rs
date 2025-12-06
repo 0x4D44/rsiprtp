@@ -10,7 +10,7 @@
 //! Note: RTP for G.722 uses a timestamp rate of 8000 Hz despite
 //! the 16 kHz sample rate (RFC 3551).
 
-use ezk_g722::libg722::{Bitrate, decoder::Decoder, encoder::Encoder};
+use ezk_g722::libg722::{decoder::Decoder, encoder::Encoder, Bitrate};
 
 /// RTP payload type for G.722.
 pub const G722_PAYLOAD_TYPE: u8 = 9;

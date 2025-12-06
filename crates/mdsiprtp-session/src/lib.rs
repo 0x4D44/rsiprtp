@@ -32,7 +32,9 @@ pub use hold::{
     CallHoldInfo, HoldError, HoldManager, HoldRequest, HoldResponse, HoldState, MediaDirection,
 };
 pub use manager::{CallManager, ManagerConfig, ManagerEvent};
-pub use registration::{RegistrationConfig, RegistrationError, RegistrationManager, RegistrationState};
+pub use registration::{
+    RegistrationConfig, RegistrationError, RegistrationManager, RegistrationState,
+};
 pub use transfer::{
     ReferTo, ReplacesHeader, TransferError, TransferInfo, TransferManager, TransferProgress,
     TransferRole, TransferState, TransferType,

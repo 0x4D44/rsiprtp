@@ -35,10 +35,8 @@ pub mod traits;
 pub mod udp;
 
 // Re-export main types
-pub use traits::{
-    IncomingMessage, OutgoingMessage, TransportAddress, TransportProtocol,
-};
-pub use udp::{UdpSender, UdpTransport, MAX_UDP_SIZE, MTU_SAFE_SIZE};
+pub use resolver::{ResolvedTarget, ResolverError, SipResolver};
 pub use tcp::{TcpSender, TcpTransport, MAX_TCP_SIZE};
 pub use tls::{TlsClientConfig, TlsSender, TlsServerConfig, TlsTransport, MAX_TLS_SIZE};
-pub use resolver::{ResolvedTarget, ResolverError, SipResolver};
+pub use traits::{IncomingMessage, OutgoingMessage, TransportAddress, TransportProtocol};
+pub use udp::{UdpSender, UdpTransport, MAX_UDP_SIZE, MTU_SAFE_SIZE};

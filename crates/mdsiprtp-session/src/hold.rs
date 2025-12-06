@@ -192,7 +192,8 @@ impl HoldManager {
 
     /// Register a new call.
     pub fn add_call(&mut self, call_id: &str) {
-        self.calls.insert(call_id.to_string(), CallHoldInfo::default());
+        self.calls
+            .insert(call_id.to_string(), CallHoldInfo::default());
     }
 
     /// Remove a call.
@@ -218,7 +219,9 @@ impl HoldManager {
         call_id: &str,
         inactive: bool,
     ) -> Result<MediaDirection, HoldError> {
-        let info = self.calls.get_mut(call_id)
+        let info = self
+            .calls
+            .get_mut(call_id)
             .ok_or_else(|| HoldError::CallNotFound(call_id.to_string()))?;
 
         if info.state == HoldState::LocalHold || info.state == HoldState::BothHold {
@@ -244,7 +247,9 @@ impl HoldManager {
     ///
     /// Returns the SDP direction to use in re-INVITE.
     pub fn create_resume_request(&mut self, call_id: &str) -> Result<MediaDirection, HoldError> {
-        let info = self.calls.get_mut(call_id)
+        let info = self
+            .calls
+            .get_mut(call_id)
             .ok_or_else(|| HoldError::CallNotFound(call_id.to_string()))?;
 
         if !info.state.is_local_hold() {
@@ -268,10 +273,14 @@ impl HoldManager {
         call_id: &str,
         remote_direction: MediaDirection,
     ) -> Result<HoldResponse, HoldError> {
-        let info = self.calls.get_mut(call_id)
+        let info = self
+            .calls
+            .get_mut(call_id)
             .ok_or_else(|| HoldError::CallNotFound(call_id.to_string()))?;
 
-        let request = info.pending_request.take()
+        let request = info
+            .pending_request
+            .take()
             .ok_or_else(|| HoldError::InvalidState("no pending hold request".into()))?;
 
         info.local_direction = request.direction;
@@ -293,7 +302,9 @@ impl HoldManager {
         call_id: &str,
         remote_direction: MediaDirection,
     ) -> Result<HoldState, HoldError> {
-        let info = self.calls.get_mut(call_id)
+        let info = self
+            .calls
+            .get_mut(call_id)
             .ok_or_else(|| HoldError::CallNotFound(call_id.to_string()))?;
 
         info.remote_direction = remote_direction;
@@ -367,12 +378,52 @@ pub fn parse_sdp_direction(sdp: &str) -> MediaDirection {
 mod tests {
     use super::*;
 
+    // HoldError tests
+    #[test]
+    fn test_hold_error_call_not_found() {
+        let err = HoldError::CallNotFound("call-123".to_string());
+        assert!(err.to_string().contains("call not found"));
+        assert!(err.to_string().contains("call-123"));
+    }
+
+    #[test]
+    fn test_hold_error_invalid_state() {
+        let err = HoldError::InvalidState("already holding".to_string());
+        assert!(err.to_string().contains("invalid state"));
+    }
+
+    #[test]
+    fn test_hold_error_sdp_error() {
+        let err = HoldError::SdpError("parse failed".to_string());
+        assert!(err.to_string().contains("failed to generate hold SDP"));
+    }
+
+    #[test]
+    fn test_hold_error_debug() {
+        let err = HoldError::CallNotFound("x".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("CallNotFound"));
+    }
+
+    // MediaDirection tests
     #[test]
     fn test_media_direction() {
-        assert_eq!(MediaDirection::from_sdp("sendrecv"), Some(MediaDirection::SendRecv));
-        assert_eq!(MediaDirection::from_sdp("SENDONLY"), Some(MediaDirection::SendOnly));
-        assert_eq!(MediaDirection::from_sdp("recvonly"), Some(MediaDirection::RecvOnly));
-        assert_eq!(MediaDirection::from_sdp("inactive"), Some(MediaDirection::Inactive));
+        assert_eq!(
+            MediaDirection::from_sdp("sendrecv"),
+            Some(MediaDirection::SendRecv)
+        );
+        assert_eq!(
+            MediaDirection::from_sdp("SENDONLY"),
+            Some(MediaDirection::SendOnly)
+        );
+        assert_eq!(
+            MediaDirection::from_sdp("recvonly"),
+            Some(MediaDirection::RecvOnly)
+        );
+        assert_eq!(
+            MediaDirection::from_sdp("inactive"),
+            Some(MediaDirection::Inactive)
+        );
 
         assert!(MediaDirection::SendRecv.can_send());
         assert!(MediaDirection::SendRecv.can_recv());
@@ -380,6 +431,44 @@ mod tests {
         assert!(!MediaDirection::SendOnly.can_recv());
         assert!(!MediaDirection::Inactive.can_send());
         assert!(!MediaDirection::Inactive.can_recv());
+    }
+
+    #[test]
+    fn test_media_direction_from_sdp_invalid() {
+        assert_eq!(MediaDirection::from_sdp("invalid"), None);
+        assert_eq!(MediaDirection::from_sdp(""), None);
+        assert_eq!(MediaDirection::from_sdp("send"), None);
+    }
+
+    #[test]
+    fn test_media_direction_to_sdp() {
+        assert_eq!(MediaDirection::SendRecv.to_sdp(), "sendrecv");
+        assert_eq!(MediaDirection::SendOnly.to_sdp(), "sendonly");
+        assert_eq!(MediaDirection::RecvOnly.to_sdp(), "recvonly");
+        assert_eq!(MediaDirection::Inactive.to_sdp(), "inactive");
+    }
+
+    #[test]
+    fn test_media_direction_can_recv() {
+        assert!(MediaDirection::SendRecv.can_recv());
+        assert!(!MediaDirection::SendOnly.can_recv());
+        assert!(MediaDirection::RecvOnly.can_recv());
+        assert!(!MediaDirection::Inactive.can_recv());
+    }
+
+    #[test]
+    fn test_media_direction_debug() {
+        assert!(format!("{:?}", MediaDirection::SendRecv).contains("SendRecv"));
+        assert!(format!("{:?}", MediaDirection::SendOnly).contains("SendOnly"));
+        assert!(format!("{:?}", MediaDirection::RecvOnly).contains("RecvOnly"));
+        assert!(format!("{:?}", MediaDirection::Inactive).contains("Inactive"));
+    }
+
+    #[test]
+    fn test_media_direction_clone_copy() {
+        let d = MediaDirection::SendOnly;
+        let cloned = d;
+        assert_eq!(d, cloned);
     }
 
     #[test]
@@ -399,6 +488,15 @@ mod tests {
     }
 
     #[test]
+    fn test_remote_direction_inactive() {
+        assert_eq!(
+            MediaDirection::Inactive.remote_direction(),
+            MediaDirection::Inactive
+        );
+    }
+
+    // HoldState tests
+    #[test]
     fn test_hold_state() {
         assert!(HoldState::Active.is_active());
         assert!(!HoldState::Active.is_local_hold());
@@ -412,6 +510,123 @@ mod tests {
 
         assert!(HoldState::BothHold.is_local_hold());
         assert!(HoldState::BothHold.is_remote_hold());
+    }
+
+    #[test]
+    fn test_hold_state_is_active() {
+        assert!(HoldState::Active.is_active());
+        assert!(!HoldState::LocalHold.is_active());
+        assert!(!HoldState::RemoteHold.is_active());
+        assert!(!HoldState::BothHold.is_active());
+    }
+
+    #[test]
+    fn test_hold_state_debug() {
+        assert!(format!("{:?}", HoldState::Active).contains("Active"));
+        assert!(format!("{:?}", HoldState::LocalHold).contains("LocalHold"));
+        assert!(format!("{:?}", HoldState::RemoteHold).contains("RemoteHold"));
+        assert!(format!("{:?}", HoldState::BothHold).contains("BothHold"));
+    }
+
+    #[test]
+    fn test_hold_state_clone_copy() {
+        let s = HoldState::LocalHold;
+        let cloned = s;
+        assert_eq!(s, cloned);
+    }
+
+    // HoldRequest tests
+    #[test]
+    fn test_hold_request_debug() {
+        let request = HoldRequest {
+            call_id: "call-123".to_string(),
+            direction: MediaDirection::SendOnly,
+            music_on_hold: true,
+        };
+        let debug = format!("{:?}", request);
+        assert!(debug.contains("HoldRequest"));
+    }
+
+    #[test]
+    fn test_hold_request_clone() {
+        let request = HoldRequest {
+            call_id: "call-123".to_string(),
+            direction: MediaDirection::SendOnly,
+            music_on_hold: true,
+        };
+        let cloned = request.clone();
+        assert_eq!(cloned.call_id, "call-123");
+        assert_eq!(cloned.direction, MediaDirection::SendOnly);
+        assert!(cloned.music_on_hold);
+    }
+
+    // HoldResponse tests
+    #[test]
+    fn test_hold_response_debug() {
+        let response = HoldResponse {
+            call_id: "call-123".to_string(),
+            direction: MediaDirection::SendOnly,
+            state: HoldState::LocalHold,
+        };
+        let debug = format!("{:?}", response);
+        assert!(debug.contains("HoldResponse"));
+    }
+
+    #[test]
+    fn test_hold_response_clone() {
+        let response = HoldResponse {
+            call_id: "call-123".to_string(),
+            direction: MediaDirection::SendOnly,
+            state: HoldState::LocalHold,
+        };
+        let cloned = response.clone();
+        assert_eq!(cloned.call_id, "call-123");
+        assert_eq!(cloned.state, HoldState::LocalHold);
+    }
+
+    // CallHoldInfo tests
+    #[test]
+    fn test_call_hold_info_default() {
+        let info = CallHoldInfo::default();
+        assert_eq!(info.state, HoldState::Active);
+        assert_eq!(info.local_direction, MediaDirection::SendRecv);
+        assert_eq!(info.remote_direction, MediaDirection::SendRecv);
+        assert!(info.pending_request.is_none());
+    }
+
+    #[test]
+    fn test_call_hold_info_debug() {
+        let info = CallHoldInfo::default();
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("CallHoldInfo"));
+    }
+
+    #[test]
+    fn test_call_hold_info_clone() {
+        let mut info = CallHoldInfo::default();
+        info.state = HoldState::LocalHold;
+        let cloned = info.clone();
+        assert_eq!(cloned.state, HoldState::LocalHold);
+    }
+
+    // HoldManager tests
+    #[test]
+    fn test_hold_manager_new() {
+        let manager = HoldManager::new();
+        assert!(manager.hold_state("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_hold_manager_default() {
+        let manager = HoldManager::default();
+        assert!(manager.call_info("x").is_none());
+    }
+
+    #[test]
+    fn test_hold_manager_debug() {
+        let manager = HoldManager::new();
+        let debug = format!("{:?}", manager);
+        assert!(debug.contains("HoldManager"));
     }
 
     #[test]
@@ -445,6 +660,74 @@ mod tests {
     }
 
     #[test]
+    fn test_hold_manager_inactive_hold() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        // Put on hold with inactive
+        let direction = manager.create_hold_request("call-1", true).unwrap();
+        assert_eq!(direction, MediaDirection::Inactive);
+    }
+
+    #[test]
+    fn test_hold_manager_already_on_hold() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        manager.create_hold_request("call-1", false).unwrap();
+        manager
+            .handle_hold_response("call-1", MediaDirection::RecvOnly)
+            .unwrap();
+
+        // Try to hold again - should fail
+        let result = manager.create_hold_request("call-1", false);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HoldError::InvalidState(_)));
+    }
+
+    #[test]
+    fn test_hold_manager_hold_call_not_found() {
+        let mut manager = HoldManager::new();
+        let result = manager.create_hold_request("nonexistent", false);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HoldError::CallNotFound(_)));
+    }
+
+    #[test]
+    fn test_hold_manager_resume_not_on_hold() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        let result = manager.create_resume_request("call-1");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HoldError::InvalidState(_)));
+    }
+
+    #[test]
+    fn test_hold_manager_resume_call_not_found() {
+        let mut manager = HoldManager::new();
+        let result = manager.create_resume_request("nonexistent");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HoldError::CallNotFound(_)));
+    }
+
+    #[test]
+    fn test_hold_manager_response_call_not_found() {
+        let mut manager = HoldManager::new();
+        let result = manager.handle_hold_response("nonexistent", MediaDirection::SendRecv);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_hold_manager_response_no_pending() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+        let result = manager.handle_hold_response("call-1", MediaDirection::SendRecv);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), HoldError::InvalidState(_)));
+    }
+
+    #[test]
     fn test_remote_hold() {
         let mut manager = HoldManager::new();
         manager.add_call("call-1");
@@ -463,12 +746,185 @@ mod tests {
     }
 
     #[test]
+    fn test_remote_hold_call_not_found() {
+        let mut manager = HoldManager::new();
+        let result = manager.handle_remote_hold("nonexistent", MediaDirection::SendOnly);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_both_hold() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        // We put on hold
+        manager.create_hold_request("call-1", false).unwrap();
+        manager
+            .handle_hold_response("call-1", MediaDirection::RecvOnly)
+            .unwrap();
+        assert_eq!(manager.hold_state("call-1"), Some(HoldState::LocalHold));
+
+        // Remote also puts on hold - note: handle_remote_hold resets local direction
+        // to the inverse of remote_direction, so we go to RemoteHold, not BothHold
+        let state = manager
+            .handle_remote_hold("call-1", MediaDirection::SendOnly)
+            .unwrap();
+        assert_eq!(state, HoldState::RemoteHold);
+    }
+
+    #[test]
+    fn test_both_hold_via_inactive() {
+        // Both hold can occur with inactive direction
+        assert_eq!(
+            compute_hold_state(MediaDirection::Inactive, MediaDirection::Inactive),
+            HoldState::BothHold
+        );
+        assert_eq!(
+            compute_hold_state(MediaDirection::SendOnly, MediaDirection::SendOnly),
+            HoldState::BothHold
+        );
+    }
+
+    #[test]
+    fn test_cancel_pending() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        manager.create_hold_request("call-1", false).unwrap();
+        assert!(manager
+            .call_info("call-1")
+            .unwrap()
+            .pending_request
+            .is_some());
+
+        manager.cancel_pending("call-1");
+        assert!(manager
+            .call_info("call-1")
+            .unwrap()
+            .pending_request
+            .is_none());
+    }
+
+    #[test]
+    fn test_cancel_pending_nonexistent() {
+        let mut manager = HoldManager::new();
+        manager.cancel_pending("nonexistent"); // Should not panic
+    }
+
+    #[test]
+    fn test_can_send() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        // Active call can send
+        assert!(manager.can_send("call-1"));
+
+        // Put on hold - still can send (sendonly)
+        manager.create_hold_request("call-1", false).unwrap();
+        manager
+            .handle_hold_response("call-1", MediaDirection::RecvOnly)
+            .unwrap();
+        assert!(manager.can_send("call-1"));
+    }
+
+    #[test]
+    fn test_can_send_inactive() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        // Put on hold with inactive - cannot send
+        manager.create_hold_request("call-1", true).unwrap();
+        manager
+            .handle_hold_response("call-1", MediaDirection::Inactive)
+            .unwrap();
+        assert!(!manager.can_send("call-1"));
+    }
+
+    #[test]
+    fn test_can_send_nonexistent() {
+        let manager = HoldManager::new();
+        assert!(!manager.can_send("nonexistent"));
+    }
+
+    #[test]
+    fn test_can_recv() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        // Active call can receive
+        assert!(manager.can_recv("call-1"));
+
+        // Put on hold - cannot receive (sendonly)
+        manager.create_hold_request("call-1", false).unwrap();
+        manager
+            .handle_hold_response("call-1", MediaDirection::RecvOnly)
+            .unwrap();
+        assert!(!manager.can_recv("call-1"));
+    }
+
+    #[test]
+    fn test_can_recv_nonexistent() {
+        let manager = HoldManager::new();
+        assert!(!manager.can_recv("nonexistent"));
+    }
+
+    #[test]
+    fn test_call_info() {
+        let mut manager = HoldManager::new();
+        manager.add_call("call-1");
+
+        let info = manager.call_info("call-1").unwrap();
+        assert_eq!(info.state, HoldState::Active);
+
+        assert!(manager.call_info("nonexistent").is_none());
+    }
+
+    // Helper function tests
+    #[test]
     fn test_parse_sdp_direction() {
         let sdp = "v=0\r\nm=audio 5000 RTP/AVP 0\r\na=sendonly\r\n";
         assert_eq!(parse_sdp_direction(sdp), MediaDirection::SendOnly);
 
         let sdp = "v=0\r\nm=audio 5000 RTP/AVP 0\r\n";
         assert_eq!(parse_sdp_direction(sdp), MediaDirection::SendRecv);
+    }
+
+    #[test]
+    fn test_parse_sdp_direction_recvonly() {
+        let sdp = "v=0\r\na=recvonly\r\nm=audio 5000 RTP/AVP 0\r\n";
+        assert_eq!(parse_sdp_direction(sdp), MediaDirection::RecvOnly);
+    }
+
+    #[test]
+    fn test_parse_sdp_direction_inactive() {
+        let sdp = "v=0\r\na=inactive\r\n";
+        assert_eq!(parse_sdp_direction(sdp), MediaDirection::Inactive);
+    }
+
+    #[test]
+    fn test_parse_sdp_direction_with_whitespace() {
+        let sdp = "v=0\r\n  a=sendonly  \r\n";
+        assert_eq!(parse_sdp_direction(sdp), MediaDirection::SendOnly);
+    }
+
+    #[test]
+    fn test_sdp_direction_attribute() {
+        assert_eq!(
+            sdp_direction_attribute(MediaDirection::SendRecv),
+            "a=sendrecv"
+        );
+        assert_eq!(
+            sdp_direction_attribute(MediaDirection::SendOnly),
+            "a=sendonly"
+        );
+        assert_eq!(
+            sdp_direction_attribute(MediaDirection::RecvOnly),
+            "a=recvonly"
+        );
+        assert_eq!(
+            sdp_direction_attribute(MediaDirection::Inactive),
+            "a=inactive"
+        );
     }
 
     #[test]
@@ -487,6 +943,33 @@ mod tests {
         );
         assert_eq!(
             compute_hold_state(MediaDirection::Inactive, MediaDirection::Inactive),
+            HoldState::BothHold
+        );
+    }
+
+    #[test]
+    fn test_compute_hold_state_variants() {
+        // Local sendonly, remote sendrecv = local hold
+        assert_eq!(
+            compute_hold_state(MediaDirection::SendOnly, MediaDirection::SendRecv),
+            HoldState::LocalHold
+        );
+
+        // Local inactive, remote sendrecv = local hold
+        assert_eq!(
+            compute_hold_state(MediaDirection::Inactive, MediaDirection::SendRecv),
+            HoldState::LocalHold
+        );
+
+        // Local recvonly, remote inactive = remote hold
+        assert_eq!(
+            compute_hold_state(MediaDirection::RecvOnly, MediaDirection::Inactive),
+            HoldState::RemoteHold
+        );
+
+        // Local sendonly, remote inactive = both hold
+        assert_eq!(
+            compute_hold_state(MediaDirection::SendOnly, MediaDirection::Inactive),
             HoldState::BothHold
         );
     }

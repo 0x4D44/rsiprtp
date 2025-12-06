@@ -31,10 +31,10 @@ pub mod dtls;
 mod kdf;
 mod sdes;
 
-pub use context::{SrtpContext, SrtcpContext};
+pub use context::{SrtcpContext, SrtpContext};
 pub use dtls::{
-    DtlsConfig, DtlsError, DtlsRole, DtlsSrtpKeys, DtlsState,
-    Fingerprint, FingerprintHash, SrtpProfile,
+    DtlsConfig, DtlsError, DtlsRole, DtlsSrtpKeys, DtlsState, Fingerprint, FingerprintHash,
+    SrtpProfile,
 };
 pub use kdf::{CryptoSuite, SessionKeys};
 pub use sdes::SdesAttribute;

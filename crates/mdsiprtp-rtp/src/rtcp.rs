@@ -473,7 +473,7 @@ impl SourceDescription {
                 buf.put_slice(value_bytes);
             }
             buf.put_u8(0); // End of items
-            // Pad to 32-bit boundary
+                           // Pad to 32-bit boundary
             while !buf.len().is_multiple_of(4) {
                 buf.put_u8(0);
             }
@@ -754,10 +754,7 @@ impl Nack {
 
     /// Get all lost sequence numbers from all NACK entries.
     pub fn all_lost_sequences(&self) -> Vec<u16> {
-        self.nacks
-            .iter()
-            .flat_map(|n| n.lost_sequences())
-            .collect()
+        self.nacks.iter().flat_map(|n| n.lost_sequences()).collect()
     }
 }
 
@@ -1413,9 +1410,15 @@ mod tests {
             // Should be within 1% or exact for small values
             if bitrate > 0 {
                 let error = ((decoded as i64 - bitrate as i64).abs() as f64) / (bitrate as f64);
-                assert!(error < 0.01 || decoded == bitrate,
+                assert!(
+                    error < 0.01 || decoded == bitrate,
                     "Bitrate {} encoded as {}*2^{} = {}, error = {}",
-                    bitrate, mantissa, exp, decoded, error);
+                    bitrate,
+                    mantissa,
+                    exp,
+                    decoded,
+                    error
+                );
             }
         }
     }

@@ -4,7 +4,7 @@
 //! for some time. It facilitates sequencing of messages between the UAs and
 //! proper routing of requests between both of them.
 
-use mdsiprtp_sip::{SipRequest, SipResponse, Via, RecordRoute as SipRecordRoute};
+use mdsiprtp_sip::{RecordRoute as SipRecordRoute, SipRequest, SipResponse, Via};
 
 /// Dialog identifier per RFC 3261.
 ///
@@ -21,7 +21,11 @@ pub struct DialogId {
 
 impl DialogId {
     /// Create a new dialog ID.
-    pub fn new(call_id: impl Into<String>, local_tag: impl Into<String>, remote_tag: impl Into<String>) -> Self {
+    pub fn new(
+        call_id: impl Into<String>,
+        local_tag: impl Into<String>,
+        remote_tag: impl Into<String>,
+    ) -> Self {
         Self {
             call_id: call_id.into(),
             local_tag: local_tag.into(),
@@ -123,7 +127,10 @@ impl RouteSet {
         // Check if first route uses loose routing
         let loose_routing = record_routes.first().map(|rr| rr.lr).unwrap_or(false);
 
-        Self { routes, loose_routing }
+        Self {
+            routes,
+            loose_routing,
+        }
     }
 
     /// Get the routes as string values.
@@ -327,7 +334,8 @@ mod tests {
     fn test_dialog_info_from_response() {
         let invite = create_invite();
         let response = create_response(&invite);
-        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed).unwrap();
+        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed)
+            .unwrap();
 
         assert_eq!(info.state, DialogState::Confirmed);
         assert_eq!(info.local_seq, 1);
@@ -338,7 +346,9 @@ mod tests {
     fn test_next_local_seq() {
         let invite = create_invite();
         let response = create_response(&invite);
-        let mut info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed).unwrap();
+        let mut info =
+            DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed)
+                .unwrap();
 
         assert_eq!(info.next_local_seq(), 2);
         assert_eq!(info.next_local_seq(), 3);
@@ -348,7 +358,9 @@ mod tests {
     fn test_update_remote_seq() {
         let invite = create_invite();
         let response = create_response(&invite);
-        let mut info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed).unwrap();
+        let mut info =
+            DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed)
+                .unwrap();
 
         assert!(info.update_remote_seq(1));
         assert!(info.update_remote_seq(2));

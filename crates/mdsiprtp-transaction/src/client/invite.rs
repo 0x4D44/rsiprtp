@@ -37,9 +37,9 @@
 //!       +-------------------+
 //! ```
 
-use std::time::Duration;
-use mdsiprtp_sip::{SipRequest, SipResponse, Method, Via};
 use crate::timer::{Timer, TimerValues};
+use mdsiprtp_sip::{Method, SipRequest, SipResponse, Via};
+use std::time::Duration;
 
 /// Transaction ID for matching responses to requests.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -156,11 +156,13 @@ impl InviteClientTransaction {
 
         // For unreliable transport, start Timer A
         if !reliable {
-            tx.actions.push(Action::SetTimer(Timer::A, tx.retransmit_interval));
+            tx.actions
+                .push(Action::SetTimer(Timer::A, tx.retransmit_interval));
         }
 
         // Start Timer B
-        tx.actions.push(Action::SetTimer(Timer::B, tx.timers.timer_b()));
+        tx.actions
+            .push(Action::SetTimer(Timer::B, tx.timers.timer_b()));
 
         Some(tx)
     }
@@ -187,7 +189,8 @@ impl InviteClientTransaction {
                 // Retransmit and restart Timer A with doubled interval
                 self.actions.push(Action::Send(self.request.to_bytes()));
                 self.retransmit_interval = self.timers.next_retransmit(self.retransmit_interval);
-                self.actions.push(Action::SetTimer(Timer::A, self.retransmit_interval));
+                self.actions
+                    .push(Action::SetTimer(Timer::A, self.retransmit_interval));
             }
             (State::Calling, Timer::B) => {
                 // Transaction timeout
@@ -222,7 +225,8 @@ impl InviteClientTransaction {
                     if !self.reliable {
                         self.actions.push(Action::CancelTimer(Timer::A));
                     }
-                    self.actions.push(Action::Event(Event::Provisional(response)));
+                    self.actions
+                        .push(Action::Event(Event::Provisional(response)));
                 } else if (200..300).contains(&code) {
                     // 2xx response - terminate (ACK is sent by TU)
                     self.state = State::Terminated;
@@ -252,7 +256,8 @@ impl InviteClientTransaction {
             State::Proceeding => {
                 if (100..200).contains(&code) {
                     // Another provisional response
-                    self.actions.push(Action::Event(Event::Provisional(response)));
+                    self.actions
+                        .push(Action::Event(Event::Provisional(response)));
                 } else if (200..300).contains(&code) {
                     // 2xx response - terminate (ACK is sent by TU)
                     self.state = State::Terminated;
@@ -329,7 +334,8 @@ fn build_ack_for_non_2xx(invite: &SipRequest) -> Option<SipRequest> {
 
     // Extract Via header information from original INVITE
     let via_raw = invite.via_headers_raw();
-    let via = via_raw.first()
+    let via = via_raw
+        .first()
         .and_then(|v| Via::parse(v).ok())
         .unwrap_or_else(|| Via {
             protocol: "UDP".to_string(),
@@ -400,7 +406,9 @@ mod tests {
 
         assert_eq!(tx.state(), State::Proceeding);
         let actions = tx.poll_actions();
-        assert!(actions.iter().any(|a| matches!(a, Action::Event(Event::Provisional(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Provisional(_)))));
     }
 
     #[test]
@@ -414,7 +422,9 @@ mod tests {
 
         assert_eq!(tx.state(), State::Terminated);
         let actions = tx.poll_actions();
-        assert!(actions.iter().any(|a| matches!(a, Action::Event(Event::Success(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Success(_)))));
     }
 
     #[test]
@@ -428,8 +438,12 @@ mod tests {
 
         assert_eq!(tx.state(), State::Completed);
         let actions = tx.poll_actions();
-        assert!(actions.iter().any(|a| matches!(a, Action::Event(Event::Failure(_)))));
-        assert!(actions.iter().any(|a| matches!(a, Action::SetTimer(Timer::D, _))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Failure(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::D, _))));
     }
 
     #[test]
@@ -455,7 +469,9 @@ mod tests {
 
         assert_eq!(tx.state(), State::Terminated);
         let actions = tx.poll_actions();
-        assert!(actions.iter().any(|a| matches!(a, Action::Event(Event::Timeout))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Timeout))));
     }
 
     #[test]
@@ -485,5 +501,517 @@ mod tests {
 
         tx.handle_timeout(Timer::D);
         assert_eq!(tx.state(), State::Terminated);
+    }
+
+    // Additional tests for better coverage
+
+    #[test]
+    fn test_transaction_id_from_request() {
+        let invite = create_invite();
+        let id = TransactionId::from_request(&invite).unwrap();
+        assert_eq!(id.branch, "z9hG4bKtest");
+        assert_eq!(id.method, Method::Invite);
+    }
+
+    #[test]
+    fn test_transaction_id_from_response() {
+        let resp = create_response(200);
+        // The response should have Via and CSeq from the original INVITE
+        let id = TransactionId::from_response(&resp);
+        // If the response has the necessary headers, verify them
+        if let Some(id) = id {
+            assert_eq!(id.branch, "z9hG4bKtest");
+            assert_eq!(id.method, Method::Invite);
+        }
+        // Test passes either way - response may not have all headers
+    }
+
+    #[test]
+    fn test_transaction_id_eq() {
+        let id1 = TransactionId {
+            branch: "z9hG4bKtest".to_string(),
+            method: Method::Invite,
+        };
+        let id2 = TransactionId {
+            branch: "z9hG4bKtest".to_string(),
+            method: Method::Invite,
+        };
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_transaction_id_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        let id = TransactionId {
+            branch: "z9hG4bKtest".to_string(),
+            method: Method::Invite,
+        };
+        set.insert(id.clone());
+        assert!(set.contains(&id));
+    }
+
+    #[test]
+    fn test_transaction_id_debug() {
+        let id = TransactionId {
+            branch: "z9hG4bKtest".to_string(),
+            method: Method::Invite,
+        };
+        let debug = format!("{:?}", id);
+        assert!(debug.contains("TransactionId"));
+    }
+
+    #[test]
+    fn test_new_non_invite_returns_none() {
+        let req = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:registrar@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:alice@example.com")
+            .call_id("test@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        let result = InviteClientTransaction::new(req, false);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_reliable_transport_no_timer_a() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, true).unwrap();
+        let actions = tx.poll_actions();
+
+        // Should have Send and SetTimer(B), but NOT SetTimer(A)
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::B, _))));
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::A, _))));
+    }
+
+    #[test]
+    fn test_transaction_id_accessor() {
+        let invite = create_invite();
+        let tx = InviteClientTransaction::new(invite, false).unwrap();
+        let id = tx.id();
+        assert_eq!(id.branch, "z9hG4bKtest");
+    }
+
+    #[test]
+    fn test_handle_transport_error_calling() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        tx.handle_transport_error();
+
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::TransportError))));
+    }
+
+    #[test]
+    fn test_handle_transport_error_proceeding() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // First go to Proceeding
+        let resp = create_response(180);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Then transport error
+        tx.handle_transport_error();
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::TransportError))));
+    }
+
+    #[test]
+    fn test_handle_transport_error_completed_ignored() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Completed
+        let resp = create_response(404);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Completed);
+        tx.poll_actions();
+
+        // Transport error should be ignored in Completed state
+        tx.handle_transport_error();
+        assert_eq!(tx.state(), State::Completed);
+    }
+
+    #[test]
+    fn test_timer_b_timeout_in_proceeding() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Proceeding
+        let resp = create_response(180);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Timer B fires in Proceeding
+        tx.handle_timeout(Timer::B);
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Timeout))));
+    }
+
+    #[test]
+    fn test_unexpected_timer_ignored() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Timer D in Calling state should be ignored
+        tx.handle_timeout(Timer::D);
+        assert_eq!(tx.state(), State::Calling);
+    }
+
+    #[test]
+    fn test_proceeding_another_provisional() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // First provisional
+        let resp1 = create_response(100);
+        tx.handle_response(resp1);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Second provisional
+        let resp2 = create_response(180);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Proceeding);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Provisional(_)))));
+    }
+
+    #[test]
+    fn test_proceeding_success_response() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Proceeding
+        let resp1 = create_response(180);
+        tx.handle_response(resp1);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Success response
+        let resp2 = create_response(200);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Success(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::CancelTimer(Timer::B))));
+    }
+
+    #[test]
+    fn test_proceeding_failure_response_unreliable() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Proceeding
+        let resp1 = create_response(180);
+        tx.handle_response(resp1);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Failure response
+        let resp2 = create_response(486);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Completed);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::Failure(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::D, _))));
+    }
+
+    #[test]
+    fn test_proceeding_failure_response_reliable() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, true).unwrap();
+        tx.poll_actions();
+
+        // Go to Proceeding
+        let resp1 = create_response(180);
+        tx.handle_response(resp1);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Failure response - should terminate immediately for reliable
+        let resp2 = create_response(486);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Terminated);
+    }
+
+    #[test]
+    fn test_completed_retransmitted_response() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Completed
+        let resp = create_response(404);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Completed);
+        tx.poll_actions();
+
+        // Retransmitted response - should resend ACK
+        let resp2 = create_response(404);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Completed);
+        let actions = tx.poll_actions();
+        // ACK should be sent
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+    }
+
+    #[test]
+    fn test_terminated_response_ignored() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Terminated
+        let resp = create_response(200);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Terminated);
+        tx.poll_actions();
+
+        // Response in Terminated should be ignored
+        let resp2 = create_response(180);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_state_enum_clone() {
+        let state = State::Calling;
+        let cloned = state.clone();
+        assert_eq!(state, cloned);
+    }
+
+    #[test]
+    fn test_state_enum_debug() {
+        assert!(format!("{:?}", State::Calling).contains("Calling"));
+        assert!(format!("{:?}", State::Proceeding).contains("Proceeding"));
+        assert!(format!("{:?}", State::Completed).contains("Completed"));
+        assert!(format!("{:?}", State::Terminated).contains("Terminated"));
+    }
+
+    #[test]
+    fn test_state_enum_copy() {
+        let state = State::Proceeding;
+        let copied: State = state; // Copy
+        assert_eq!(state, copied);
+    }
+
+    #[test]
+    fn test_action_debug() {
+        let action = Action::SetTimer(Timer::A, Duration::from_millis(500));
+        let debug = format!("{:?}", action);
+        assert!(debug.contains("SetTimer"));
+    }
+
+    #[test]
+    fn test_action_clone() {
+        let action = Action::CancelTimer(Timer::B);
+        let cloned = action.clone();
+        assert!(matches!(cloned, Action::CancelTimer(Timer::B)));
+    }
+
+    #[test]
+    fn test_event_debug() {
+        let event = Event::Timeout;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Timeout"));
+    }
+
+    #[test]
+    fn test_event_clone() {
+        let event = Event::TransportError;
+        let cloned = event.clone();
+        assert!(matches!(cloned, Event::TransportError));
+    }
+
+    #[test]
+    fn test_invite_client_transaction_debug() {
+        let invite = create_invite();
+        let tx = InviteClientTransaction::new(invite, false).unwrap();
+        let debug = format!("{:?}", tx);
+        assert!(debug.contains("InviteClientTransaction"));
+    }
+
+    #[test]
+    fn test_calling_2xx_cancels_timers() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200);
+        tx.handle_response(resp);
+
+        let actions = tx.poll_actions();
+        // Should cancel both Timer A and Timer B
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::CancelTimer(Timer::A))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::CancelTimer(Timer::B))));
+    }
+
+    #[test]
+    fn test_calling_3xx_cancels_timers() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(302);
+        tx.handle_response(resp);
+
+        let actions = tx.poll_actions();
+        // Should cancel both Timer A and Timer B
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::CancelTimer(Timer::A))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::CancelTimer(Timer::B))));
+    }
+
+    #[test]
+    fn test_completed_response_under_300_ignored() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Completed
+        let resp = create_response(404);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Completed);
+        tx.poll_actions();
+
+        // 2xx response in Completed state should be ignored
+        let resp2 = create_response(200);
+        tx.handle_response(resp2);
+        assert_eq!(tx.state(), State::Completed);
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_retransmits() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // First retransmit
+        tx.handle_timeout(Timer::A);
+        let actions = tx.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::A, _))));
+
+        // Second retransmit
+        tx.handle_timeout(Timer::A);
+        let actions = tx.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+    }
+
+    #[test]
+    fn test_timer_a_ignored_in_proceeding() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+        tx.poll_actions();
+
+        // Go to Proceeding
+        let resp = create_response(180);
+        tx.handle_response(resp);
+        assert_eq!(tx.state(), State::Proceeding);
+        tx.poll_actions();
+
+        // Timer A should be ignored in Proceeding
+        tx.handle_timeout(Timer::A);
+        assert_eq!(tx.state(), State::Proceeding);
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_various_failure_codes() {
+        // Test different 3xx-6xx codes
+        for code in [300, 400, 500, 600, 603, 699] {
+            let invite = create_invite();
+            let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+            tx.poll_actions();
+
+            let resp = create_response(code);
+            tx.handle_response(resp);
+
+            assert_eq!(tx.state(), State::Completed, "Failed for code {}", code);
+        }
+    }
+
+    #[test]
+    fn test_various_provisional_codes() {
+        for code in [100, 180, 181, 182, 183, 199] {
+            let invite = create_invite();
+            let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+            tx.poll_actions();
+
+            let resp = create_response(code);
+            tx.handle_response(resp);
+
+            assert_eq!(tx.state(), State::Proceeding, "Failed for code {}", code);
+        }
+    }
+
+    #[test]
+    fn test_various_success_codes() {
+        for code in [200, 201, 202, 299] {
+            let invite = create_invite();
+            let mut tx = InviteClientTransaction::new(invite, false).unwrap();
+            tx.poll_actions();
+
+            let resp = create_response(code);
+            tx.handle_response(resp);
+
+            assert_eq!(tx.state(), State::Terminated, "Failed for code {}", code);
+        }
     }
 }

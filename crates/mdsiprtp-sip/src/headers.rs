@@ -40,7 +40,8 @@ impl Via {
 
         // Parse protocol (e.g., "SIP/2.0/UDP")
         let protocol_parts: Vec<&str> = parts[0].split('/').collect();
-        let protocol = protocol_parts.last()
+        let protocol = protocol_parts
+            .last()
             .ok_or_else(|| SipError::Parse("Missing transport protocol".to_string()))?
             .to_string();
 
@@ -57,7 +58,10 @@ impl Via {
             let port_str = &host_port[idx + 1..];
             // Check if it's actually a port (all digits) or part of IPv6
             if port_str.chars().all(|c| c.is_ascii_digit()) && !host_port.contains('[') {
-                (host_port[..idx].to_string(), port_str.parse().unwrap_or(5060))
+                (
+                    host_port[..idx].to_string(),
+                    port_str.parse().unwrap_or(5060),
+                )
             } else {
                 (host_port.to_string(), 5060)
             }
@@ -87,7 +91,9 @@ impl Via {
         }
 
         if branch.is_empty() {
-            return Err(SipError::Parse("Via header missing branch parameter".to_string()));
+            return Err(SipError::Parse(
+                "Via header missing branch parameter".to_string(),
+            ));
         }
 
         Ok(Via {
@@ -267,10 +273,14 @@ impl RecordRoute {
                 };
                 (uri, params)
             } else {
-                return Err(SipError::Parse("Record-Route URI missing closing >".to_string()));
+                return Err(SipError::Parse(
+                    "Record-Route URI missing closing >".to_string(),
+                ));
             }
         } else {
-            return Err(SipError::Parse("Record-Route must have URI in angle brackets".to_string()));
+            return Err(SipError::Parse(
+                "Record-Route must have URI in angle brackets".to_string(),
+            ));
         };
 
         let uri = SipUri::parse(uri_str)?;
@@ -341,7 +351,9 @@ impl Route {
                 return Err(SipError::Parse("Route URI missing closing >".to_string()));
             }
         } else {
-            return Err(SipError::Parse("Route must have URI in angle brackets".to_string()));
+            return Err(SipError::Parse(
+                "Route must have URI in angle brackets".to_string(),
+            ));
         };
 
         let uri = SipUri::parse(uri_str)?;
@@ -445,6 +457,7 @@ impl RouteSet {
 mod tests {
     use super::*;
 
+    // Via tests
     #[test]
     fn test_via_parse() {
         let via = Via::parse("SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK776").unwrap();
@@ -458,11 +471,54 @@ mod tests {
 
     #[test]
     fn test_via_parse_with_received() {
-        let via = Via::parse("SIP/2.0/TCP proxy.example.com:5060;branch=z9hG4bK123;received=10.0.0.1;rport=12345").unwrap();
+        let via = Via::parse(
+            "SIP/2.0/TCP proxy.example.com:5060;branch=z9hG4bK123;received=10.0.0.1;rport=12345",
+        )
+        .unwrap();
         assert_eq!(via.protocol, "TCP");
         assert_eq!(via.host, "proxy.example.com");
         assert_eq!(via.received, Some("10.0.0.1".to_string()));
         assert_eq!(via.rport, Some(12345));
+    }
+
+    #[test]
+    fn test_via_parse_tls() {
+        let via = Via::parse("SIP/2.0/TLS secure.example.com:5061;branch=z9hG4bKsecure").unwrap();
+        assert_eq!(via.protocol, "TLS");
+        assert_eq!(via.host, "secure.example.com");
+        assert_eq!(via.port, 5061);
+    }
+
+    #[test]
+    fn test_via_parse_default_port() {
+        let via = Via::parse("SIP/2.0/UDP proxy.example.com;branch=z9hG4bKabc").unwrap();
+        assert_eq!(via.host, "proxy.example.com");
+        assert_eq!(via.port, 5060);
+    }
+
+    #[test]
+    fn test_via_parse_rport_no_value() {
+        let via = Via::parse("SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK776;rport").unwrap();
+        assert!(via.rport.is_none());
+    }
+
+    #[test]
+    fn test_via_parse_invalid_format() {
+        let result = Via::parse("InvalidVia");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_via_parse_no_branch() {
+        let result = Via::parse("SIP/2.0/UDP 192.168.1.1:5060");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_via_parse_whitespace() {
+        let via = Via::parse("  SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK123  ").unwrap();
+        assert_eq!(via.protocol, "UDP");
+        assert_eq!(via.branch, "z9hG4bK123");
     }
 
     #[test]
@@ -485,6 +541,36 @@ mod tests {
     }
 
     #[test]
+    fn test_via_to_header_value_no_optional() {
+        let via = Via {
+            protocol: "TCP".to_string(),
+            host: "example.com".to_string(),
+            port: 5060,
+            branch: "z9hG4bK999".to_string(),
+            received: None,
+            rport: None,
+        };
+
+        let s = via.to_header_value();
+        assert_eq!(s, "SIP/2.0/TCP example.com:5060;branch=z9hG4bK999");
+    }
+
+    #[test]
+    fn test_via_clone() {
+        let via = Via::parse("SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK123").unwrap();
+        let cloned = via.clone();
+        assert_eq!(via, cloned);
+    }
+
+    #[test]
+    fn test_via_debug() {
+        let via = Via::parse("SIP/2.0/UDP 192.168.1.1:5060;branch=z9hG4bK123").unwrap();
+        let debug = format!("{:?}", via);
+        assert!(debug.contains("Via"));
+    }
+
+    // Contact tests
+    #[test]
     fn test_contact_parse() {
         let contact = Contact::parse("<sip:alice@192.168.1.1:5060>").unwrap();
         assert_eq!(contact.uri.to_string(), "sip:alice@192.168.1.1:5060");
@@ -499,6 +585,89 @@ mod tests {
     }
 
     #[test]
+    fn test_contact_parse_with_q_value() {
+        let contact = Contact::parse("<sip:alice@example.com>;q=0.5").unwrap();
+        assert_eq!(contact.q, Some(0.5));
+    }
+
+    #[test]
+    fn test_contact_parse_with_all_params() {
+        let contact = Contact::parse("\"Bob\" <sip:bob@example.com>;expires=7200;q=0.8").unwrap();
+        assert_eq!(contact.display_name, Some("Bob".to_string()));
+        assert_eq!(contact.expires, Some(7200));
+        assert_eq!(contact.q, Some(0.8));
+    }
+
+    #[test]
+    fn test_contact_parse_display_name_no_quotes() {
+        let contact = Contact::parse("Alice <sip:alice@example.com>").unwrap();
+        assert_eq!(contact.display_name, Some("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_contact_parse_no_angle_brackets() {
+        let contact = Contact::parse("sip:alice@example.com").unwrap();
+        assert!(contact.display_name.is_none());
+        assert!(contact.uri.to_string().contains("alice"));
+    }
+
+    #[test]
+    fn test_contact_parse_no_angle_brackets_with_params() {
+        let contact = Contact::parse("sip:alice@example.com;expires=1800").unwrap();
+        assert_eq!(contact.expires, Some(1800));
+    }
+
+    #[test]
+    fn test_contact_parse_missing_closing_bracket() {
+        let result = Contact::parse("<sip:alice@example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_contact_to_header_value() {
+        let contact = Contact {
+            uri: SipUri::parse("sip:alice@example.com").unwrap(),
+            display_name: Some("Alice".to_string()),
+            expires: Some(3600),
+            q: Some(0.7),
+        };
+
+        let s = contact.to_header_value();
+        assert!(s.contains("\"Alice\""));
+        assert!(s.contains("<sip:alice@example.com>"));
+        assert!(s.contains("expires=3600"));
+        assert!(s.contains("q=0.7"));
+    }
+
+    #[test]
+    fn test_contact_to_header_value_no_optional() {
+        let contact = Contact {
+            uri: SipUri::parse("sip:bob@example.com").unwrap(),
+            display_name: None,
+            expires: None,
+            q: None,
+        };
+
+        let s = contact.to_header_value();
+        assert_eq!(s, "<sip:bob@example.com>");
+    }
+
+    #[test]
+    fn test_contact_display() {
+        let contact = Contact::parse("<sip:alice@example.com>").unwrap();
+        let s = contact.to_string();
+        assert!(s.contains("sip:alice@example.com"));
+    }
+
+    #[test]
+    fn test_contact_clone() {
+        let contact = Contact::parse("<sip:alice@example.com>").unwrap();
+        let cloned = contact.clone();
+        assert_eq!(contact, cloned);
+    }
+
+    // RecordRoute tests
+    #[test]
     fn test_record_route_parse() {
         let rr = RecordRoute::parse("<sip:proxy.example.com>;lr").unwrap();
         assert!(rr.lr);
@@ -509,6 +678,152 @@ mod tests {
     fn test_record_route_parse_no_lr() {
         let rr = RecordRoute::parse("<sip:proxy.example.com>").unwrap();
         assert!(!rr.lr);
+    }
+
+    #[test]
+    fn test_record_route_parse_with_port() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com:5060>;lr").unwrap();
+        assert!(rr.lr);
+    }
+
+    #[test]
+    fn test_record_route_parse_missing_brackets() {
+        let result = RecordRoute::parse("sip:proxy.example.com;lr");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_route_parse_missing_closing() {
+        let result = RecordRoute::parse("<sip:proxy.example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_route_parse_all() {
+        let values = vec![
+            "<sip:p1.example.com>;lr, <sip:p2.example.com>;lr".to_string(),
+            "<sip:p3.example.com>".to_string(),
+        ];
+        let routes = RecordRoute::parse_all(&values);
+        assert_eq!(routes.len(), 3);
+    }
+
+    #[test]
+    fn test_record_route_parse_all_empty() {
+        let values: Vec<String> = vec![];
+        let routes = RecordRoute::parse_all(&values);
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn test_record_route_to_header_value() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>;lr").unwrap();
+        let s = rr.to_header_value();
+        assert!(s.contains("<sip:proxy.example.com>"));
+        assert!(s.contains("lr"));
+    }
+
+    #[test]
+    fn test_record_route_to_header_value_no_lr() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>").unwrap();
+        let s = rr.to_header_value();
+        assert!(!s.contains("lr"));
+    }
+
+    #[test]
+    fn test_record_route_display() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>;lr").unwrap();
+        let s = rr.to_string();
+        assert!(s.contains("proxy.example.com"));
+    }
+
+    #[test]
+    fn test_record_route_clone() {
+        let rr = RecordRoute::parse("<sip:proxy.example.com>;lr").unwrap();
+        let cloned = rr.clone();
+        assert_eq!(rr, cloned);
+    }
+
+    // Route tests
+    #[test]
+    fn test_route_parse() {
+        let route = Route::parse("<sip:proxy.example.com:5060>;lr").unwrap();
+        assert!(route.lr);
+    }
+
+    #[test]
+    fn test_route_parse_no_lr() {
+        let route = Route::parse("<sip:proxy.example.com>").unwrap();
+        assert!(!route.lr);
+    }
+
+    #[test]
+    fn test_route_parse_missing_brackets() {
+        let result = Route::parse("sip:proxy.example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_parse_missing_closing() {
+        let result = Route::parse("<sip:proxy.example.com");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_parse_all() {
+        let values = vec!["<sip:p1.example.com>;lr, <sip:p2.example.com>;lr".to_string()];
+        let routes = Route::parse_all(&values);
+        assert_eq!(routes.len(), 2);
+    }
+
+    #[test]
+    fn test_route_parse_all_empty() {
+        let values: Vec<String> = vec![];
+        let routes = Route::parse_all(&values);
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn test_route_to_header_value() {
+        let route = Route::parse("<sip:proxy.example.com>;lr").unwrap();
+        let s = route.to_header_value();
+        assert!(s.contains("<sip:proxy.example.com>"));
+        assert!(s.contains("lr"));
+    }
+
+    #[test]
+    fn test_route_to_header_value_no_lr() {
+        let route = Route::parse("<sip:proxy.example.com>").unwrap();
+        let s = route.to_header_value();
+        assert!(!s.contains("lr"));
+    }
+
+    #[test]
+    fn test_route_display() {
+        let route = Route::parse("<sip:proxy.example.com>;lr").unwrap();
+        let s = route.to_string();
+        assert!(s.contains("proxy.example.com"));
+    }
+
+    #[test]
+    fn test_route_clone() {
+        let route = Route::parse("<sip:proxy.example.com>;lr").unwrap();
+        let cloned = route.clone();
+        assert_eq!(route, cloned);
+    }
+
+    // RouteSet tests
+    #[test]
+    fn test_route_set_new() {
+        let route_set = RouteSet::new();
+        assert!(route_set.is_empty());
+        assert_eq!(route_set.len(), 0);
+    }
+
+    #[test]
+    fn test_route_set_default() {
+        let route_set = RouteSet::default();
+        assert!(route_set.is_empty());
     }
 
     #[test]
@@ -531,8 +846,67 @@ mod tests {
     }
 
     #[test]
-    fn test_route_parse() {
-        let route = Route::parse("<sip:proxy.example.com:5060>;lr").unwrap();
-        assert!(route.lr);
+    fn test_route_set_is_empty() {
+        let mut route_set = RouteSet::new();
+        assert!(route_set.is_empty());
+
+        route_set.push(Route::parse("<sip:proxy.example.com>;lr").unwrap());
+        assert!(!route_set.is_empty());
+    }
+
+    #[test]
+    fn test_route_set_len() {
+        let mut route_set = RouteSet::new();
+        assert_eq!(route_set.len(), 0);
+
+        route_set.push(Route::parse("<sip:p1.example.com>;lr").unwrap());
+        assert_eq!(route_set.len(), 1);
+
+        route_set.push(Route::parse("<sip:p2.example.com>;lr").unwrap());
+        assert_eq!(route_set.len(), 2);
+    }
+
+    #[test]
+    fn test_route_set_first() {
+        let mut route_set = RouteSet::new();
+        assert!(route_set.first().is_none());
+
+        route_set.push(Route::parse("<sip:first.example.com>;lr").unwrap());
+        route_set.push(Route::parse("<sip:second.example.com>;lr").unwrap());
+
+        let first = route_set.first().unwrap();
+        assert!(first.uri.to_string().contains("first"));
+    }
+
+    #[test]
+    fn test_route_set_routes() {
+        let mut route_set = RouteSet::new();
+        route_set.push(Route::parse("<sip:p1.example.com>;lr").unwrap());
+        route_set.push(Route::parse("<sip:p2.example.com>;lr").unwrap());
+
+        let routes = route_set.routes();
+        assert_eq!(routes.len(), 2);
+    }
+
+    #[test]
+    fn test_route_set_push() {
+        let mut route_set = RouteSet::new();
+        route_set.push(Route::parse("<sip:proxy.example.com>;lr").unwrap());
+        assert_eq!(route_set.len(), 1);
+    }
+
+    #[test]
+    fn test_route_set_clone() {
+        let mut route_set = RouteSet::new();
+        route_set.push(Route::parse("<sip:proxy.example.com>;lr").unwrap());
+        let cloned = route_set.clone();
+        assert_eq!(cloned.len(), 1);
+    }
+
+    #[test]
+    fn test_route_set_debug() {
+        let route_set = RouteSet::new();
+        let debug = format!("{:?}", route_set);
+        assert!(debug.contains("RouteSet"));
     }
 }

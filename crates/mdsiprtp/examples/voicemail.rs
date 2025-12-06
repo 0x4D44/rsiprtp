@@ -230,10 +230,7 @@ impl VoicemailServer {
     pub async fn end_call(&self, call_id: &str) {
         if let Some(call) = self.calls.write().await.remove(call_id) {
             if let Some(path) = call.output_path {
-                println!(
-                    "Call {} ended. Message saved to {:?}",
-                    call_id, path
-                );
+                println!("Call {} ended. Message saved to {:?}", call_id, path);
             } else {
                 println!("Call {} ended. No message recorded.", call_id);
             }
@@ -251,9 +248,7 @@ fn is_silence(samples: &[i16], threshold: f32) -> bool {
         return true;
     }
 
-    let sum_squares: i64 = samples.iter()
-        .map(|&s| (s as i64) * (s as i64))
-        .sum();
+    let sum_squares: i64 = samples.iter().map(|&s| (s as i64) * (s as i64)).sum();
 
     let rms = ((sum_squares as f64) / (samples.len() as f64)).sqrt();
     let normalized = rms / (i16::MAX as f64);
@@ -282,13 +277,18 @@ async fn main() {
     println!("  Output directory: {:?}", config.output_dir);
     println!("  Max record duration: {}s", config.max_record_duration);
     println!("  Silence threshold: {}", config.silence_threshold);
-    println!("  Silence duration to end: {}s", config.silence_duration_secs);
+    println!(
+        "  Silence duration to end: {}s",
+        config.silence_duration_secs
+    );
 
     let server = VoicemailServer::new(config);
 
     // Simulate a call
     println!("\n--- Simulating incoming call ---");
-    server.handle_incoming_call("call-123", "alice@example.com").await;
+    server
+        .handle_incoming_call("call-123", "alice@example.com")
+        .await;
 
     // Simulate greeting playback complete
     println!("\n--- Starting recording ---");
@@ -352,14 +352,20 @@ mod tests {
         // Check state
         let calls = server.calls.read().await;
         assert!(calls.contains_key("test-1"));
-        assert_eq!(calls.get("test-1").unwrap().state, VoicemailState::PlayingGreeting);
+        assert_eq!(
+            calls.get("test-1").unwrap().state,
+            VoicemailState::PlayingGreeting
+        );
         drop(calls);
 
         // Start recording
         server.start_recording("test-1").await;
 
         let calls = server.calls.read().await;
-        assert_eq!(calls.get("test-1").unwrap().state, VoicemailState::Recording);
+        assert_eq!(
+            calls.get("test-1").unwrap().state,
+            VoicemailState::Recording
+        );
         drop(calls);
 
         // DTMF to end

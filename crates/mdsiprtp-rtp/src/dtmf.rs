@@ -472,4 +472,232 @@ mod tests {
         let result = receiver.process_packet(102, &event.encode());
         assert!(result.is_none());
     }
+
+    // Additional tests for better coverage
+
+    #[test]
+    fn test_dtmf_digit_debug() {
+        let digit = DtmfDigit::Star;
+        let debug = format!("{:?}", digit);
+        assert!(debug.contains("Star"));
+    }
+
+    #[test]
+    fn test_dtmf_digit_clone() {
+        let digit = DtmfDigit::Five;
+        let cloned = digit.clone();
+        assert_eq!(digit, cloned);
+    }
+
+    #[test]
+    fn test_dtmf_digit_copy() {
+        let digit = DtmfDigit::Nine;
+        let copied: DtmfDigit = digit;
+        assert_eq!(digit, copied);
+    }
+
+    #[test]
+    fn test_dtmf_digit_eq() {
+        assert_eq!(DtmfDigit::Zero, DtmfDigit::Zero);
+        assert_ne!(DtmfDigit::Zero, DtmfDigit::One);
+    }
+
+    #[test]
+    fn test_dtmf_digit_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(DtmfDigit::Star);
+        set.insert(DtmfDigit::Pound);
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&DtmfDigit::Star));
+    }
+
+    #[test]
+    fn test_dtmf_digit_display() {
+        assert_eq!(format!("{}", DtmfDigit::Zero), "0");
+        assert_eq!(format!("{}", DtmfDigit::Nine), "9");
+        assert_eq!(format!("{}", DtmfDigit::Star), "*");
+        assert_eq!(format!("{}", DtmfDigit::Pound), "#");
+        assert_eq!(format!("{}", DtmfDigit::A), "A");
+        assert_eq!(format!("{}", DtmfDigit::D), "D");
+    }
+
+    #[test]
+    fn test_dtmf_digit_from_event_code_invalid() {
+        assert!(DtmfDigit::from_event_code(16).is_none());
+        assert!(DtmfDigit::from_event_code(255).is_none());
+    }
+
+    #[test]
+    fn test_dtmf_digit_as_char_all() {
+        assert_eq!(DtmfDigit::Zero.as_char(), '0');
+        assert_eq!(DtmfDigit::One.as_char(), '1');
+        assert_eq!(DtmfDigit::Two.as_char(), '2');
+        assert_eq!(DtmfDigit::Three.as_char(), '3');
+        assert_eq!(DtmfDigit::Four.as_char(), '4');
+        assert_eq!(DtmfDigit::Five.as_char(), '5');
+        assert_eq!(DtmfDigit::Six.as_char(), '6');
+        assert_eq!(DtmfDigit::Seven.as_char(), '7');
+        assert_eq!(DtmfDigit::Eight.as_char(), '8');
+        assert_eq!(DtmfDigit::Nine.as_char(), '9');
+        assert_eq!(DtmfDigit::Star.as_char(), '*');
+        assert_eq!(DtmfDigit::Pound.as_char(), '#');
+        assert_eq!(DtmfDigit::A.as_char(), 'A');
+        assert_eq!(DtmfDigit::B.as_char(), 'B');
+        assert_eq!(DtmfDigit::C.as_char(), 'C');
+        assert_eq!(DtmfDigit::D.as_char(), 'D');
+    }
+
+    #[test]
+    fn test_dtmf_digit_from_char_lowercase() {
+        assert_eq!(DtmfDigit::from_char('b'), Some(DtmfDigit::B));
+        assert_eq!(DtmfDigit::from_char('c'), Some(DtmfDigit::C));
+        assert_eq!(DtmfDigit::from_char('d'), Some(DtmfDigit::D));
+    }
+
+    #[test]
+    fn test_dtmf_event_debug() {
+        let event = DtmfEvent::new(DtmfDigit::One, 100);
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("DtmfEvent"));
+    }
+
+    #[test]
+    fn test_dtmf_event_clone() {
+        let event = DtmfEvent::new(DtmfDigit::One, 100).with_end();
+        let cloned = event.clone();
+        assert_eq!(event, cloned);
+    }
+
+    #[test]
+    fn test_dtmf_event_eq() {
+        let event1 = DtmfEvent::new(DtmfDigit::One, 100);
+        let event2 = DtmfEvent::new(DtmfDigit::One, 100);
+        let event3 = DtmfEvent::new(DtmfDigit::Two, 100);
+        assert_eq!(event1, event2);
+        assert_ne!(event1, event3);
+    }
+
+    #[test]
+    fn test_dtmf_event_new_defaults() {
+        let event = DtmfEvent::new(DtmfDigit::Five, 500);
+        assert_eq!(event.digit, DtmfDigit::Five);
+        assert_eq!(event.duration, 500);
+        assert_eq!(event.volume, 10); // Default volume
+        assert!(!event.end);
+    }
+
+    #[test]
+    fn test_dtmf_event_with_volume_clamped() {
+        let event = DtmfEvent::new(DtmfDigit::One, 100).with_volume(100);
+        assert_eq!(event.volume, 63); // Clamped to max 63
+    }
+
+    #[test]
+    fn test_dtmf_event_decode_too_short() {
+        assert!(DtmfEvent::decode(&[]).is_none());
+        assert!(DtmfEvent::decode(&[0, 1, 2]).is_none());
+    }
+
+    #[test]
+    fn test_dtmf_event_decode_invalid_event_code() {
+        let data = [20, 0, 0, 100]; // Event code 20 is invalid
+        assert!(DtmfEvent::decode(&data).is_none());
+    }
+
+    #[test]
+    fn test_dtmf_sender_set_sample_rate() {
+        let mut sender = DtmfSender::new(101, 0x12345678);
+        sender.set_sample_rate(16000);
+        // Generate packets with new rate
+        let packets = sender.generate_packets(DtmfDigit::One, 100, 1000);
+        assert!(!packets.is_empty());
+    }
+
+    #[test]
+    fn test_dtmf_sender_long_duration() {
+        let mut sender = DtmfSender::new(101, 0x12345678);
+        // Longer duration should produce more packets
+        let packets = sender.generate_packets(DtmfDigit::Five, 500, 1000);
+        // 500ms / 50ms per packet = 10 packets + 2 end repeats = 12
+        assert!(packets.len() >= 5);
+    }
+
+    #[test]
+    fn test_dtmf_receiver_reset() {
+        let mut receiver = DtmfReceiver::new(101);
+
+        // Start an event
+        let start_event = DtmfEvent::new(DtmfDigit::Seven, 100);
+        receiver.process_packet(101, &start_event.encode());
+        assert!(receiver.current_digit().is_some());
+
+        // Reset
+        receiver.reset();
+        assert!(receiver.current_digit().is_none());
+    }
+
+    #[test]
+    fn test_dtmf_receiver_different_digits_sequence() {
+        let mut receiver = DtmfReceiver::new(101);
+
+        // First digit
+        let end_event1 = DtmfEvent::new(DtmfDigit::One, 500).with_end();
+        let result = receiver.process_packet(101, &end_event1.encode());
+        assert_eq!(result, Some(DtmfDigit::One));
+
+        // Different digit should return
+        let end_event2 = DtmfEvent::new(DtmfDigit::Two, 500).with_end();
+        let result = receiver.process_packet(101, &end_event2.encode());
+        assert_eq!(result, Some(DtmfDigit::Two));
+    }
+
+    #[test]
+    fn test_dtmf_receiver_start_clears_last() {
+        let mut receiver = DtmfReceiver::new(101);
+
+        // End an event
+        let end_event = DtmfEvent::new(DtmfDigit::One, 500).with_end();
+        receiver.process_packet(101, &end_event.encode());
+
+        // Start a new event (clears last_event)
+        let start_event = DtmfEvent::new(DtmfDigit::Two, 100);
+        receiver.process_packet(101, &start_event.encode());
+
+        // Now same digit end should return (last_event was cleared by start)
+        let end_event2 = DtmfEvent::new(DtmfDigit::One, 500).with_end();
+        let result = receiver.process_packet(101, &end_event2.encode());
+        assert_eq!(result, Some(DtmfDigit::One));
+    }
+
+    #[test]
+    fn test_event_code_all_digits() {
+        assert_eq!(DtmfDigit::One.event_code(), 1);
+        assert_eq!(DtmfDigit::Two.event_code(), 2);
+        assert_eq!(DtmfDigit::Three.event_code(), 3);
+        assert_eq!(DtmfDigit::Four.event_code(), 4);
+        assert_eq!(DtmfDigit::Five.event_code(), 5);
+        assert_eq!(DtmfDigit::Six.event_code(), 6);
+        assert_eq!(DtmfDigit::Seven.event_code(), 7);
+        assert_eq!(DtmfDigit::Eight.event_code(), 8);
+        assert_eq!(DtmfDigit::A.event_code(), 12);
+        assert_eq!(DtmfDigit::B.event_code(), 13);
+        assert_eq!(DtmfDigit::C.event_code(), 14);
+    }
+
+    #[test]
+    fn test_from_char_all_digits() {
+        assert_eq!(DtmfDigit::from_char('1'), Some(DtmfDigit::One));
+        assert_eq!(DtmfDigit::from_char('2'), Some(DtmfDigit::Two));
+        assert_eq!(DtmfDigit::from_char('3'), Some(DtmfDigit::Three));
+        assert_eq!(DtmfDigit::from_char('4'), Some(DtmfDigit::Four));
+        assert_eq!(DtmfDigit::from_char('5'), Some(DtmfDigit::Five));
+        assert_eq!(DtmfDigit::from_char('6'), Some(DtmfDigit::Six));
+        assert_eq!(DtmfDigit::from_char('7'), Some(DtmfDigit::Seven));
+        assert_eq!(DtmfDigit::from_char('8'), Some(DtmfDigit::Eight));
+        assert_eq!(DtmfDigit::from_char('9'), Some(DtmfDigit::Nine));
+        assert_eq!(DtmfDigit::from_char('B'), Some(DtmfDigit::B));
+        assert_eq!(DtmfDigit::from_char('C'), Some(DtmfDigit::C));
+        assert_eq!(DtmfDigit::from_char('D'), Some(DtmfDigit::D));
+    }
 }

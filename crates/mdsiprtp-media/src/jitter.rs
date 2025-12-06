@@ -328,8 +328,7 @@ impl JitterBuffer {
         }
 
         self.stats.target_delay_ms = self.config.samples_to_ms(self.target_delay);
-        self.stats.jitter_ms =
-            (self.jitter * 1000.0) / self.config.clock_rate as f64;
+        self.stats.jitter_ms = (self.jitter * 1000.0) / self.config.clock_rate as f64;
     }
 
     /// Get current statistics.

@@ -23,19 +23,29 @@
 //! The [`TransactionManager`] coordinates multiple transactions and routes messages
 //! to the appropriate transaction based on transaction ID matching.
 
-pub mod timer;
 pub mod client;
-pub mod server;
 pub mod manager;
+pub mod server;
+pub mod timer;
 
 // Re-export main types
-pub use timer::{Timer, TimerValues, ActiveTimer};
-pub use client::invite::{TransactionId, InviteClientTransaction};
-pub use client::invite::{State as InviteClientState, Action as InviteClientAction, Event as InviteClientEvent};
+pub use client::invite::{
+    Action as InviteClientAction, Event as InviteClientEvent, State as InviteClientState,
+};
+pub use client::invite::{InviteClientTransaction, TransactionId};
 pub use client::non_invite::NonInviteClientTransaction;
-pub use client::non_invite::{State as NonInviteClientState, Action as NonInviteClientAction, Event as NonInviteClientEvent};
+pub use client::non_invite::{
+    Action as NonInviteClientAction, Event as NonInviteClientEvent, State as NonInviteClientState,
+};
+pub use manager::{
+    ManagerAction, ManagerEvent, TransactionHandle, TransactionManager, TransactionType,
+};
 pub use server::invite::InviteServerTransaction;
-pub use server::invite::{State as InviteServerState, Action as InviteServerAction, Event as InviteServerEvent};
+pub use server::invite::{
+    Action as InviteServerAction, Event as InviteServerEvent, State as InviteServerState,
+};
 pub use server::non_invite::NonInviteServerTransaction;
-pub use server::non_invite::{State as NonInviteServerState, Action as NonInviteServerAction, Event as NonInviteServerEvent};
-pub use manager::{TransactionManager, TransactionHandle, TransactionType, ManagerAction, ManagerEvent};
+pub use server::non_invite::{
+    Action as NonInviteServerAction, Event as NonInviteServerEvent, State as NonInviteServerState,
+};
+pub use timer::{ActiveTimer, Timer, TimerValues};

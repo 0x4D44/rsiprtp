@@ -52,7 +52,8 @@ impl AudioMixer {
     pub fn add_source(&mut self, ssrc: u32, samples: &[i16]) {
         if self.sources.len() >= self.max_sources && !self.sources.contains_key(&ssrc) {
             // Remove oldest inactive source if at capacity
-            let inactive = self.sources
+            let inactive = self
+                .sources
                 .iter()
                 .filter(|(_, s)| !s.active)
                 .max_by_key(|(_, s)| s.silent_frames)
@@ -108,7 +109,11 @@ impl AudioMixer {
     ///
     /// # Returns
     /// Tuple of (mixed audio samples, contributing SSRC list)
-    pub fn mix_except(&mut self, num_samples: usize, exclude_ssrc: Option<u32>) -> (Vec<i16>, Vec<u32>) {
+    pub fn mix_except(
+        &mut self,
+        num_samples: usize,
+        exclude_ssrc: Option<u32>,
+    ) -> (Vec<i16>, Vec<u32>) {
         self.output_buffer.clear();
         self.output_buffer.resize(num_samples, 0);
 
@@ -306,7 +311,8 @@ impl ActiveSpeakerDetector {
 
     /// Get all active speakers sorted by energy (highest first).
     pub fn get_active_speakers(&self) -> Vec<(u32, f32)> {
-        let mut speakers: Vec<_> = self.energy_history
+        let mut speakers: Vec<_> = self
+            .energy_history
             .iter()
             .filter(|(_, history)| !history.is_empty())
             .map(|(&ssrc, history)| {
@@ -343,9 +349,7 @@ fn calculate_rms_energy(samples: &[i16]) -> f32 {
         return 0.0;
     }
 
-    let sum_squares: i64 = samples.iter()
-        .map(|&s| (s as i64) * (s as i64))
-        .sum();
+    let sum_squares: i64 = samples.iter().map(|&s| (s as i64) * (s as i64)).sum();
 
     let rms = ((sum_squares as f64) / (samples.len() as f64)).sqrt();
     (rms / i16::MAX as f64) as f32
@@ -365,9 +369,7 @@ pub fn is_silence(samples: &[i16], threshold: f32) -> bool {
     }
 
     // Calculate RMS energy
-    let sum_squares: i64 = samples.iter()
-        .map(|&s| (s as i64) * (s as i64))
-        .sum();
+    let sum_squares: i64 = samples.iter().map(|&s| (s as i64) * (s as i64)).sum();
 
     let rms = ((sum_squares as f64) / (samples.len() as f64)).sqrt();
     let normalized = rms / (i16::MAX as f64);
@@ -387,10 +389,7 @@ pub fn auto_gain_control(samples: &mut [i16], target_level: f32, max_gain: f32) 
     }
 
     // Find peak
-    let peak = samples.iter()
-        .map(|&s| s.abs() as i32)
-        .max()
-        .unwrap_or(0);
+    let peak = samples.iter().map(|&s| s.abs() as i32).max().unwrap_or(0);
 
     if peak == 0 {
         return;

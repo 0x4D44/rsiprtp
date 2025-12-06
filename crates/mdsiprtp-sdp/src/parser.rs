@@ -61,7 +61,8 @@ impl SessionDescription {
                         'c' => m.connection = Some(Connection::parse(value)?),
                         'b' => {
                             if let Some((btype, bw)) = value.split_once(':') {
-                                m.bandwidth.insert(btype.to_string(), bw.parse().unwrap_or(0));
+                                m.bandwidth
+                                    .insert(btype.to_string(), bw.parse().unwrap_or(0));
                             }
                         }
                         'a' => m.attributes.push(Attribute::parse(value)),
@@ -117,7 +118,9 @@ impl SessionDescription {
 
     /// Get audio media mutably.
     pub fn audio_media_mut(&mut self) -> Option<&mut MediaDescription> {
-        self.media.iter_mut().find(|m| m.media_type == MediaType::Audio)
+        self.media
+            .iter_mut()
+            .find(|m| m.media_type == MediaType::Audio)
     }
 }
 
@@ -519,5 +522,494 @@ a=sendrecv
         let audio = parsed.audio_media().unwrap();
         assert_eq!(audio.direction(), Direction::Inactive);
         assert!(audio.is_rejected());
+    }
+
+    // SdpParseError tests
+    #[test]
+    fn test_sdp_parse_error_debug() {
+        let err = SdpParseError::MissingVersion;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("MissingVersion"));
+    }
+
+    #[test]
+    fn test_sdp_parse_error_display() {
+        assert_eq!(SdpParseError::MissingVersion.to_string(), "Missing version");
+        assert_eq!(SdpParseError::InvalidVersion.to_string(), "Invalid version");
+        assert_eq!(SdpParseError::MissingOrigin.to_string(), "Missing origin");
+        assert_eq!(SdpParseError::InvalidOrigin.to_string(), "Invalid origin");
+        assert_eq!(
+            SdpParseError::InvalidConnection.to_string(),
+            "Invalid connection"
+        );
+        assert_eq!(SdpParseError::MissingTiming.to_string(), "Missing timing");
+        assert_eq!(SdpParseError::InvalidTiming.to_string(), "Invalid timing");
+        assert_eq!(SdpParseError::InvalidMedia.to_string(), "Invalid media");
+    }
+
+    #[test]
+    fn test_sdp_parse_error_clone() {
+        let err = SdpParseError::InvalidOrigin;
+        let cloned = err.clone();
+        assert!(format!("{:?}", cloned).contains("InvalidOrigin"));
+    }
+
+    // SessionDescription tests
+    #[test]
+    fn test_session_description_eq() {
+        let sdp1 = SessionDescription::parse(BASIC_SDP).unwrap();
+        let sdp2 = SessionDescription::parse(BASIC_SDP).unwrap();
+        assert_eq!(sdp1, sdp2);
+    }
+
+    #[test]
+    fn test_session_description_clone() {
+        let sdp1 = SessionDescription::parse(BASIC_SDP).unwrap();
+        let sdp2 = sdp1.clone();
+        assert_eq!(sdp1.session_name, sdp2.session_name);
+    }
+
+    #[test]
+    fn test_parse_missing_version() {
+        let sdp = "o=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\n";
+        let result = SessionDescription::parse(sdp);
+        assert!(matches!(result, Err(SdpParseError::MissingVersion)));
+    }
+
+    #[test]
+    fn test_parse_missing_origin() {
+        let sdp = "v=0\ns=-\nt=0 0\n";
+        let result = SessionDescription::parse(sdp);
+        assert!(matches!(result, Err(SdpParseError::MissingOrigin)));
+    }
+
+    #[test]
+    fn test_parse_missing_timing() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\n";
+        let result = SessionDescription::parse(sdp);
+        assert!(matches!(result, Err(SdpParseError::MissingTiming)));
+    }
+
+    #[test]
+    fn test_parse_with_session_info() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\ni=Session Info\nt=0 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        assert_eq!(parsed.session_info, Some("Session Info".to_string()));
+    }
+
+    #[test]
+    fn test_parse_empty_lines() {
+        let sdp = "v=0\n\no=- 0 0 IN IP4 0.0.0.0\n\ns=-\nt=0 0\n\n";
+        let result = SessionDescription::parse(sdp);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_short_lines_ignored() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nx\nt=0 0\n";
+        let result = SessionDescription::parse(sdp);
+        assert!(result.is_ok());
+    }
+
+    // Origin tests
+    #[test]
+    fn test_origin_debug() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let debug = format!("{:?}", sdp.origin);
+        assert!(debug.contains("Origin"));
+    }
+
+    #[test]
+    fn test_origin_clone() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let cloned = sdp.origin.clone();
+        assert_eq!(cloned.username, sdp.origin.username);
+    }
+
+    #[test]
+    fn test_origin_eq() {
+        let sdp1 = SessionDescription::parse(BASIC_SDP).unwrap();
+        let sdp2 = SessionDescription::parse(BASIC_SDP).unwrap();
+        assert_eq!(sdp1.origin, sdp2.origin);
+    }
+
+    // Connection tests
+    #[test]
+    fn test_connection_debug() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let conn = sdp.connection.unwrap();
+        let debug = format!("{:?}", conn);
+        assert!(debug.contains("Connection"));
+    }
+
+    #[test]
+    fn test_connection_clone() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let conn = sdp.connection.unwrap();
+        let cloned = conn.clone();
+        assert_eq!(cloned.address, conn.address);
+    }
+
+    #[test]
+    fn test_connection_eq() {
+        let sdp1 = SessionDescription::parse(BASIC_SDP).unwrap();
+        let sdp2 = SessionDescription::parse(BASIC_SDP).unwrap();
+        assert_eq!(sdp1.connection, sdp2.connection);
+    }
+
+    #[test]
+    fn test_connection_ipv6() {
+        let sdp = "v=0\no=- 0 0 IN IP6 ::1\ns=-\nc=IN IP6 2001:db8::1\nt=0 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let conn = parsed.connection.unwrap();
+        assert_eq!(conn.net_type, "IN");
+        assert_eq!(conn.addr_type, "IP6");
+        let ip = conn.ip_addr().unwrap();
+        assert!(ip.is_ipv6());
+    }
+
+    #[test]
+    fn test_connection_invalid_ip() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nc=IN IP4 not-an-ip\nt=0 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let conn = parsed.connection.unwrap();
+        assert!(conn.ip_addr().is_none());
+    }
+
+    // Timing tests
+    #[test]
+    fn test_timing_debug() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let debug = format!("{:?}", sdp.timing);
+        assert!(debug.contains("Timing"));
+    }
+
+    #[test]
+    fn test_timing_clone() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let cloned = sdp.timing.clone();
+        assert_eq!(cloned.start, sdp.timing.start);
+    }
+
+    #[test]
+    fn test_timing_eq() {
+        let sdp1 = SessionDescription::parse(BASIC_SDP).unwrap();
+        let sdp2 = SessionDescription::parse(BASIC_SDP).unwrap();
+        assert_eq!(sdp1.timing, sdp2.timing);
+    }
+
+    // MediaType tests
+    #[test]
+    fn test_media_type_from_str() {
+        assert_eq!(MediaType::from("audio"), MediaType::Audio);
+        assert_eq!(MediaType::from("AUDIO"), MediaType::Audio);
+        assert_eq!(MediaType::from("video"), MediaType::Video);
+        assert_eq!(MediaType::from("application"), MediaType::Application);
+        assert_eq!(MediaType::from("message"), MediaType::Message);
+        assert_eq!(MediaType::from("unknown"), MediaType::Other);
+    }
+
+    #[test]
+    fn test_media_type_debug() {
+        assert!(format!("{:?}", MediaType::Audio).contains("Audio"));
+        assert!(format!("{:?}", MediaType::Video).contains("Video"));
+    }
+
+    #[test]
+    fn test_media_type_clone() {
+        let mt = MediaType::Audio;
+        let cloned = mt;
+        assert_eq!(mt, cloned);
+    }
+
+    // Direction tests
+    #[test]
+    fn test_direction_default() {
+        let dir = Direction::default();
+        assert_eq!(dir, Direction::SendRecv);
+    }
+
+    #[test]
+    fn test_direction_debug() {
+        assert!(format!("{:?}", Direction::SendRecv).contains("SendRecv"));
+        assert!(format!("{:?}", Direction::SendOnly).contains("SendOnly"));
+        assert!(format!("{:?}", Direction::RecvOnly).contains("RecvOnly"));
+        assert!(format!("{:?}", Direction::Inactive).contains("Inactive"));
+    }
+
+    #[test]
+    fn test_direction_clone() {
+        let dir = Direction::RecvOnly;
+        let cloned = dir;
+        assert_eq!(dir, cloned);
+    }
+
+    // MediaDescription tests
+    #[test]
+    fn test_media_description_debug() {
+        let sdp = SessionDescription::parse(BASIC_SDP).unwrap();
+        let audio = sdp.audio_media().unwrap();
+        let debug = format!("{:?}", audio);
+        assert!(debug.contains("MediaDescription"));
+    }
+
+    #[test]
+    fn test_media_description_with_port_range() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 49170/2 RTP/AVP 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.port, 49170);
+        assert_eq!(audio.num_ports, Some(2));
+    }
+
+    #[test]
+    fn test_media_description_video() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=video 49172 RTP/AVP 96\na=rtpmap:96 H264/90000\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        assert!(parsed.audio_media().is_none());
+        assert_eq!(parsed.media[0].media_type, MediaType::Video);
+    }
+
+    #[test]
+    fn test_media_with_connection() {
+        let sdp =
+            "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\nc=IN IP4 10.0.0.1\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        let conn = audio.connection.as_ref().unwrap();
+        assert_eq!(conn.address, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_media_with_bandwidth() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\nb=AS:64\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.bandwidth.get("AS"), Some(&64));
+    }
+
+    #[test]
+    fn test_media_direction_sendonly() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\na=sendonly\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.direction(), Direction::SendOnly);
+    }
+
+    #[test]
+    fn test_media_direction_recvonly() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\na=recvonly\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.direction(), Direction::RecvOnly);
+    }
+
+    #[test]
+    fn test_media_direction_default() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.direction(), Direction::SendRecv); // Default
+    }
+
+    #[test]
+    fn test_is_rejected() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 0 RTP/AVP 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert!(audio.is_rejected());
+    }
+
+    #[test]
+    fn test_is_not_rejected() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert!(!audio.is_rejected());
+    }
+
+    // Attribute tests
+    #[test]
+    fn test_attribute_debug() {
+        let attr = Attribute {
+            name: "test".to_string(),
+            value: Some("value".to_string()),
+        };
+        let debug = format!("{:?}", attr);
+        assert!(debug.contains("Attribute"));
+    }
+
+    #[test]
+    fn test_attribute_clone() {
+        let attr = Attribute {
+            name: "test".to_string(),
+            value: Some("value".to_string()),
+        };
+        let cloned = attr.clone();
+        assert_eq!(cloned.name, attr.name);
+    }
+
+    #[test]
+    fn test_attribute_eq() {
+        let a1 = Attribute {
+            name: "test".to_string(),
+            value: None,
+        };
+        let a2 = Attribute {
+            name: "test".to_string(),
+            value: None,
+        };
+        assert_eq!(a1, a2);
+    }
+
+    #[test]
+    fn test_attribute_parse_with_value() {
+        let attr = Attribute::parse("rtpmap:0 PCMU/8000");
+        assert_eq!(attr.name, "rtpmap");
+        assert_eq!(attr.value, Some("0 PCMU/8000".to_string()));
+    }
+
+    #[test]
+    fn test_attribute_parse_flag() {
+        let attr = Attribute::parse("sendrecv");
+        assert_eq!(attr.name, "sendrecv");
+        assert!(attr.value.is_none());
+    }
+
+    // RtpMap tests
+    #[test]
+    fn test_rtpmap_debug() {
+        let rtpmap = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        let debug = format!("{:?}", rtpmap);
+        assert!(debug.contains("RtpMap"));
+    }
+
+    #[test]
+    fn test_rtpmap_clone() {
+        let rtpmap = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        let cloned = rtpmap.clone();
+        assert_eq!(cloned.encoding, rtpmap.encoding);
+    }
+
+    #[test]
+    fn test_rtpmap_eq() {
+        let r1 = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        let r2 = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_rtpmap_channels_default() {
+        let rtpmap = RtpMap {
+            payload_type: 0,
+            encoding: "PCMU".to_string(),
+            clock_rate: 8000,
+            params: None,
+        };
+        assert_eq!(rtpmap.channels(), 1);
+    }
+
+    #[test]
+    fn test_rtpmap_channels_stereo() {
+        let rtpmap = RtpMap {
+            payload_type: 96,
+            encoding: "opus".to_string(),
+            clock_rate: 48000,
+            params: Some("2".to_string()),
+        };
+        assert_eq!(rtpmap.channels(), 2);
+    }
+
+    #[test]
+    fn test_rtpmap_parse_with_channels() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 96\na=rtpmap:96 opus/48000/2\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        let rtpmaps = audio.rtpmaps();
+        assert_eq!(rtpmaps[0].channels(), 2);
+    }
+
+    // Fmtp tests
+    #[test]
+    fn test_fmtp_debug() {
+        let fmtp = Fmtp {
+            payload_type: 101,
+            params: "0-16".to_string(),
+        };
+        let debug = format!("{:?}", fmtp);
+        assert!(debug.contains("Fmtp"));
+    }
+
+    #[test]
+    fn test_fmtp_clone() {
+        let fmtp = Fmtp {
+            payload_type: 101,
+            params: "0-16".to_string(),
+        };
+        let cloned = fmtp.clone();
+        assert_eq!(cloned.params, fmtp.params);
+    }
+
+    #[test]
+    fn test_fmtp_eq() {
+        let f1 = Fmtp {
+            payload_type: 101,
+            params: "0-16".to_string(),
+        };
+        let f2 = Fmtp {
+            payload_type: 101,
+            params: "0-16".to_string(),
+        };
+        assert_eq!(f1, f2);
+    }
+
+    #[test]
+    fn test_fmtps() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 101\na=rtpmap:101 telephone-event/8000\na=fmtp:101 0-16\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        let fmtps = audio.fmtps();
+        assert_eq!(fmtps.len(), 1);
+        assert_eq!(fmtps[0].payload_type, 101);
+        assert_eq!(fmtps[0].params, "0-16");
+    }
+
+    // Multiple media streams
+    #[test]
+    fn test_multiple_media_streams() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\nt=0 0\nm=audio 5000 RTP/AVP 0\nm=video 5002 RTP/AVP 96\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        assert_eq!(parsed.media.len(), 2);
+        assert_eq!(parsed.media[0].media_type, MediaType::Audio);
+        assert_eq!(parsed.media[1].media_type, MediaType::Video);
+    }
+
+    // Session-level attributes
+    #[test]
+    fn test_session_level_attributes() {
+        let sdp = "v=0\no=- 0 0 IN IP4 0.0.0.0\ns=-\na=group:BUNDLE audio video\nt=0 0\nm=audio 5000 RTP/AVP 0\n";
+        let parsed = SessionDescription::parse(sdp).unwrap();
+        assert!(!parsed.attributes.is_empty());
+        assert_eq!(parsed.attributes[0].name, "group");
     }
 }

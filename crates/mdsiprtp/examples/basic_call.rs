@@ -51,7 +51,7 @@ use std::env;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 use tokio::net::UdpSocket;
-use tokio::time::{timeout, sleep};
+use tokio::time::{sleep, timeout};
 
 /// Configuration from environment
 struct Config {
@@ -109,7 +109,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let reg_config = RegistrationConfig {
         registrar: format!("sip:{}", config.server),
         aor: format!("sip:{}@{}", config.username, config.server),
-        contact: format!("sip:{}@{}:{}", config.username, config.local_ip, config.local_port),
+        contact: format!(
+            "sip:{}@{}:{}",
+            config.username, config.local_ip, config.local_port
+        ),
         username: config.username.clone(),
         password: config.password.clone(),
         expires: 3600,
@@ -153,9 +156,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
         let n = timeout(Duration::from_secs(5), socket.recv(&mut buf)).await??;
         let msg = SipMessage::parse(&buf[..n])?;
-        let response = msg
-            .as_response()
-            .ok_or("Expected response, got request")?;
+        let response = msg.as_response().ok_or("Expected response, got request")?;
 
         println!("Received {} {}", response.status_code(), response.reason());
 
@@ -280,7 +281,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     let bye = SipRequest::builder()
                         .method(Method::Bye)
                         .uri(&dest_uri)
-                        .via(&config.local_ip, config.local_port, "UDP", &generate_branch())
+                        .via(
+                            &config.local_ip,
+                            config.local_port,
+                            "UDP",
+                            &generate_branch(),
+                        )
                         .from(&from_uri, &from_tag)
                         .to(&dest_uri)
                         .to_tag(response.to_tag().as_deref().unwrap_or(""))
@@ -296,7 +302,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     {
                         if let Ok(msg) = SipMessage::parse(&buf[..n]) {
                             if let Some(resp) = msg.as_response() {
-                                println!("Received {} {} for BYE", resp.status_code(), resp.reason());
+                                println!(
+                                    "Received {} {} for BYE",
+                                    resp.status_code(),
+                                    resp.reason()
+                                );
                             }
                         }
                     }
@@ -327,7 +337,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if let Ok(Ok(n)) = timeout(Duration::from_secs(5), socket.recv(&mut buf)).await {
         if let Ok(msg) = SipMessage::parse(&buf[..n]) {
             if let Some(response) = msg.as_response() {
-                println!("Unregister response: {} {}", response.status_code(), response.reason());
+                println!(
+                    "Unregister response: {} {}",
+                    response.status_code(),
+                    response.reason()
+                );
             }
         }
     }

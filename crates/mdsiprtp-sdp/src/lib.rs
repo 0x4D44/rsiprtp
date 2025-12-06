@@ -26,14 +26,14 @@
 //! let parsed = SessionDescription::parse(&sdp_str).unwrap();
 //! ```
 
-pub mod parser;
 pub mod builder;
 pub mod negotiation;
+pub mod parser;
 
 // Re-export main types
-pub use parser::{
-    Attribute, Connection, Direction, Fmtp, MediaDescription, MediaType, Origin,
-    RtpMap, SdpParseError, SessionDescription, Timing,
-};
 pub use builder::{MediaBuilder, SdpBuilder};
-pub use negotiation::{Codec, NegotiatedMedia, create_answer, process_answer};
+pub use negotiation::{create_answer, process_answer, Codec, NegotiatedMedia};
+pub use parser::{
+    Attribute, Connection, Direction, Fmtp, MediaDescription, MediaType, Origin, RtpMap,
+    SdpParseError, SessionDescription, Timing,
+};

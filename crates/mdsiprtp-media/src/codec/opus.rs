@@ -162,7 +162,8 @@ impl OpusCodec {
     /// Input: 16-bit signed linear PCM samples
     /// Output: Opus encoded bytes
     pub fn encode(&mut self, pcm: &[i16]) -> Result<Vec<u8>, String> {
-        let len = self.encoder
+        let len = self
+            .encoder
             .encode(pcm, &mut self.encode_buffer)
             .map_err(|e| format!("Opus encode error: {}", e))?;
 
@@ -177,7 +178,8 @@ impl OpusCodec {
         let frame_size = self.samples_per_frame() * self.channels() as usize;
         let mut decoded = vec![0i16; frame_size];
 
-        let samples = self.decoder
+        let samples = self
+            .decoder
             .decode(Some(data), &mut decoded, false)
             .map_err(|e| format!("Opus decode error: {}", e))?;
 
@@ -192,7 +194,8 @@ impl OpusCodec {
         let frame_size = self.samples_per_frame() * self.channels() as usize;
         let mut decoded = vec![0i16; frame_size];
 
-        let samples = self.decoder
+        let samples = self
+            .decoder
             .decode(None, &mut decoded, false)
             .map_err(|e| format!("Opus PLC error: {}", e))?;
 

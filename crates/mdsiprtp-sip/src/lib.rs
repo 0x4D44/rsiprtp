@@ -10,22 +10,17 @@ pub mod uri;
 
 // Re-export main types
 pub use message::{
-    SipMessage, SipRequest, SipResponse,
-    SipRequestBuilder, SipResponseBuilder,
-    Method,
-    generate_branch, generate_tag, generate_call_id,
+    generate_branch, generate_call_id, generate_tag, Method, SipMessage, SipRequest,
+    SipRequestBuilder, SipResponse, SipResponseBuilder,
 };
 
 // Re-export auth types
 pub use auth::{
-    Algorithm, DigestAuthError, DigestChallenge, DigestCredentials,
-    DigestResponse, Qop,
+    Algorithm, DigestAuthError, DigestChallenge, DigestCredentials, DigestResponse, Qop,
 };
 
 // Re-export header types
-pub use headers::{
-    Via, Contact, RecordRoute, Route, RouteSet,
-};
+pub use headers::{Contact, RecordRoute, Route, RouteSet, Via};
 
 // Re-export URI types
 pub use uri::{SipUri, SipUriBuilder};

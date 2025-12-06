@@ -122,7 +122,10 @@ impl StunClient {
         let transaction_id = generate_transaction_id();
         let request = build_binding_request(&transaction_id);
 
-        debug!("Sending STUN Binding Request to {} ({})", server.addr, server.name);
+        debug!(
+            "Sending STUN Binding Request to {} ({})",
+            server.addr, server.name
+        );
 
         for attempt in 0..self.retries {
             if attempt > 0 {
@@ -307,10 +310,7 @@ fn parse_mapped_address(data: &[u8], xor: bool) -> Option<SocketAddr> {
                     *b ^= cookie_bytes[i];
                 }
             }
-            Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(ip_bytes)),
-                port,
-            ))
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip_bytes)), port))
         }
         AF_IPV6 if data.len() >= 20 => {
             let mut ip_bytes = [0u8; 16];
@@ -324,10 +324,7 @@ fn parse_mapped_address(data: &[u8], xor: bool) -> Option<SocketAddr> {
                 // Note: Would need transaction ID for bytes 4-15
                 // For simplicity, we don't support XOR for IPv6 here
             }
-            Some(SocketAddr::new(
-                IpAddr::V6(Ipv6Addr::from(ip_bytes)),
-                port,
-            ))
+            Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(ip_bytes)), port))
         }
         _ => None,
     }
@@ -374,6 +371,82 @@ fn parse_error_response(attrs: &[u8]) -> StunError {
 mod tests {
     use super::*;
 
+    // StunError tests
+    #[test]
+    fn test_stun_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let err: StunError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn test_stun_error_timeout() {
+        let err = StunError::Timeout;
+        assert_eq!(err.to_string(), "Request timeout");
+    }
+
+    #[test]
+    fn test_stun_error_invalid_response() {
+        let err = StunError::InvalidResponse("bad data".to_string());
+        assert!(err.to_string().contains("Invalid response"));
+        assert!(err.to_string().contains("bad data"));
+    }
+
+    #[test]
+    fn test_stun_error_error_response() {
+        let err = StunError::ErrorResponse {
+            code: 401,
+            reason: "Unauthorized".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("401"));
+        assert!(msg.contains("Unauthorized"));
+    }
+
+    #[test]
+    fn test_stun_error_no_mapped_address() {
+        let err = StunError::NoMappedAddress;
+        assert!(err.to_string().contains("No mapped address"));
+    }
+
+    #[test]
+    fn test_stun_error_debug() {
+        let err = StunError::Timeout;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Timeout"));
+    }
+
+    // StunServer tests
+    #[test]
+    fn test_stun_server_new() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 3478);
+        let server = StunServer::new(addr, "custom.stun.server");
+        assert_eq!(server.addr, addr);
+        assert_eq!(server.name, "custom.stun.server");
+    }
+
+    #[test]
+    fn test_stun_server_debug() {
+        let debug = format!("{:?}", StunServer::GOOGLE);
+        assert!(debug.contains("StunServer"));
+        assert!(debug.contains("google"));
+    }
+
+    #[test]
+    fn test_stun_server_clone() {
+        let server = StunServer::GOOGLE;
+        let cloned = server.clone();
+        assert_eq!(cloned.addr, server.addr);
+        assert_eq!(cloned.name, server.name);
+    }
+
+    #[test]
+    fn test_stun_server_constants() {
+        assert_eq!(StunServer::GOOGLE.addr.port(), 19302);
+        assert_eq!(StunServer::TWILIO.addr.port(), 3478);
+    }
+
+    // Transaction ID tests
     #[test]
     fn test_generate_transaction_id() {
         let id1 = generate_transaction_id();
@@ -383,6 +456,17 @@ mod tests {
         assert_ne!(id1, id2); // Extremely unlikely to be equal
     }
 
+    #[test]
+    fn test_generate_transaction_id_uniqueness() {
+        let ids: Vec<_> = (0..10).map(|_| generate_transaction_id()).collect();
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                assert_ne!(ids[i], ids[j]);
+            }
+        }
+    }
+
+    // Build binding request tests
     #[test]
     fn test_build_binding_request() {
         let txn_id = [1u8; 12];
@@ -408,6 +492,7 @@ mod tests {
         assert_eq!(&request[8..20], &[1u8; 12]);
     }
 
+    // Parse mapped address tests
     #[test]
     fn test_parse_mapped_address_ipv4() {
         // MAPPED-ADDRESS: 192.168.1.1:1234
@@ -419,7 +504,10 @@ mod tests {
         ];
 
         let addr = parse_mapped_address(&data, false).unwrap();
-        assert_eq!(addr, SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 1234));
+        assert_eq!(
+            addr,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 1234)
+        );
     }
 
     #[test]
@@ -427,24 +515,65 @@ mod tests {
         // XOR-MAPPED-ADDRESS for 192.168.1.1:1234
         // XOR with magic cookie 0x2112A442
         let xor_port = 1234u16 ^ (MAGIC_COOKIE >> 16) as u16; // 1234 ^ 0x2112 = 0x25D0
-        let xor_ip = [
-            192 ^ 0x21,
-            168 ^ 0x12,
-            1 ^ 0xA4,
-            1 ^ 0x42,
-        ];
+        let xor_ip = [192 ^ 0x21, 168 ^ 0x12, 1 ^ 0xA4, 1 ^ 0x42];
 
         let data = [
             0x00, // Reserved
             0x01, // Family: IPv4
-            (xor_port >> 8) as u8, (xor_port & 0xFF) as u8,
-            xor_ip[0], xor_ip[1], xor_ip[2], xor_ip[3],
+            (xor_port >> 8) as u8,
+            (xor_port & 0xFF) as u8,
+            xor_ip[0],
+            xor_ip[1],
+            xor_ip[2],
+            xor_ip[3],
         ];
 
         let addr = parse_mapped_address(&data, true).unwrap();
-        assert_eq!(addr, SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 1234));
+        assert_eq!(
+            addr,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), 1234)
+        );
     }
 
+    #[test]
+    fn test_parse_mapped_address_ipv6() {
+        // MAPPED-ADDRESS: [2001:db8::1]:8080
+        let mut data = vec![0x00, AF_IPV6];
+        data.extend_from_slice(&8080u16.to_be_bytes());
+        // IPv6 address bytes
+        let ipv6 = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+        data.extend_from_slice(&ipv6.octets());
+
+        let addr = parse_mapped_address(&data, false).unwrap();
+        assert_eq!(addr.port(), 8080);
+        assert!(addr.is_ipv6());
+    }
+
+    #[test]
+    fn test_parse_mapped_address_too_short() {
+        let data = [0x00, 0x01, 0x00]; // Only 3 bytes
+        assert!(parse_mapped_address(&data, false).is_none());
+    }
+
+    #[test]
+    fn test_parse_mapped_address_unknown_family() {
+        let data = [0x00, 0x03, 0x00, 0x50, 1, 2, 3, 4]; // Unknown family 0x03
+        assert!(parse_mapped_address(&data, false).is_none());
+    }
+
+    #[test]
+    fn test_parse_mapped_address_ipv4_too_short() {
+        let data = [0x00, AF_IPV4, 0x00, 0x50, 1, 2, 3]; // Only 7 bytes, need 8 for IPv4
+        assert!(parse_mapped_address(&data, false).is_none());
+    }
+
+    #[test]
+    fn test_parse_mapped_address_ipv6_too_short() {
+        let data = [0x00, AF_IPV6, 0x00, 0x50, 1, 2, 3, 4, 5, 6, 7, 8]; // Only 12 bytes, need 20 for IPv6
+        assert!(parse_mapped_address(&data, false).is_none());
+    }
+
+    // Parse binding response tests
     #[test]
     fn test_parse_binding_response() {
         let txn_id = [0x11u8; 12];
@@ -464,27 +593,158 @@ mod tests {
 
         // XOR'd address for 1.2.3.4:5678
         let xor_port = 5678u16 ^ (MAGIC_COOKIE >> 16) as u16;
-        let xor_ip = [
-            1 ^ 0x21,
-            2 ^ 0x12,
-            3 ^ 0xA4,
-            4 ^ 0x42,
-        ];
+        let xor_ip = [1 ^ 0x21, 2 ^ 0x12, 3 ^ 0xA4, 4 ^ 0x42];
         response.put_u8(0x00); // Reserved
         response.put_u8(0x01); // Family
         response.put_u16(xor_port);
         response.put_slice(&xor_ip);
 
         let addr = parse_binding_response(&response, &txn_id).unwrap();
-        assert_eq!(addr, SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 5678));
+        assert_eq!(
+            addr,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 5678)
+        );
     }
 
     #[test]
-    fn test_stun_server_constants() {
-        assert_eq!(StunServer::GOOGLE.addr.port(), 19302);
-        assert_eq!(StunServer::TWILIO.addr.port(), 3478);
+    fn test_parse_binding_response_too_short() {
+        let data = [0u8; 10]; // Less than 20 bytes
+        let txn_id = [0u8; 12];
+        let result = parse_binding_response(&data, &txn_id);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
     }
 
+    #[test]
+    fn test_parse_binding_response_wrong_type() {
+        let mut response = BytesMut::new();
+        response.put_u16(0x0002); // Wrong message type
+        response.put_u16(0);
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&[0u8; 12]);
+
+        let result = parse_binding_response(&response, &[0u8; 12]);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_bad_cookie() {
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(0);
+        response.put_u32(0xDEADBEEF); // Wrong cookie
+        response.put_slice(&[0u8; 12]);
+
+        let result = parse_binding_response(&response, &[0u8; 12]);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_txn_id_mismatch() {
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(0);
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&[0x11u8; 12]); // Different txn ID
+
+        let result = parse_binding_response(&response, &[0x22u8; 12]);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_no_mapped_address() {
+        let txn_id = [0x33u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(8); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Add SOFTWARE attribute instead of mapped address
+        response.put_u16(ATTR_SOFTWARE);
+        response.put_u16(4);
+        response.put_slice(b"test");
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::NoMappedAddress)));
+    }
+
+    #[test]
+    fn test_parse_binding_response_with_mapped_address() {
+        let txn_id = [0x44u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(12); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Add MAPPED-ADDRESS (not XOR)
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00); // Reserved
+        response.put_u8(AF_IPV4);
+        response.put_u16(5060);
+        response.put_slice(&[10, 0, 0, 1]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(
+            addr,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5060)
+        );
+    }
+
+    // Parse error response tests
+    #[test]
+    fn test_parse_error_response() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(8); // 4 header + 4 reason
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(4); // Class
+        attrs.put_u8(1); // Number -> 401
+        attrs.put_slice(b"Auth"); // Reason
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 401);
+                assert_eq!(reason, "Auth");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_no_reason() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(4); // Just header, no reason
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(5); // Class
+        attrs.put_u8(0); // Number -> 500
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 500);
+                assert!(reason.is_empty());
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_no_error_attr() {
+        let attrs = [0u8; 0]; // Empty
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, .. } => {
+                assert_eq!(code, 0);
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    // StunClient tests
     #[tokio::test]
     async fn test_stun_client_creation() {
         let client = StunClient::new().await;
@@ -492,5 +752,28 @@ mod tests {
 
         let client = client.unwrap();
         assert!(client.local_addr().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stun_client_bind() {
+        let client = StunClient::bind("127.0.0.1:0").await;
+        assert!(client.is_ok());
+        let client = client.unwrap();
+        let addr = client.local_addr().unwrap();
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[tokio::test]
+    async fn test_stun_client_set_timeout() {
+        let mut client = StunClient::new().await.unwrap();
+        client.set_timeout(Duration::from_secs(5));
+        assert_eq!(client.timeout, Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn test_stun_client_set_retries() {
+        let mut client = StunClient::new().await.unwrap();
+        client.set_retries(5);
+        assert_eq!(client.retries, 5);
     }
 }

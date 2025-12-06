@@ -1,7 +1,7 @@
 //! SIP message types and wrappers.
 
 use bytes::Bytes;
-use mdsiprtp_core::{SipError, Result};
+use mdsiprtp_core::{Result, SipError};
 use rsip::prelude::*;
 use std::convert::TryFrom;
 use std::fmt;
@@ -16,12 +16,13 @@ pub enum SipMessage {
 impl SipMessage {
     /// Parse a SIP message from bytes.
     pub fn parse(data: &[u8]) -> Result<Self> {
-        let msg = rsip::SipMessage::try_from(data)
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let msg = rsip::SipMessage::try_from(data).map_err(|e| SipError::Parse(e.to_string()))?;
 
         match msg {
             rsip::SipMessage::Request(req) => Ok(SipMessage::Request(SipRequest { inner: req })),
-            rsip::SipMessage::Response(resp) => Ok(SipMessage::Response(SipResponse { inner: resp })),
+            rsip::SipMessage::Response(resp) => {
+                Ok(SipMessage::Response(SipResponse { inner: resp }))
+            }
         }
     }
 
@@ -87,13 +88,15 @@ impl SipRequest {
 
     /// Get the From tag.
     pub fn from_tag(&self) -> Result<String> {
-        let from = self.inner
+        let from = self
+            .inner
             .from_header()
             .map_err(|_| SipError::MissingHeader("From".to_string()))?;
         // Convert to typed form to access tag
-        let typed_from: rsip::typed::From = from.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
-        typed_from.tag()
+        let typed_from: rsip::typed::From =
+            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+        typed_from
+            .tag()
             .map(|t| t.to_string())
             .ok_or_else(|| SipError::InvalidHeader("From header missing tag".to_string()).into())
     }
@@ -109,53 +112,58 @@ impl SipRequest {
 
     /// Get the Via branch parameter.
     pub fn via_branch(&self) -> Result<String> {
-        let via = self.inner
+        let via = self
+            .inner
             .via_header()
             .map_err(|_| SipError::MissingHeader("Via".to_string()))?;
-        let typed_via: rsip::typed::Via = via.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
-        typed_via.branch()
+        let typed_via: rsip::typed::Via =
+            via.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+        typed_via
+            .branch()
             .map(|b| b.to_string())
             .ok_or_else(|| SipError::InvalidHeader("Via header missing branch".to_string()).into())
     }
 
     /// Get the CSeq number.
     pub fn cseq(&self) -> Result<u32> {
-        let cseq = self.inner
+        let cseq = self
+            .inner
             .cseq_header()
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq = cseq.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_cseq: rsip::typed::CSeq =
+            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_cseq.seq)
     }
 
     /// Get the CSeq method.
     pub fn cseq_method(&self) -> Result<Method> {
-        let cseq = self.inner
+        let cseq = self
+            .inner
             .cseq_header()
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq = cseq.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_cseq: rsip::typed::CSeq =
+            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(Method::from(&typed_cseq.method))
     }
 
     /// Get the From URI.
     pub fn from_uri(&self) -> Result<rsip::Uri> {
-        let from = self.inner
+        let from = self
+            .inner
             .from_header()
             .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        let typed_from: rsip::typed::From = from.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_from: rsip::typed::From =
+            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_from.uri)
     }
 
     /// Get the To URI.
     pub fn to_uri(&self) -> Result<rsip::Uri> {
-        let to = self.inner
+        let to = self
+            .inner
             .to_header()
             .map_err(|_| SipError::MissingHeader("To".to_string()))?;
-        let typed_to: rsip::typed::To = to.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_to: rsip::typed::To = to.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_to.uri)
     }
 
@@ -276,12 +284,14 @@ impl SipResponse {
 
     /// Get the From tag.
     pub fn from_tag(&self) -> Result<String> {
-        let from = self.inner
+        let from = self
+            .inner
             .from_header()
             .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        let typed_from: rsip::typed::From = from.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
-        typed_from.tag()
+        let typed_from: rsip::typed::From =
+            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+        typed_from
+            .tag()
             .map(|t| t.to_string())
             .ok_or_else(|| SipError::InvalidHeader("From header missing tag".to_string()).into())
     }
@@ -297,33 +307,37 @@ impl SipResponse {
 
     /// Get the Via branch parameter.
     pub fn via_branch(&self) -> Result<String> {
-        let via = self.inner
+        let via = self
+            .inner
             .via_header()
             .map_err(|_| SipError::MissingHeader("Via".to_string()))?;
-        let typed_via: rsip::typed::Via = via.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
-        typed_via.branch()
+        let typed_via: rsip::typed::Via =
+            via.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+        typed_via
+            .branch()
             .map(|b| b.to_string())
             .ok_or_else(|| SipError::InvalidHeader("Via header missing branch".to_string()).into())
     }
 
     /// Get the CSeq number.
     pub fn cseq(&self) -> Result<u32> {
-        let cseq = self.inner
+        let cseq = self
+            .inner
             .cseq_header()
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq = cseq.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_cseq: rsip::typed::CSeq =
+            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_cseq.seq)
     }
 
     /// Get the CSeq method.
     pub fn cseq_method(&self) -> Result<Method> {
-        let cseq = self.inner
+        let cseq = self
+            .inner
             .cseq_header()
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq = cseq.typed()
-            .map_err(|e| SipError::Parse(e.to_string()))?;
+        let typed_cseq: rsip::typed::CSeq =
+            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(Method::from(&typed_cseq.method))
     }
 
@@ -687,15 +701,33 @@ impl SipRequestBuilder {
             return Err(SipError::InvalidHeader(err).into());
         }
 
-        let method = self.method.ok_or_else(|| SipError::InvalidHeader("Missing method".to_string()))?;
-        let uri = self.uri.ok_or_else(|| SipError::InvalidHeader("Missing request URI".to_string()))?;
-        let from_uri = self.from_uri.ok_or_else(|| SipError::InvalidHeader("Missing From URI".to_string()))?;
-        let from_tag = self.from_tag.ok_or_else(|| SipError::InvalidHeader("Missing From tag".to_string()))?;
-        let to_uri = self.to_uri.ok_or_else(|| SipError::InvalidHeader("Missing To URI".to_string()))?;
-        let call_id = self.call_id.ok_or_else(|| SipError::InvalidHeader("Missing Call-ID".to_string()))?;
-        let cseq = self.cseq.ok_or_else(|| SipError::InvalidHeader("Missing CSeq".to_string()))?;
-        let via_host = self.via_host.ok_or_else(|| SipError::InvalidHeader("Missing Via host".to_string()))?;
-        let via_branch = self.via_branch.ok_or_else(|| SipError::InvalidHeader("Missing Via branch".to_string()))?;
+        let method = self
+            .method
+            .ok_or_else(|| SipError::InvalidHeader("Missing method".to_string()))?;
+        let uri = self
+            .uri
+            .ok_or_else(|| SipError::InvalidHeader("Missing request URI".to_string()))?;
+        let from_uri = self
+            .from_uri
+            .ok_or_else(|| SipError::InvalidHeader("Missing From URI".to_string()))?;
+        let from_tag = self
+            .from_tag
+            .ok_or_else(|| SipError::InvalidHeader("Missing From tag".to_string()))?;
+        let to_uri = self
+            .to_uri
+            .ok_or_else(|| SipError::InvalidHeader("Missing To URI".to_string()))?;
+        let call_id = self
+            .call_id
+            .ok_or_else(|| SipError::InvalidHeader("Missing Call-ID".to_string()))?;
+        let cseq = self
+            .cseq
+            .ok_or_else(|| SipError::InvalidHeader("Missing CSeq".to_string()))?;
+        let via_host = self
+            .via_host
+            .ok_or_else(|| SipError::InvalidHeader("Missing Via host".to_string()))?;
+        let via_branch = self
+            .via_branch
+            .ok_or_else(|| SipError::InvalidHeader("Missing Via branch".to_string()))?;
 
         let mut headers = rsip::Headers::default();
 
@@ -733,37 +765,51 @@ impl SipRequestBuilder {
 
         // Max-Forwards
         let mf = self.max_forwards.unwrap_or(70);
-        headers.push(rsip::Header::MaxForwards(rsip::headers::MaxForwards::new(mf.to_string())));
+        headers.push(rsip::Header::MaxForwards(rsip::headers::MaxForwards::new(
+            mf.to_string(),
+        )));
 
         // Contact header
         if let Some(contact) = self.contact_uri {
             let contact_str = format!("<{}>", contact);
-            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(contact_str)));
+            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(
+                contact_str,
+            )));
         }
 
         // Authorization header
         if let Some(auth) = self.authorization {
-            headers.push(rsip::Header::Authorization(rsip::headers::Authorization::new(auth)));
+            headers.push(rsip::Header::Authorization(
+                rsip::headers::Authorization::new(auth),
+            ));
         }
 
         // Proxy-Authorization header
         if let Some(auth) = self.proxy_authorization {
-            headers.push(rsip::Header::ProxyAuthorization(rsip::headers::ProxyAuthorization::new(auth)));
+            headers.push(rsip::Header::ProxyAuthorization(
+                rsip::headers::ProxyAuthorization::new(auth),
+            ));
         }
 
         // Expires header
         if let Some(expires) = self.expires {
-            headers.push(rsip::Header::Expires(rsip::headers::Expires::new(expires.to_string())));
+            headers.push(rsip::Header::Expires(rsip::headers::Expires::new(
+                expires.to_string(),
+            )));
         }
 
         // Content-Type and Content-Length
         let body = self.body.unwrap_or_default();
         if !body.is_empty() {
             if let Some(ct) = self.content_type {
-                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(ct)));
+                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(
+                    ct,
+                )));
             }
         }
-        headers.push(rsip::Header::ContentLength(rsip::headers::ContentLength::new(body.len().to_string())));
+        headers.push(rsip::Header::ContentLength(
+            rsip::headers::ContentLength::new(body.len().to_string()),
+        ));
 
         let req = rsip::Request {
             method,
@@ -876,7 +922,9 @@ impl SipResponseBuilder {
 
     /// Build the response.
     pub fn build(self) -> Result<SipResponse> {
-        let status_code = self.status_code.ok_or_else(|| SipError::InvalidHeader("Missing status code".to_string()))?;
+        let status_code = self
+            .status_code
+            .ok_or_else(|| SipError::InvalidHeader("Missing status code".to_string()))?;
 
         let mut headers = rsip::Headers::default();
 
@@ -908,17 +956,23 @@ impl SipResponseBuilder {
         // Contact header
         if let Some(contact) = self.contact_uri {
             let contact_str = format!("<{}>", contact);
-            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(contact_str)));
+            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(
+                contact_str,
+            )));
         }
 
         // Content-Type and Content-Length
         let body = self.body.unwrap_or_default();
         if !body.is_empty() {
             if let Some(ct) = self.content_type {
-                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(ct)));
+                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(
+                    ct,
+                )));
             }
         }
-        headers.push(rsip::Header::ContentLength(rsip::headers::ContentLength::new(body.len().to_string())));
+        headers.push(rsip::Header::ContentLength(
+            rsip::headers::ContentLength::new(body.len().to_string()),
+        ));
 
         let status = rsip::StatusCode::from(status_code);
 
@@ -984,6 +1038,7 @@ Content-Type: application/sdp\r\n\
 Content-Length: 0\r\n\
 \r\n";
 
+    // SipMessage tests
     #[test]
     fn test_parse_invite() {
         let msg = SipMessage::parse(INVITE_MSG).unwrap();
@@ -1016,6 +1071,342 @@ Content-Length: 0\r\n\
     }
 
     #[test]
+    fn test_sip_message_parse_invalid() {
+        let result = SipMessage::parse(b"invalid data");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sip_message_is_request_on_response() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        assert!(!msg.is_request());
+    }
+
+    #[test]
+    fn test_sip_message_is_response_on_request() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        assert!(!msg.is_response());
+    }
+
+    #[test]
+    fn test_sip_message_as_request_on_response() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        assert!(msg.as_request().is_none());
+    }
+
+    #[test]
+    fn test_sip_message_as_response_on_request() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        assert!(msg.as_response().is_none());
+    }
+
+    #[test]
+    fn test_sip_message_to_bytes_request() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let bytes = msg.to_bytes();
+        assert!(!bytes.is_empty());
+        assert!(bytes.starts_with(b"INVITE"));
+    }
+
+    #[test]
+    fn test_sip_message_to_bytes_response() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let bytes = msg.to_bytes();
+        assert!(!bytes.is_empty());
+        assert!(bytes.starts_with(b"SIP/2.0"));
+    }
+
+    #[test]
+    fn test_sip_message_clone() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let cloned = msg.clone();
+        assert!(cloned.is_request());
+    }
+
+    // SipRequest tests
+    #[test]
+    fn test_request_uri() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let uri = req.uri();
+        assert!(uri.to_string().contains("bob@biloxi.com"));
+    }
+
+    #[test]
+    fn test_request_from_uri() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let uri = req.from_uri().unwrap();
+        assert!(uri.to_string().contains("alice@atlanta.com"));
+    }
+
+    #[test]
+    fn test_request_to_uri() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let uri = req.to_uri().unwrap();
+        assert!(uri.to_string().contains("bob@biloxi.com"));
+    }
+
+    #[test]
+    fn test_request_contact_uri() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let contact = req.contact_uri();
+        assert!(contact.is_some());
+    }
+
+    #[test]
+    fn test_request_body() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.body().is_empty());
+    }
+
+    #[test]
+    fn test_request_content_type() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let ct = req.content_type();
+        assert!(ct.is_some());
+        assert!(ct.unwrap().contains("application/sdp"));
+    }
+
+    #[test]
+    fn test_request_record_routes() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let routes = req.record_routes();
+        // INVITE_MSG doesn't have Record-Route headers
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn test_request_via_headers_raw() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let vias = req.via_headers_raw();
+        assert!(!vias.is_empty());
+        assert!(vias[0].contains("pc33.atlanta.com"));
+    }
+
+    #[test]
+    fn test_request_inner() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let inner = req.inner();
+        assert_eq!(inner.method, rsip::Method::Invite);
+    }
+
+    // SipResponse tests
+    #[test]
+    fn test_response_reason() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let reason = resp.reason();
+        assert!(reason.contains("OK"));
+    }
+
+    #[test]
+    fn test_response_is_provisional() {
+        let provisional = b"SIP/2.0 180 Ringing\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(provisional).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.is_provisional());
+        assert!(!resp.is_success());
+        assert!(!resp.is_failure());
+    }
+
+    #[test]
+    fn test_response_is_failure() {
+        let failure = b"SIP/2.0 404 Not Found\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(failure).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.is_failure());
+        assert!(!resp.is_success());
+        assert!(!resp.is_provisional());
+    }
+
+    #[test]
+    fn test_response_cseq() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert_eq!(resp.cseq().unwrap(), 314159);
+    }
+
+    #[test]
+    fn test_response_cseq_method() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert_eq!(resp.cseq_method().unwrap(), Method::Invite);
+    }
+
+    #[test]
+    fn test_response_contact_uri() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let contact = resp.contact_uri();
+        assert!(contact.is_some());
+    }
+
+    #[test]
+    fn test_response_body() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.body().is_empty());
+    }
+
+    #[test]
+    fn test_response_content_type() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let ct = resp.content_type();
+        assert!(ct.is_some());
+    }
+
+    #[test]
+    fn test_response_record_routes() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let routes = resp.record_routes();
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn test_response_via_headers_raw() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let vias = resp.via_headers_raw();
+        assert!(!vias.is_empty());
+    }
+
+    #[test]
+    fn test_response_www_authenticate_none() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.www_authenticate().is_none());
+    }
+
+    #[test]
+    fn test_response_proxy_authenticate_none() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.proxy_authenticate().is_none());
+    }
+
+    #[test]
+    fn test_response_inner() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let inner = resp.inner();
+        assert_eq!(inner.status_code.code(), 200);
+    }
+
+    // Method tests
+    #[test]
+    fn test_method_display() {
+        assert_eq!(format!("{}", Method::Invite), "INVITE");
+        assert_eq!(format!("{}", Method::Ack), "ACK");
+        assert_eq!(format!("{}", Method::Register), "REGISTER");
+        assert_eq!(format!("{}", Method::Bye), "BYE");
+        assert_eq!(format!("{}", Method::Cancel), "CANCEL");
+        assert_eq!(format!("{}", Method::Options), "OPTIONS");
+        assert_eq!(format!("{}", Method::Prack), "PRACK");
+        assert_eq!(format!("{}", Method::Subscribe), "SUBSCRIBE");
+        assert_eq!(format!("{}", Method::Notify), "NOTIFY");
+        assert_eq!(format!("{}", Method::Publish), "PUBLISH");
+        assert_eq!(format!("{}", Method::Info), "INFO");
+        assert_eq!(format!("{}", Method::Refer), "REFER");
+        assert_eq!(format!("{}", Method::Message), "MESSAGE");
+        assert_eq!(format!("{}", Method::Update), "UPDATE");
+        assert_eq!(format!("{}", Method::Other), "OTHER");
+    }
+
+    #[test]
+    fn test_method_creates_dialog() {
+        assert!(Method::Invite.creates_dialog());
+        assert!(Method::Subscribe.creates_dialog());
+        assert!(!Method::Register.creates_dialog());
+        assert!(!Method::Options.creates_dialog());
+    }
+
+    #[test]
+    fn test_method_is_invite() {
+        assert!(Method::Invite.is_invite());
+        assert!(!Method::Register.is_invite());
+        assert!(!Method::Bye.is_invite());
+    }
+
+    #[test]
+    fn test_method_to_rsip() {
+        assert_eq!(Method::Invite.to_rsip(), rsip::Method::Invite);
+        assert_eq!(Method::Ack.to_rsip(), rsip::Method::Ack);
+        assert_eq!(Method::Bye.to_rsip(), rsip::Method::Bye);
+        assert_eq!(Method::Cancel.to_rsip(), rsip::Method::Cancel);
+        assert_eq!(Method::Register.to_rsip(), rsip::Method::Register);
+        assert_eq!(Method::Options.to_rsip(), rsip::Method::Options);
+        assert_eq!(Method::Prack.to_rsip(), rsip::Method::PRack);
+        assert_eq!(Method::Subscribe.to_rsip(), rsip::Method::Subscribe);
+        assert_eq!(Method::Notify.to_rsip(), rsip::Method::Notify);
+        assert_eq!(Method::Publish.to_rsip(), rsip::Method::Publish);
+        assert_eq!(Method::Info.to_rsip(), rsip::Method::Info);
+        assert_eq!(Method::Refer.to_rsip(), rsip::Method::Refer);
+        assert_eq!(Method::Message.to_rsip(), rsip::Method::Message);
+        assert_eq!(Method::Update.to_rsip(), rsip::Method::Update);
+        // Other falls back to Invite
+        assert_eq!(Method::Other.to_rsip(), rsip::Method::Invite);
+    }
+
+    #[test]
+    fn test_method_from_rsip() {
+        assert_eq!(Method::from(&rsip::Method::Invite), Method::Invite);
+        assert_eq!(Method::from(&rsip::Method::Ack), Method::Ack);
+        assert_eq!(Method::from(&rsip::Method::Bye), Method::Bye);
+        assert_eq!(Method::from(&rsip::Method::Cancel), Method::Cancel);
+        assert_eq!(Method::from(&rsip::Method::Register), Method::Register);
+        assert_eq!(Method::from(&rsip::Method::Options), Method::Options);
+        assert_eq!(Method::from(&rsip::Method::PRack), Method::Prack);
+        assert_eq!(Method::from(&rsip::Method::Subscribe), Method::Subscribe);
+        assert_eq!(Method::from(&rsip::Method::Notify), Method::Notify);
+        assert_eq!(Method::from(&rsip::Method::Publish), Method::Publish);
+        assert_eq!(Method::from(&rsip::Method::Info), Method::Info);
+        assert_eq!(Method::from(&rsip::Method::Refer), Method::Refer);
+        assert_eq!(Method::from(&rsip::Method::Message), Method::Message);
+        assert_eq!(Method::from(&rsip::Method::Update), Method::Update);
+    }
+
+    #[test]
+    fn test_method_clone() {
+        let m = Method::Invite;
+        let cloned = m;
+        assert_eq!(m, cloned);
+    }
+
+    #[test]
+    fn test_method_debug() {
+        let m = Method::Invite;
+        let debug = format!("{:?}", m);
+        assert!(debug.contains("Invite"));
+    }
+
+    // Builder tests
+    #[test]
     fn test_build_request() {
         let req = SipRequest::builder()
             .method(Method::Invite)
@@ -1033,6 +1424,191 @@ Content-Length: 0\r\n\
         assert!(req.call_id().unwrap().contains("testcall"));
         assert_eq!(req.from_tag().unwrap(), "fromtag1");
         assert_eq!(req.cseq().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_build_request_with_display_name() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .from_display("Alice")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("\"Alice\""));
+    }
+
+    #[test]
+    fn test_build_request_with_to_tag() {
+        let req = SipRequest::builder()
+            .method(Method::Ack)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .to_tag("totag1")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("tag=totag1"));
+    }
+
+    #[test]
+    fn test_build_request_with_body() {
+        let sdp = b"v=0\r\no=- 123 456 IN IP4 192.168.1.1\r\n".to_vec();
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .body(sdp.clone(), "application/sdp")
+            .build()
+            .unwrap();
+
+        assert_eq!(req.body(), &sdp[..]);
+    }
+
+    #[test]
+    fn test_build_request_with_authorization() {
+        let req = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:alice@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .authorization("Digest username=\"alice\"")
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("Authorization"));
+    }
+
+    #[test]
+    fn test_build_request_with_proxy_authorization() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .proxy_authorization("Digest username=\"alice\"")
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("Proxy-Authorization"));
+    }
+
+    #[test]
+    fn test_build_request_with_expires() {
+        let req = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:alice@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .expires(3600)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("Expires"));
+    }
+
+    #[test]
+    fn test_build_request_with_max_forwards() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .max_forwards(50)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("Max-Forwards: 50"));
+    }
+
+    #[test]
+    fn test_build_request_missing_method() {
+        let result = SipRequest::builder()
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_uri() {
+        // Test when URI is not provided at all
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_from() {
+        // Test when From URI is not provided
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_to() {
+        // Test when To URI is not provided
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1055,6 +1631,46 @@ Content-Length: 0\r\n\
     }
 
     #[test]
+    fn test_build_response_with_body() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+
+        let sdp = b"v=0\r\n".to_vec();
+        let resp = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(req)
+            .body(sdp.clone(), "application/sdp")
+            .build()
+            .unwrap();
+
+        assert_eq!(resp.body(), &sdp[..]);
+    }
+
+    #[test]
+    fn test_build_response_missing_status() {
+        let result = SipResponse::builder().build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_response_to_tag_already_present() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+
+        // First add a to_tag, then try to add another
+        let resp = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(req)
+            .to_tag("first_tag")
+            .to_tag("second_tag") // Should not add another tag
+            .build()
+            .unwrap();
+
+        let to_tag = resp.to_tag();
+        assert!(to_tag.is_some());
+    }
+
+    #[test]
     fn test_roundtrip() {
         let msg = SipMessage::parse(INVITE_MSG).unwrap();
         let bytes = msg.to_bytes();
@@ -1067,18 +1683,19 @@ Content-Length: 0\r\n\
         assert_eq!(req1.call_id().unwrap(), req2.call_id().unwrap());
     }
 
-    #[test]
-    fn test_method_display() {
-        assert_eq!(format!("{}", Method::Invite), "INVITE");
-        assert_eq!(format!("{}", Method::Ack), "ACK");
-        assert_eq!(format!("{}", Method::Register), "REGISTER");
-    }
-
+    // Helper function tests
     #[test]
     fn test_generate_branch() {
         let branch = generate_branch();
         assert!(branch.starts_with("z9hG4bK"));
         assert!(branch.len() > 10);
+    }
+
+    #[test]
+    fn test_generate_branch_unique() {
+        let branch1 = generate_branch();
+        let branch2 = generate_branch();
+        assert_ne!(branch1, branch2);
     }
 
     #[test]
@@ -1088,8 +1705,37 @@ Content-Length: 0\r\n\
     }
 
     #[test]
+    fn test_generate_tag_unique() {
+        let tag1 = generate_tag();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let tag2 = generate_tag();
+        assert_ne!(tag1, tag2);
+    }
+
+    #[test]
     fn test_generate_call_id() {
         let call_id = generate_call_id("example.com");
         assert!(call_id.ends_with("@example.com"));
+    }
+
+    #[test]
+    fn test_generate_call_id_unique() {
+        let call_id1 = generate_call_id("example.com");
+        let call_id2 = generate_call_id("example.com");
+        assert_ne!(call_id1, call_id2);
+    }
+
+    #[test]
+    fn test_request_builder_default() {
+        let builder = SipRequestBuilder::default();
+        let debug = format!("{:?}", builder);
+        assert!(debug.contains("SipRequestBuilder"));
+    }
+
+    #[test]
+    fn test_response_builder_default() {
+        let builder = SipResponseBuilder::default();
+        let debug = format!("{:?}", builder);
+        assert!(debug.contains("SipResponseBuilder"));
     }
 }

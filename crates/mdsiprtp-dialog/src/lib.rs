@@ -14,11 +14,13 @@
 //! - [`InviteDialog`]: State machine for INVITE-initiated dialogs
 //! - [`DialogManager`]: Manages multiple dialogs, routes messages
 
-pub mod state;
 pub mod invite;
 pub mod manager;
+pub mod state;
 
 // Re-export main types
-pub use state::{DialogId, DialogState, DialogInfo, RouteSet};
-pub use invite::{InviteDialog, Role, Action as DialogAction, Event as DialogEvent, TerminationReason};
-pub use manager::{DialogManager, DialogHandle, ManagerAction, ManagerEvent};
+pub use invite::{
+    Action as DialogAction, Event as DialogEvent, InviteDialog, Role, TerminationReason,
+};
+pub use manager::{DialogHandle, DialogManager, ManagerAction, ManagerEvent};
+pub use state::{DialogId, DialogInfo, DialogState, RouteSet};

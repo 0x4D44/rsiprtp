@@ -128,7 +128,8 @@ impl ConferenceMixer {
         }
 
         // Clamp to i16
-        mixed.iter()
+        mixed
+            .iter()
             .map(|&s| s.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
             .collect()
     }
@@ -143,7 +144,8 @@ impl ConferenceMixer {
             }
         }
 
-        mixed.iter()
+        mixed
+            .iter()
             .map(|&s| s.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
             .collect()
     }
@@ -184,7 +186,8 @@ impl SpeakerDetector {
 
     /// Get the loudest speaker.
     pub fn get_active_speaker(&self) -> Option<u32> {
-        self.energy.iter()
+        self.energy
+            .iter()
             .filter(|(_, &e)| e > self.threshold)
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
             .map(|(&ssrc, _)| ssrc)
@@ -195,9 +198,7 @@ fn calculate_rms(samples: &[i16]) -> f32 {
     if samples.is_empty() {
         return 0.0;
     }
-    let sum: f64 = samples.iter()
-        .map(|&s| (s as f64) * (s as f64))
-        .sum();
+    let sum: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
     ((sum / samples.len() as f64).sqrt() / i16::MAX as f64) as f32
 }
 
@@ -405,11 +406,15 @@ async fn main() {
     println!("\n--- Simulating conference call ---");
 
     // First caller joins
-    let accepted = bridge.handle_incoming_call("call-1", "alice@example.com", 1001).await;
+    let accepted = bridge
+        .handle_incoming_call("call-1", "alice@example.com", 1001)
+        .await;
     assert!(accepted);
 
     // Second caller joins
-    let accepted = bridge.handle_incoming_call("call-2", "bob@example.com", 1002).await;
+    let accepted = bridge
+        .handle_incoming_call("call-2", "bob@example.com", 1002)
+        .await;
     assert!(accepted);
 
     println!("Participants: {}", bridge.participant_count().await);
@@ -421,7 +426,9 @@ async fn main() {
     let bob_audio: Vec<i16> = vec![3000; 160];
     let ai_response: Vec<i16> = vec![4000; 160];
 
-    bridge.process_participant_audio("call-1", &alice_audio).await;
+    bridge
+        .process_participant_audio("call-1", &alice_audio)
+        .await;
     bridge.process_participant_audio("call-2", &bob_audio).await;
     bridge.process_ai_audio(&ai_response).await;
 

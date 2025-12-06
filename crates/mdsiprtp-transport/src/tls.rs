@@ -208,8 +208,7 @@ impl Default for TlsClientConfig {
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
-    let certs = rustls_pemfile::certs(&mut reader)
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(certs)
 }
 
@@ -283,7 +282,8 @@ impl TlsTransport {
         if let Some(ca_path) = &config.ca_cert_path {
             let certs = load_certs(Path::new(ca_path))?;
             for cert in certs {
-                root_store.add(cert)
+                root_store
+                    .add(cert)
                     .map_err(|e| mdsiprtp_core::TransportError::TlsError(e.to_string()))?;
             }
         } else {
@@ -330,20 +330,20 @@ impl TlsTransport {
             }
         }
 
-        let connector = self.connector.as_ref()
-            .ok_or_else(|| mdsiprtp_core::TransportError::TlsError(
-                "No TLS connector configured".into()
-            ))?;
+        let connector = self.connector.as_ref().ok_or_else(|| {
+            mdsiprtp_core::TransportError::TlsError("No TLS connector configured".into())
+        })?;
 
         debug!("TLS connecting to {} ({})", addr, server_name);
         let tcp_stream = TcpStream::connect(addr).await?;
 
-        let server_name = ServerName::try_from(server_name.to_string())
-            .map_err(|_| mdsiprtp_core::TransportError::TlsError(
-                format!("Invalid server name: {}", server_name)
-            ))?;
+        let server_name = ServerName::try_from(server_name.to_string()).map_err(|_| {
+            mdsiprtp_core::TransportError::TlsError(format!("Invalid server name: {}", server_name))
+        })?;
 
-        let tls_stream = connector.connect(server_name, tcp_stream).await
+        let tls_stream = connector
+            .connect(server_name, tcp_stream)
+            .await
             .map_err(|e| mdsiprtp_core::TransportError::TlsError(e.to_string()))?;
 
         let conn = TlsConnectionState::new(TlsConnection::Client(tls_stream), addr);
@@ -403,7 +403,10 @@ impl TlsTransport {
                 loop {
                     match listener.accept().await {
                         Ok((tcp_stream, remote_addr)) => {
-                            debug!("Accepted TCP connection from {}, starting TLS handshake", remote_addr);
+                            debug!(
+                                "Accepted TCP connection from {}, starting TLS handshake",
+                                remote_addr
+                            );
 
                             let acceptor = acceptor.clone();
                             let tx = tx_clone.clone();
@@ -415,7 +418,7 @@ impl TlsTransport {
                                         debug!("TLS handshake complete with {}", remote_addr);
                                         let conn = TlsConnectionState::new(
                                             TlsConnection::Server(tls_stream),
-                                            remote_addr
+                                            remote_addr,
                                         );
                                         let conn_arc = Arc::new(Mutex::new(conn));
 
@@ -480,7 +483,11 @@ impl TlsTransport {
 
             match result {
                 Ok(Some(data)) => {
-                    trace!("Received {} bytes from {} over TLS", data.len(), remote_addr);
+                    trace!(
+                        "Received {} bytes from {} over TLS",
+                        data.len(),
+                        remote_addr
+                    );
                     let msg = IncomingMessage {
                         data,
                         source: remote_addr,
@@ -603,8 +610,10 @@ impl rustls::client::danger::ServerCertVerifier for NoCertificateVerification {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustls::client::danger::ServerCertVerifier;
     use std::net::{IpAddr, Ipv4Addr};
 
+    // find_header_end tests
     #[test]
     fn test_find_header_end() {
         let data = b"INVITE sip:test SIP/2.0\r\nContent-Length: 0\r\n\r\n";
@@ -614,6 +623,46 @@ mod tests {
         assert_eq!(find_header_end(data), None);
     }
 
+    #[test]
+    fn test_find_header_end_empty() {
+        let data = b"";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    #[test]
+    fn test_find_header_end_only_crlf() {
+        let data = b"\r\n\r\n";
+        assert_eq!(find_header_end(data), Some(4));
+    }
+
+    #[test]
+    fn test_find_header_end_single_crlf() {
+        let data = b"\r\n";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    #[test]
+    fn test_find_header_end_three_bytes() {
+        let data = b"\r\n\r";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    #[test]
+    fn test_find_header_end_at_start() {
+        let data = b"\r\n\r\nSome body content here";
+        assert_eq!(find_header_end(data), Some(4));
+    }
+
+    #[test]
+    fn test_find_header_end_multiline_headers() {
+        let data = b"SIP/2.0 200 OK\r\nVia: SIP/2.0/TLS host\r\nFrom: test\r\nTo: test\r\nContent-Length: 10\r\n\r\n0123456789";
+        let end = find_header_end(data);
+        assert!(end.is_some());
+        let end = end.unwrap();
+        assert!(end < data.len());
+    }
+
+    // parse_content_length tests
     #[test]
     fn test_parse_content_length() {
         let headers = b"INVITE sip:test SIP/2.0\r\nContent-Length: 123\r\n\r\n";
@@ -627,17 +676,358 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_content_length_mixed_case() {
+        let headers = b"SIP/2.0 200 OK\r\nCONTENT-LENGTH: 789\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 789);
+
+        let headers = b"SIP/2.0 200 OK\r\ncontent-length: 321\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 321);
+
+        let headers = b"SIP/2.0 200 OK\r\nContent-length: 555\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 555);
+    }
+
+    #[test]
+    fn test_parse_content_length_short_form_mixed_case() {
+        let headers = b"SIP/2.0 200 OK\r\nL: 999\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 999);
+    }
+
+    #[test]
+    fn test_parse_content_length_whitespace() {
+        let headers = b"SIP/2.0 200 OK\r\nContent-Length:    42   \r\n\r\n";
+        assert_eq!(parse_content_length(headers), 42);
+    }
+
+    #[test]
+    fn test_parse_content_length_zero() {
+        let headers = b"SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_large() {
+        let headers = b"SIP/2.0 200 OK\r\nContent-Length: 65535\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 65535);
+    }
+
+    #[test]
+    fn test_parse_content_length_invalid() {
+        // Invalid value should return 0
+        let headers = b"SIP/2.0 200 OK\r\nContent-Length: abc\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_invalid_utf8() {
+        // Invalid UTF-8 should return 0
+        let headers = &[0x80, 0x81, 0x82];
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_empty() {
+        let headers = b"";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_multiple_headers() {
+        let headers = b"SIP/2.0 200 OK\r\nVia: test\r\nContent-Length: 100\r\nCall-ID: abc\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 100);
+    }
+
+    // TlsClientConfig tests
+    #[test]
     fn test_tls_client_config_default() {
         let config = TlsClientConfig::default();
         assert!(config.verify_server);
         assert!(config.ca_cert_path.is_none());
     }
 
+    #[test]
+    fn test_tls_client_config_custom() {
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: Some("/path/to/ca.pem".to_string()),
+        };
+        assert!(!config.verify_server);
+        assert_eq!(config.ca_cert_path.as_deref(), Some("/path/to/ca.pem"));
+    }
+
+    #[test]
+    fn test_tls_client_config_no_verify() {
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        assert!(!config.verify_server);
+        assert!(config.ca_cert_path.is_none());
+    }
+
+    // TlsServerConfig tests
+    #[test]
+    fn test_tls_server_config() {
+        let config = TlsServerConfig {
+            cert_path: "/etc/ssl/server.crt".to_string(),
+            key_path: "/etc/ssl/server.key".to_string(),
+        };
+        assert_eq!(config.cert_path, "/etc/ssl/server.crt");
+        assert_eq!(config.key_path, "/etc/ssl/server.key");
+    }
+
+    // TlsTransport tests
     #[tokio::test]
     async fn test_new_client() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config);
         assert!(transport.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_new_client_no_verify() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5061);
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        let transport = TlsTransport::new_client(addr, config);
+        assert!(transport.is_ok());
+        let transport = transport.unwrap();
+        assert_eq!(transport.local_addr(), addr);
+    }
+
+    #[tokio::test]
+    async fn test_new_client_ipv6() {
+        let addr = SocketAddr::new(IpAddr::V6("::1".parse().unwrap()), 5061);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config);
+        assert!(transport.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_transport_local_addr() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 5061);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        assert_eq!(transport.local_addr(), addr);
+    }
+
+    #[tokio::test]
+    async fn test_transport_sender() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        let _sender = transport.sender();
+        // Just verifying sender() doesn't panic
+    }
+
+    #[tokio::test]
+    async fn test_sender_clone() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        let sender1 = transport.sender();
+        let _sender2 = sender1.clone();
+        // Verify clone works
+    }
+
+    #[tokio::test]
+    async fn test_send_to_no_connection() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5061);
+        let result = transport.send_to(b"test", dest).await;
+        // Should fail because no connection exists
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sender_send_to_no_connection() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        let sender = transport.sender();
+
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5061);
+        let result = sender.send_to(b"test", dest).await;
+        // Should fail because no connection exists
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_connect_no_connector() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        // Create transport without connector by using a client config
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        // Try to connect - connector exists so it will try to connect
+        // but the destination doesn't exist so it will fail
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 5061);
+        let result = transport.connect(dest, "test.example.com").await;
+        assert!(result.is_err()); // Connection refused or timeout
+    }
+
+    // MAX_TLS_SIZE constant test
+    #[test]
+    fn test_max_tls_size() {
+        assert_eq!(MAX_TLS_SIZE, 65536);
+    }
+
+    #[test]
+    fn test_initial_buf_size() {
+        assert_eq!(INITIAL_BUF_SIZE, 4096);
+    }
+
+    // NoCertificateVerification tests
+    #[test]
+    fn test_no_certificate_verification_debug() {
+        let verifier = NoCertificateVerification;
+        let debug = format!("{:?}", verifier);
+        assert!(debug.contains("NoCertificateVerification"));
+    }
+
+    #[test]
+    fn test_no_certificate_verification_supported_schemes() {
+        let verifier = NoCertificateVerification;
+        let schemes = verifier.supported_verify_schemes();
+        assert!(!schemes.is_empty());
+        // Should include common signature schemes
+        assert!(schemes.contains(&rustls::SignatureScheme::RSA_PKCS1_SHA256));
+        assert!(schemes.contains(&rustls::SignatureScheme::ECDSA_NISTP256_SHA256));
+        assert!(schemes.contains(&rustls::SignatureScheme::ED25519));
+    }
+
+    // OutgoingMessage construction
+    #[test]
+    fn test_outgoing_message_new() {
+        let data = Bytes::from_static(b"SIP/2.0 200 OK\r\n\r\n");
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5061);
+        let msg = OutgoingMessage::new(data.clone(), dest);
+        assert_eq!(msg.data, data);
+        assert_eq!(msg.destination, dest);
+    }
+
+    // Edge case: Content-Length at start of headers
+    #[test]
+    fn test_parse_content_length_at_start() {
+        let headers = b"Content-Length: 50\r\nVia: test\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 50);
+    }
+
+    // Edge case: Multiple Content-Length headers (returns first)
+    #[test]
+    fn test_parse_content_length_multiple() {
+        let headers = b"Content-Length: 100\r\nContent-Length: 200\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 100);
+    }
+
+    // Error handling tests
+    #[test]
+    fn test_load_certs_file_not_found() {
+        let result = load_certs(Path::new("/nonexistent/path/cert.pem"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_private_key_file_not_found() {
+        let result = load_private_key(Path::new("/nonexistent/path/key.pem"));
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_bind_server_invalid_cert() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsServerConfig {
+            cert_path: "/nonexistent/cert.pem".to_string(),
+            key_path: "/nonexistent/key.pem".to_string(),
+        };
+        let result = TlsTransport::bind_server(addr, config).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_new_client_invalid_ca() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig {
+            verify_server: true,
+            ca_cert_path: Some("/nonexistent/ca.pem".to_string()),
+        };
+        let result = TlsTransport::new_client(addr, config);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_send_via_transport_no_connection() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5061);
+        let msg = OutgoingMessage::new(Bytes::from_static(b"test"), dest);
+        let result = transport.send(msg).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_sender_send_via_send_method() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig::default();
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+        let sender = transport.sender();
+
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 5061);
+        let msg = OutgoingMessage::new(Bytes::from_static(b"test"), dest);
+        let result = sender.send(msg).await;
+        assert!(result.is_err());
+    }
+
+    // Edge case: find_header_end with exactly 4 bytes that is CRLF CRLF
+    #[test]
+    fn test_find_header_end_exact_match() {
+        let data = b"\r\n\r\n";
+        assert_eq!(find_header_end(data), Some(4));
+    }
+
+    // parse_content_length with no colon
+    #[test]
+    fn test_parse_content_length_no_colon() {
+        let headers = b"Content-Length 100\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    // parse_content_length with empty value
+    #[test]
+    fn test_parse_content_length_empty_value() {
+        let headers = b"Content-Length:\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    // parse_content_length with negative-like value
+    #[test]
+    fn test_parse_content_length_negative() {
+        let headers = b"Content-Length: -100\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    // test find_header_end with longer data
+    #[test]
+    fn test_find_header_end_long_headers() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"INVITE sip:bob@example.com SIP/2.0\r\n");
+        data.extend_from_slice(b"Via: SIP/2.0/TLS pc33.example.com;branch=z9hG4bK776\r\n");
+        data.extend_from_slice(b"Max-Forwards: 70\r\n");
+        data.extend_from_slice(b"To: Bob <sip:bob@example.com>\r\n");
+        data.extend_from_slice(b"From: Alice <sip:alice@example.com>;tag=1928301774\r\n");
+        data.extend_from_slice(b"Call-ID: test@example.com\r\n");
+        data.extend_from_slice(b"CSeq: 1 INVITE\r\n");
+        data.extend_from_slice(b"Content-Length: 0\r\n");
+        data.extend_from_slice(b"\r\n");
+
+        let result = find_header_end(&data);
+        assert!(result.is_some());
     }
 }

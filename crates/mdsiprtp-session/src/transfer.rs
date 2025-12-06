@@ -190,7 +190,8 @@ impl ReplacesHeader {
     pub fn parse(s: &str) -> Result<Self, TransferError> {
         let mut parts = s.split(';');
 
-        let call_id = parts.next()
+        let call_id = parts
+            .next()
             .ok_or_else(|| TransferError::InvalidReferTo("missing call-id".into()))?
             .trim()
             .to_string();
@@ -215,7 +216,8 @@ impl ReplacesHeader {
         Ok(Self {
             call_id,
             to_tag: to_tag.ok_or_else(|| TransferError::InvalidReferTo("missing to-tag".into()))?,
-            from_tag: from_tag.ok_or_else(|| TransferError::InvalidReferTo("missing from-tag".into()))?,
+            from_tag: from_tag
+                .ok_or_else(|| TransferError::InvalidReferTo("missing from-tag".into()))?,
             early_only,
         })
     }
@@ -386,7 +388,9 @@ impl TransferManager {
         let info = self.transfers.entry(call_id.to_string()).or_default();
 
         if info.state != TransferState::None {
-            return Err(TransferError::InvalidState("transfer already in progress".into()));
+            return Err(TransferError::InvalidState(
+                "transfer already in progress".into(),
+            ));
         }
 
         info.state = TransferState::Pending;
@@ -407,7 +411,9 @@ impl TransferManager {
         let info = self.transfers.entry(call_id.to_string()).or_default();
 
         if info.state != TransferState::None {
-            return Err(TransferError::InvalidState("transfer already in progress".into()));
+            return Err(TransferError::InvalidState(
+                "transfer already in progress".into(),
+            ));
         }
 
         info.state = TransferState::Pending;
@@ -424,7 +430,9 @@ impl TransferManager {
         call_id: &str,
         status_code: u16,
     ) -> Result<TransferState, TransferError> {
-        let info = self.transfers.get_mut(call_id)
+        let info = self
+            .transfers
+            .get_mut(call_id)
             .ok_or_else(|| TransferError::CallNotFound(call_id.to_string()))?;
 
         if (200..300).contains(&status_code) {
@@ -467,7 +475,9 @@ impl TransferManager {
         let progress = TransferProgress::parse_sipfrag(sipfrag)
             .ok_or_else(|| TransferError::Failed("invalid sipfrag".into()))?;
 
-        let info = self.transfers.get_mut(call_id)
+        let info = self
+            .transfers
+            .get_mut(call_id)
             .ok_or_else(|| TransferError::CallNotFound(call_id.to_string()))?;
 
         if progress.is_success() {
@@ -520,11 +530,141 @@ pub fn build_referred_by(transferor_uri: &str) -> String {
 mod tests {
     use super::*;
 
+    // TransferError tests
+    #[test]
+    fn test_transfer_error_call_not_found() {
+        let err = TransferError::CallNotFound("call-123".to_string());
+        assert!(err.to_string().contains("call not found"));
+        assert!(err.to_string().contains("call-123"));
+    }
+
+    #[test]
+    fn test_transfer_error_invalid_state() {
+        let err = TransferError::InvalidState("already in progress".to_string());
+        assert!(err.to_string().contains("invalid state"));
+        assert!(err.to_string().contains("already in progress"));
+    }
+
+    #[test]
+    fn test_transfer_error_rejected() {
+        let err = TransferError::Rejected { code: 486 };
+        assert!(err.to_string().contains("rejected"));
+        assert!(err.to_string().contains("486"));
+    }
+
+    #[test]
+    fn test_transfer_error_failed() {
+        let err = TransferError::Failed("timeout".to_string());
+        assert!(err.to_string().contains("transfer failed"));
+        assert!(err.to_string().contains("timeout"));
+    }
+
+    #[test]
+    fn test_transfer_error_invalid_refer_to() {
+        let err = TransferError::InvalidReferTo("bad uri".to_string());
+        assert!(err.to_string().contains("invalid Refer-To URI"));
+    }
+
+    #[test]
+    fn test_transfer_error_debug() {
+        let err = TransferError::CallNotFound("x".to_string());
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("CallNotFound"));
+    }
+
+    // TransferType tests
+    #[test]
+    fn test_transfer_type_blind() {
+        let t = TransferType::Blind;
+        assert_eq!(t, TransferType::Blind);
+        assert_ne!(t, TransferType::Attended);
+    }
+
+    #[test]
+    fn test_transfer_type_attended() {
+        let t = TransferType::Attended;
+        assert_eq!(t, TransferType::Attended);
+    }
+
+    #[test]
+    fn test_transfer_type_debug() {
+        assert!(format!("{:?}", TransferType::Blind).contains("Blind"));
+        assert!(format!("{:?}", TransferType::Attended).contains("Attended"));
+    }
+
+    #[test]
+    fn test_transfer_type_clone() {
+        let t = TransferType::Blind;
+        let cloned = t;
+        assert_eq!(t, cloned);
+    }
+
+    // TransferState tests
+    #[test]
+    fn test_transfer_state_all_variants() {
+        assert_eq!(TransferState::None, TransferState::None);
+        assert_eq!(TransferState::Pending, TransferState::Pending);
+        assert_eq!(TransferState::Accepted, TransferState::Accepted);
+        assert_eq!(TransferState::InProgress, TransferState::InProgress);
+        assert_eq!(TransferState::Completed, TransferState::Completed);
+        assert_eq!(TransferState::Failed, TransferState::Failed);
+    }
+
+    #[test]
+    fn test_transfer_state_debug() {
+        assert!(format!("{:?}", TransferState::None).contains("None"));
+        assert!(format!("{:?}", TransferState::Pending).contains("Pending"));
+        assert!(format!("{:?}", TransferState::Accepted).contains("Accepted"));
+        assert!(format!("{:?}", TransferState::InProgress).contains("InProgress"));
+        assert!(format!("{:?}", TransferState::Completed).contains("Completed"));
+        assert!(format!("{:?}", TransferState::Failed).contains("Failed"));
+    }
+
+    #[test]
+    fn test_transfer_state_clone_copy() {
+        let s = TransferState::InProgress;
+        let cloned = s;
+        assert_eq!(s, cloned);
+    }
+
+    // TransferRole tests
+    #[test]
+    fn test_transfer_role_all_variants() {
+        assert_eq!(TransferRole::Transferor, TransferRole::Transferor);
+        assert_eq!(TransferRole::Transferee, TransferRole::Transferee);
+        assert_eq!(TransferRole::Target, TransferRole::Target);
+    }
+
+    #[test]
+    fn test_transfer_role_debug() {
+        assert!(format!("{:?}", TransferRole::Transferor).contains("Transferor"));
+        assert!(format!("{:?}", TransferRole::Transferee).contains("Transferee"));
+        assert!(format!("{:?}", TransferRole::Target).contains("Target"));
+    }
+
+    #[test]
+    fn test_transfer_role_clone_copy() {
+        let r = TransferRole::Target;
+        let cloned = r;
+        assert_eq!(r, cloned);
+    }
+
+    // ReferTo tests
     #[test]
     fn test_refer_to_blind() {
         let refer_to = ReferTo::blind("sip:carol@example.com");
         assert_eq!(refer_to.to_header(), "<sip:carol@example.com>");
         assert!(refer_to.replaces.is_none());
+    }
+
+    #[test]
+    fn test_refer_to_attended() {
+        let replaces = ReplacesHeader::new("call-123", "to-tag", "from-tag");
+        let refer_to = ReferTo::attended("sip:carol@example.com", replaces);
+        assert!(refer_to.replaces.is_some());
+        let header = refer_to.to_header();
+        assert!(header.starts_with("<sip:carol@example.com?"));
+        assert!(header.contains("Replaces="));
     }
 
     #[test]
@@ -534,6 +674,45 @@ mod tests {
         assert!(refer_to.replaces.is_none());
     }
 
+    #[test]
+    fn test_refer_to_parse_without_brackets() {
+        let refer_to = ReferTo::parse("sip:carol@example.com").unwrap();
+        assert_eq!(refer_to.uri, "sip:carol@example.com");
+    }
+
+    #[test]
+    fn test_refer_to_parse_with_whitespace() {
+        let refer_to = ReferTo::parse("  <sip:carol@example.com>  ").unwrap();
+        assert_eq!(refer_to.uri, "sip:carol@example.com");
+    }
+
+    #[test]
+    fn test_refer_to_parse_with_replaces() {
+        let uri = "<sip:carol@example.com?Replaces=call-id%3Bto-tag%3Dto1%3Bfrom-tag%3Dfrom1>";
+        let refer_to = ReferTo::parse(uri).unwrap();
+        assert_eq!(refer_to.uri, "sip:carol@example.com");
+        assert!(refer_to.replaces.is_some());
+        let replaces = refer_to.replaces.unwrap();
+        assert_eq!(replaces.call_id, "call-id");
+        assert_eq!(replaces.to_tag, "to1");
+        assert_eq!(replaces.from_tag, "from1");
+    }
+
+    #[test]
+    fn test_refer_to_debug() {
+        let refer_to = ReferTo::blind("sip:test@example.com");
+        let debug = format!("{:?}", refer_to);
+        assert!(debug.contains("ReferTo"));
+    }
+
+    #[test]
+    fn test_refer_to_clone() {
+        let refer_to = ReferTo::blind("sip:test@example.com");
+        let cloned = refer_to.clone();
+        assert_eq!(cloned.uri, "sip:test@example.com");
+    }
+
+    // ReplacesHeader tests
     #[test]
     fn test_replaces_header() {
         let replaces = ReplacesHeader::new("abc123", "to1", "from1");
@@ -549,6 +728,64 @@ mod tests {
     }
 
     #[test]
+    fn test_replaces_header_with_early_only() {
+        let mut replaces = ReplacesHeader::new("abc123", "to1", "from1");
+        replaces.early_only = true;
+        let header = replaces.to_header();
+        assert!(header.contains("early-only"));
+
+        let param = replaces.to_uri_param();
+        assert!(param.contains("early-only"));
+    }
+
+    #[test]
+    fn test_replaces_header_parse_early_only() {
+        let s = "call-123;to-tag=to1;from-tag=from1;early-only";
+        let replaces = ReplacesHeader::parse(s).unwrap();
+        assert!(replaces.early_only);
+    }
+
+    #[test]
+    fn test_replaces_header_parse_missing_to_tag() {
+        let s = "call-123;from-tag=from1";
+        let result = ReplacesHeader::parse(s);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            TransferError::InvalidReferTo(_)
+        ));
+    }
+
+    #[test]
+    fn test_replaces_header_parse_missing_from_tag() {
+        let s = "call-123;to-tag=to1";
+        let result = ReplacesHeader::parse(s);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_replaces_header_parse_case_insensitive() {
+        let s = "call-123;TO-TAG=to1;FROM-TAG=from1";
+        let replaces = ReplacesHeader::parse(s).unwrap();
+        assert_eq!(replaces.to_tag, "to1");
+        assert_eq!(replaces.from_tag, "from1");
+    }
+
+    #[test]
+    fn test_replaces_header_parse_with_whitespace() {
+        let s = " call-123 ; to-tag=to1 ; from-tag=from1 ";
+        let replaces = ReplacesHeader::parse(s).unwrap();
+        assert_eq!(replaces.call_id, "call-123");
+    }
+
+    #[test]
+    fn test_replaces_header_parse_unknown_param() {
+        let s = "call-123;to-tag=to1;from-tag=from1;unknown=value";
+        let replaces = ReplacesHeader::parse(s).unwrap();
+        assert_eq!(replaces.to_tag, "to1");
+    }
+
+    #[test]
     fn test_replaces_uri_encoding() {
         let replaces = ReplacesHeader::new("abc;123", "to=1", "from&1");
         let param = replaces.to_uri_param();
@@ -559,6 +796,57 @@ mod tests {
         assert!(param.contains("from%261"));
     }
 
+    #[test]
+    fn test_replaces_debug() {
+        let replaces = ReplacesHeader::new("call-123", "to1", "from1");
+        let debug = format!("{:?}", replaces);
+        assert!(debug.contains("ReplacesHeader"));
+    }
+
+    #[test]
+    fn test_replaces_clone() {
+        let replaces = ReplacesHeader::new("call-123", "to1", "from1");
+        let cloned = replaces.clone();
+        assert_eq!(cloned.call_id, "call-123");
+    }
+
+    // URL encoding/decoding tests
+    #[test]
+    fn test_url_encode_special_chars() {
+        let encoded = url_encode("hello;world=test&more@addr");
+        assert!(encoded.contains("%3B"));
+        assert!(encoded.contains("%3D"));
+        assert!(encoded.contains("%26"));
+        assert!(encoded.contains("%40"));
+    }
+
+    #[test]
+    fn test_url_encode_percent() {
+        let encoded = url_encode("50%off");
+        assert!(encoded.contains("%25"));
+    }
+
+    #[test]
+    fn test_url_decode_special_chars() {
+        let decoded = url_decode("hello%3Bworld%3Dtest%26more%40addr");
+        assert_eq!(decoded, "hello;world=test&more@addr");
+    }
+
+    #[test]
+    fn test_url_decode_invalid_hex() {
+        let decoded = url_decode("hello%GG%world");
+        // Invalid hex should be preserved with %
+        assert!(decoded.contains("%"));
+    }
+
+    #[test]
+    fn test_url_decode_truncated() {
+        // When only one hex char available, it still parses (e.g. "3" -> 0x3)
+        let decoded = url_decode("hello%3");
+        assert!(decoded.starts_with("hello"));
+    }
+
+    // TransferProgress tests
     #[test]
     fn test_transfer_progress() {
         let sipfrag = "SIP/2.0 180 Ringing\r\n";
@@ -573,6 +861,121 @@ mod tests {
         assert_eq!(progress.status_code, 200);
         assert!(progress.final_);
         assert!(progress.is_success());
+    }
+
+    #[test]
+    fn test_transfer_progress_100_trying() {
+        let sipfrag = "SIP/2.0 100 Trying";
+        let progress = TransferProgress::parse_sipfrag(sipfrag).unwrap();
+        assert_eq!(progress.status_code, 100);
+        assert!(progress.is_provisional());
+        assert!(!progress.is_success());
+    }
+
+    #[test]
+    fn test_transfer_progress_failure() {
+        let sipfrag = "SIP/2.0 486 Busy Here";
+        let progress = TransferProgress::parse_sipfrag(sipfrag).unwrap();
+        assert_eq!(progress.status_code, 486);
+        assert!(progress.final_);
+        assert!(!progress.is_success());
+    }
+
+    #[test]
+    fn test_transfer_progress_long_reason() {
+        let sipfrag = "SIP/2.0 603 Decline The Call";
+        let progress = TransferProgress::parse_sipfrag(sipfrag).unwrap();
+        assert_eq!(progress.reason, "Decline The Call");
+    }
+
+    #[test]
+    fn test_transfer_progress_invalid_not_sip() {
+        let sipfrag = "HTTP/1.1 200 OK";
+        let progress = TransferProgress::parse_sipfrag(sipfrag);
+        assert!(progress.is_none());
+    }
+
+    #[test]
+    fn test_transfer_progress_invalid_too_short() {
+        let sipfrag = "SIP/2.0 200";
+        let progress = TransferProgress::parse_sipfrag(sipfrag);
+        assert!(progress.is_none());
+    }
+
+    #[test]
+    fn test_transfer_progress_invalid_status_code() {
+        let sipfrag = "SIP/2.0 XYZ Bad";
+        let progress = TransferProgress::parse_sipfrag(sipfrag);
+        assert!(progress.is_none());
+    }
+
+    #[test]
+    fn test_transfer_progress_empty() {
+        let progress = TransferProgress::parse_sipfrag("");
+        assert!(progress.is_none());
+    }
+
+    #[test]
+    fn test_transfer_progress_debug() {
+        let sipfrag = "SIP/2.0 200 OK";
+        let progress = TransferProgress::parse_sipfrag(sipfrag).unwrap();
+        let debug = format!("{:?}", progress);
+        assert!(debug.contains("TransferProgress"));
+    }
+
+    #[test]
+    fn test_transfer_progress_clone() {
+        let sipfrag = "SIP/2.0 200 OK";
+        let progress = TransferProgress::parse_sipfrag(sipfrag).unwrap();
+        let cloned = progress.clone();
+        assert_eq!(cloned.status_code, 200);
+    }
+
+    // TransferInfo tests
+    #[test]
+    fn test_transfer_info_default() {
+        let info = TransferInfo::default();
+        assert_eq!(info.state, TransferState::None);
+        assert_eq!(info.role, TransferRole::Transferor);
+        assert_eq!(info.transfer_type, TransferType::Blind);
+        assert!(info.target.is_none());
+        assert!(info.subscription_id.is_none());
+        assert!(info.last_progress.is_none());
+    }
+
+    #[test]
+    fn test_transfer_info_debug() {
+        let info = TransferInfo::default();
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("TransferInfo"));
+    }
+
+    #[test]
+    fn test_transfer_info_clone() {
+        let mut info = TransferInfo::default();
+        info.target = Some("sip:test@example.com".to_string());
+        let cloned = info.clone();
+        assert_eq!(cloned.target, Some("sip:test@example.com".to_string()));
+    }
+
+    // TransferManager tests
+    #[test]
+    fn test_transfer_manager_new() {
+        let manager = TransferManager::new();
+        assert_eq!(manager.transfer_state("nonexistent"), TransferState::None);
+    }
+
+    #[test]
+    fn test_transfer_manager_default() {
+        let manager = TransferManager::default();
+        assert!(manager.transfer_info("x").is_none());
+    }
+
+    #[test]
+    fn test_transfer_manager_debug() {
+        let manager = TransferManager::new();
+        let debug = format!("{:?}", manager);
+        assert!(debug.contains("TransferManager"));
     }
 
     #[test]
@@ -591,11 +994,15 @@ mod tests {
         assert_eq!(manager.transfer_state("call-1"), TransferState::Accepted);
 
         // Progress notification
-        manager.handle_notify("call-1", "SIP/2.0 180 Ringing\r\n").unwrap();
+        manager
+            .handle_notify("call-1", "SIP/2.0 180 Ringing\r\n")
+            .unwrap();
         assert_eq!(manager.transfer_state("call-1"), TransferState::InProgress);
 
         // Success
-        manager.handle_notify("call-1", "SIP/2.0 200 OK\r\n").unwrap();
+        manager
+            .handle_notify("call-1", "SIP/2.0 200 OK\r\n")
+            .unwrap();
         assert_eq!(manager.transfer_state("call-1"), TransferState::Completed);
     }
 
@@ -616,6 +1023,100 @@ mod tests {
     }
 
     #[test]
+    fn test_transfer_manager_blind_already_in_progress() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        let result = manager.initiate_blind_transfer("call-1", "sip:dave@example.com");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            TransferError::InvalidState(_)
+        ));
+    }
+
+    #[test]
+    fn test_transfer_manager_attended_already_in_progress() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        let replaces = ReplacesHeader::new("call-2", "tag1", "tag2");
+        let result = manager.initiate_attended_transfer("call-1", "sip:dave@example.com", replaces);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_transfer_manager_refer_response_rejected() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        let result = manager.handle_refer_response("call-1", 486);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            TransferError::Rejected { code: 486 }
+        ));
+        assert_eq!(manager.transfer_state("call-1"), TransferState::Failed);
+    }
+
+    #[test]
+    fn test_transfer_manager_refer_response_provisional() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        let state = manager.handle_refer_response("call-1", 100).unwrap();
+        assert_eq!(state, TransferState::Pending); // Still pending for provisional
+    }
+
+    #[test]
+    fn test_transfer_manager_refer_response_call_not_found() {
+        let mut manager = TransferManager::new();
+        let result = manager.handle_refer_response("nonexistent", 200);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            TransferError::CallNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn test_transfer_manager_notify_failed() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        manager.handle_refer_response("call-1", 202).unwrap();
+
+        let progress = manager
+            .handle_notify("call-1", "SIP/2.0 486 Busy Here")
+            .unwrap();
+        assert!(!progress.is_success());
+        assert_eq!(manager.transfer_state("call-1"), TransferState::Failed);
+    }
+
+    #[test]
+    fn test_transfer_manager_notify_invalid_sipfrag() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        let result = manager.handle_notify("call-1", "invalid sipfrag");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TransferError::Failed(_)));
+    }
+
+    #[test]
+    fn test_transfer_manager_notify_call_not_found() {
+        let mut manager = TransferManager::new();
+        let result = manager.handle_notify("nonexistent", "SIP/2.0 200 OK");
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_incoming_refer() {
         let mut manager = TransferManager::new();
 
@@ -624,5 +1125,74 @@ mod tests {
 
         assert_eq!(info.role, TransferRole::Transferee);
         assert_eq!(info.state, TransferState::InProgress);
+    }
+
+    #[test]
+    fn test_incoming_refer_attended() {
+        let mut manager = TransferManager::new();
+        let replaces = ReplacesHeader::new("call-2", "tag1", "tag2");
+        let refer_to = ReferTo::attended("sip:carol@example.com", replaces);
+        let info = manager.handle_incoming_refer("call-1", refer_to).unwrap();
+
+        assert_eq!(info.transfer_type, TransferType::Attended);
+        assert_eq!(info.target, Some("sip:carol@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_transfer_manager_clear() {
+        let mut manager = TransferManager::new();
+        manager
+            .initiate_blind_transfer("call-1", "sip:carol@example.com")
+            .unwrap();
+        assert!(manager.transfer_info("call-1").is_some());
+
+        manager.clear("call-1");
+        assert!(manager.transfer_info("call-1").is_none());
+        assert_eq!(manager.transfer_state("call-1"), TransferState::None);
+    }
+
+    #[test]
+    fn test_transfer_manager_clear_nonexistent() {
+        let mut manager = TransferManager::new();
+        manager.clear("nonexistent"); // Should not panic
+    }
+
+    // Helper function tests
+    #[test]
+    fn test_build_refer_to_blind() {
+        let header = build_refer_to_blind("sip:carol@example.com");
+        assert_eq!(header, "Refer-To: <sip:carol@example.com>");
+    }
+
+    #[test]
+    fn test_build_refer_to_attended() {
+        let replaces = ReplacesHeader::new("call-123", "to1", "from1");
+        let header = build_refer_to_attended("sip:carol@example.com", &replaces);
+        assert!(header.starts_with("Refer-To: <sip:carol@example.com?"));
+        assert!(header.contains("Replaces="));
+    }
+
+    #[test]
+    fn test_build_referred_by() {
+        let header = build_referred_by("sip:alice@example.com");
+        assert_eq!(header, "Referred-By: <sip:alice@example.com>");
+    }
+
+    // Parse replaces param tests
+    #[test]
+    fn test_parse_replaces_param_no_replaces() {
+        let result = parse_replaces_param("other=value").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_replaces_param_with_other_params() {
+        let result = parse_replaces_param(
+            "foo=bar&Replaces=call-123%3Bto-tag%3Dto1%3Bfrom-tag%3Dfrom1&baz=qux",
+        )
+        .unwrap();
+        assert!(result.is_some());
+        let replaces = result.unwrap();
+        assert_eq!(replaces.call_id, "call-123");
     }
 }

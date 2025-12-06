@@ -138,7 +138,11 @@ impl TurnClient {
     pub async fn new(server: TurnServer) -> Result<Self, TurnError> {
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.connect(&server.addr).await?;
-        debug!("TURN client bound to {}, connecting to {}", socket.local_addr()?, server.addr);
+        debug!(
+            "TURN client bound to {}, connecting to {}",
+            socket.local_addr()?,
+            server.addr
+        );
 
         Ok(Self {
             socket,
@@ -198,12 +202,10 @@ impl TurnClient {
                         self.allocation = Some(alloc.clone());
                         Ok(alloc)
                     }
-                    AllocateResult::AuthRequired { .. } => {
-                        Err(TurnError::ErrorResponse {
-                            code: 401,
-                            reason: "Authentication failed".into(),
-                        })
-                    }
+                    AllocateResult::AuthRequired { .. } => Err(TurnError::ErrorResponse {
+                        code: 401,
+                        reason: "Authentication failed".into(),
+                    }),
                 }
             }
         }
@@ -213,7 +215,10 @@ impl TurnClient {
     pub async fn refresh(&mut self, lifetime: u32) -> Result<u32, TurnError> {
         let alloc = self.allocation.as_ref().ok_or(TurnError::NotAllocated)?;
 
-        debug!("Refreshing TURN allocation, requested lifetime={}", lifetime);
+        debug!(
+            "Refreshing TURN allocation, requested lifetime={}",
+            lifetime
+        );
 
         let auth = AuthContext {
             username: self.server.username.clone(),
@@ -267,7 +272,11 @@ impl TurnClient {
             return Err(TurnError::NotAllocated);
         }
 
-        trace!("Sending {} bytes to peer {} via relay", data.len(), peer_addr);
+        trace!(
+            "Sending {} bytes to peer {} via relay",
+            data.len(),
+            peer_addr
+        );
 
         let indication = self.build_send_indication(peer_addr, data)?;
         self.socket.send(&indication).await?;
@@ -406,7 +415,12 @@ impl TurnClient {
         let mut attrs = BytesMut::new();
 
         // XOR-PEER-ADDRESS
-        encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, &self.transaction_id);
+        encode_xor_address(
+            &mut attrs,
+            ATTR_XOR_PEER_ADDRESS,
+            peer_addr,
+            &self.transaction_id,
+        );
 
         // USERNAME
         let username_bytes = auth.username.as_bytes();
@@ -444,11 +458,20 @@ impl TurnClient {
     }
 
     /// Build a Send indication.
-    fn build_send_indication(&self, peer_addr: SocketAddr, data: &[u8]) -> Result<Bytes, TurnError> {
+    fn build_send_indication(
+        &self,
+        peer_addr: SocketAddr,
+        data: &[u8],
+    ) -> Result<Bytes, TurnError> {
         let mut attrs = BytesMut::new();
 
         // XOR-PEER-ADDRESS
-        encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, &self.transaction_id);
+        encode_xor_address(
+            &mut attrs,
+            ATTR_XOR_PEER_ADDRESS,
+            peer_addr,
+            &self.transaction_id,
+        );
 
         // DATA
         attrs.put_u16(ATTR_DATA);
@@ -569,7 +592,8 @@ impl TurnClient {
         }
 
         let relayed = relayed_addr.ok_or(TurnError::NoRelayAddress)?;
-        let mapped = mapped_addr.unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
+        let mapped =
+            mapped_addr.unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0));
 
         Ok(AllocateResult::Success(TurnAllocation {
             relayed_addr: relayed,
@@ -759,7 +783,9 @@ impl TurnClient {
 
         match (peer_addr, payload) {
             (Some(addr), Some(data)) => Ok((addr, data)),
-            _ => Err(TurnError::InvalidResponse("Missing peer address or data".into())),
+            _ => Err(TurnError::InvalidResponse(
+                "Missing peer address or data".into(),
+            )),
         }
     }
 }
@@ -826,8 +852,7 @@ fn add_message_integrity(msg: &mut BytesMut, username: &str, realm: &str, passwo
     msg[3] = (new_len & 0xFF) as u8;
 
     // Compute HMAC-SHA1 over the message up to this point
-    let mut mac = HmacSha1::new_from_slice(&key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha1::new_from_slice(&key).expect("HMAC can take key of any size");
     mac.update(msg);
     let result = mac.finalize();
     let integrity = result.into_bytes();
@@ -891,8 +916,7 @@ fn verify_message_integrity(msg: &[u8], username: &str, realm: &str, password: &
     verify_msg[3] = (new_len & 0xFF) as u8;
 
     // Compute HMAC
-    let mut mac = HmacSha1::new_from_slice(&key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha1::new_from_slice(&key).expect("HMAC can take key of any size");
     mac.update(&verify_msg);
     let computed = mac.finalize().into_bytes();
 
@@ -989,6 +1013,155 @@ fn parse_xor_address(data: &[u8], txn_id: &[u8; 12]) -> Option<SocketAddr> {
 mod tests {
     use super::*;
 
+    // TurnError tests
+    #[test]
+    fn test_turn_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let err: TurnError = io_err.into();
+        let msg = err.to_string();
+        assert!(msg.contains("IO error"));
+    }
+
+    #[test]
+    fn test_turn_error_timeout() {
+        let err = TurnError::Timeout;
+        assert_eq!(err.to_string(), "Request timeout");
+    }
+
+    #[test]
+    fn test_turn_error_invalid_response() {
+        let err = TurnError::InvalidResponse("bad data".to_string());
+        assert!(err.to_string().contains("Invalid response"));
+        assert!(err.to_string().contains("bad data"));
+    }
+
+    #[test]
+    fn test_turn_error_error_response() {
+        let err = TurnError::ErrorResponse {
+            code: 401,
+            reason: "Unauthorized".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("401"));
+        assert!(msg.contains("Unauthorized"));
+    }
+
+    #[test]
+    fn test_turn_error_auth_required() {
+        let err = TurnError::AuthRequired {
+            realm: "example.com".to_string(),
+            nonce: "abc123".to_string(),
+        };
+        assert!(err.to_string().contains("Authentication required"));
+    }
+
+    #[test]
+    fn test_turn_error_no_relay_address() {
+        let err = TurnError::NoRelayAddress;
+        assert!(err.to_string().contains("No relay address"));
+    }
+
+    #[test]
+    fn test_turn_error_not_allocated() {
+        let err = TurnError::NotAllocated;
+        assert!(err.to_string().contains("Allocation not active"));
+    }
+
+    #[test]
+    fn test_turn_error_debug() {
+        let err = TurnError::Timeout;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("Timeout"));
+    }
+
+    // TurnServer tests
+    #[test]
+    fn test_turn_server_new() {
+        let server = TurnServer::new("1.2.3.4:3478".parse().unwrap(), "user", "pass");
+
+        assert_eq!(server.username, "user");
+        assert_eq!(server.password, "pass");
+        assert_eq!(server.addr.port(), 3478);
+        assert!(server.realm.is_none());
+    }
+
+    #[test]
+    fn test_turn_server_with_realm() {
+        let mut server = TurnServer::new(
+            "turn.example.com:3478"
+                .parse::<SocketAddr>()
+                .unwrap_or_else(|_| "1.2.3.4:3478".parse().unwrap()),
+            "testuser",
+            "testpass",
+        );
+        server.realm = Some("example.com".to_string());
+
+        assert_eq!(server.username, "testuser");
+        assert_eq!(server.password, "testpass");
+        assert_eq!(server.realm.as_deref(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_turn_server_clone() {
+        let server = TurnServer::new("1.2.3.4:3478".parse().unwrap(), "user", "pass");
+        let cloned = server.clone();
+        assert_eq!(cloned.username, server.username);
+        assert_eq!(cloned.addr, server.addr);
+    }
+
+    #[test]
+    fn test_turn_server_debug() {
+        let server = TurnServer::new("1.2.3.4:3478".parse().unwrap(), "user", "pass");
+        let debug = format!("{:?}", server);
+        assert!(debug.contains("TurnServer"));
+        assert!(debug.contains("user"));
+    }
+
+    // TurnAllocation tests
+    #[test]
+    fn test_turn_allocation() {
+        let alloc = TurnAllocation {
+            relayed_addr: "203.0.113.1:49152".parse().unwrap(),
+            mapped_addr: "192.0.2.1:12345".parse().unwrap(),
+            lifetime: 600,
+            realm: "example.com".to_string(),
+            nonce: "abc123def456".to_string(),
+        };
+
+        assert_eq!(alloc.relayed_addr.port(), 49152);
+        assert_eq!(alloc.mapped_addr.port(), 12345);
+        assert_eq!(alloc.lifetime, 600);
+        assert_eq!(alloc.realm, "example.com");
+    }
+
+    #[test]
+    fn test_turn_allocation_clone() {
+        let alloc = TurnAllocation {
+            relayed_addr: "203.0.113.1:49152".parse().unwrap(),
+            mapped_addr: "192.0.2.1:12345".parse().unwrap(),
+            lifetime: 600,
+            realm: "test.realm".to_string(),
+            nonce: "nonce123".to_string(),
+        };
+        let cloned = alloc.clone();
+        assert_eq!(cloned.relayed_addr, alloc.relayed_addr);
+        assert_eq!(cloned.lifetime, alloc.lifetime);
+    }
+
+    #[test]
+    fn test_turn_allocation_debug() {
+        let alloc = TurnAllocation {
+            relayed_addr: "1.2.3.4:5000".parse().unwrap(),
+            mapped_addr: "5.6.7.8:6000".parse().unwrap(),
+            lifetime: 300,
+            realm: "realm".to_string(),
+            nonce: "nonce".to_string(),
+        };
+        let debug = format!("{:?}", alloc);
+        assert!(debug.contains("TurnAllocation"));
+    }
+
+    // Transaction ID tests
     #[test]
     fn test_generate_transaction_id() {
         let id1 = generate_transaction_id();
@@ -997,6 +1170,18 @@ mod tests {
         assert_eq!(id1.len(), 12);
     }
 
+    #[test]
+    fn test_generate_transaction_id_randomness() {
+        // Generate multiple IDs and ensure they're all different
+        let ids: Vec<_> = (0..10).map(|_| generate_transaction_id()).collect();
+        for i in 0..ids.len() {
+            for j in (i + 1)..ids.len() {
+                assert_ne!(ids[i], ids[j]);
+            }
+        }
+    }
+
+    // XOR address tests
     #[test]
     fn test_xor_address_encode_decode_ipv4() {
         let txn_id = [0x11u8; 12];
@@ -1013,18 +1198,65 @@ mod tests {
     }
 
     #[test]
-    fn test_turn_server_new() {
-        let server = TurnServer::new(
-            "1.2.3.4:3478".parse().unwrap(),
-            "user",
-            "pass",
-        );
+    fn test_xor_address_encode_decode_ipv6() {
+        let txn_id = [0x22u8; 12];
+        let addr: SocketAddr = "[2001:db8::1]:8080".parse().unwrap();
 
-        assert_eq!(server.username, "user");
-        assert_eq!(server.password, "pass");
-        assert_eq!(server.addr.port(), 3478);
+        let mut buf = BytesMut::new();
+        encode_xor_address(&mut buf, ATTR_XOR_PEER_ADDRESS, addr, &txn_id);
+
+        // Skip type and length
+        let encoded = &buf[4..];
+        let decoded = parse_xor_address(encoded, &txn_id).unwrap();
+
+        assert_eq!(decoded, addr);
     }
 
+    #[test]
+    fn test_xor_address_different_ports() {
+        let txn_id = [0x33u8; 12];
+
+        for port in [80, 443, 5060, 5061, 3478, 49152, 65535] {
+            let addr: SocketAddr = format!("10.0.0.1:{}", port).parse().unwrap();
+            let mut buf = BytesMut::new();
+            encode_xor_address(&mut buf, ATTR_XOR_MAPPED_ADDRESS, addr, &txn_id);
+            let decoded = parse_xor_address(&buf[4..], &txn_id).unwrap();
+            assert_eq!(decoded, addr);
+        }
+    }
+
+    #[test]
+    fn test_parse_xor_address_too_short() {
+        let txn_id = [0u8; 12];
+        // Less than 4 bytes
+        assert!(parse_xor_address(&[0, 1, 2], &txn_id).is_none());
+    }
+
+    #[test]
+    fn test_parse_xor_address_invalid_family() {
+        let txn_id = [0u8; 12];
+        // Unknown family (0x03)
+        let data = [0, 0x03, 0, 0, 0, 0, 0, 0];
+        assert!(parse_xor_address(&data, &txn_id).is_none());
+    }
+
+    #[test]
+    fn test_parse_xor_address_ipv4_too_short() {
+        let txn_id = [0u8; 12];
+        // IPv4 family but not enough data
+        let data = [0, AF_IPV4, 0, 0, 0, 0, 0]; // Only 7 bytes, need 8
+        assert!(parse_xor_address(&data, &txn_id).is_none());
+    }
+
+    #[test]
+    fn test_parse_xor_address_ipv6_too_short() {
+        let txn_id = [0u8; 12];
+        // IPv6 family but not enough data
+        let data = [0, AF_IPV6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; // Only 12 bytes, need 20
+        assert!(parse_xor_address(&data, &txn_id).is_none());
+    }
+
+    // Padding tests
     #[test]
     fn test_pad_to_4_bytes() {
         let mut buf = BytesMut::new();
@@ -1044,6 +1276,32 @@ mod tests {
     }
 
     #[test]
+    fn test_pad_to_4_bytes_single() {
+        let mut buf = BytesMut::new();
+        buf.put_slice(b"a");
+        pad_to_4_bytes(&mut buf, 1);
+        assert_eq!(buf.len(), 4);
+    }
+
+    #[test]
+    fn test_pad_to_4_bytes_empty() {
+        let mut buf = BytesMut::new();
+        pad_to_4_bytes(&mut buf, 0);
+        assert_eq!(buf.len(), 0); // No padding needed for 0-length
+    }
+
+    #[test]
+    fn test_pad_to_4_bytes_various() {
+        for len in 0..20 {
+            let mut buf = BytesMut::new();
+            buf.extend_from_slice(&vec![0u8; len]);
+            pad_to_4_bytes(&mut buf, len);
+            assert_eq!(buf.len() % 4, 0);
+        }
+    }
+
+    // Long-term key computation tests
+    #[test]
     fn test_compute_long_term_key() {
         // Test vector from RFC 5389 / RFC 5766 examples
         // Key = MD5("user:realm:password")
@@ -1055,6 +1313,28 @@ mod tests {
         assert_ne!(key, key2);
     }
 
+    #[test]
+    fn test_compute_long_term_key_deterministic() {
+        let key1 = compute_long_term_key("alice", "example.com", "secret");
+        let key2 = compute_long_term_key("alice", "example.com", "secret");
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_compute_long_term_key_different_realm() {
+        let key1 = compute_long_term_key("user", "realm1.com", "pass");
+        let key2 = compute_long_term_key("user", "realm2.com", "pass");
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_compute_long_term_key_different_password() {
+        let key1 = compute_long_term_key("user", "realm", "pass1");
+        let key2 = compute_long_term_key("user", "realm", "pass2");
+        assert_ne!(key1, key2);
+    }
+
+    // MESSAGE-INTEGRITY tests
     #[test]
     fn test_message_integrity_roundtrip() {
         // Build a simple STUN message with MESSAGE-INTEGRITY
@@ -1088,7 +1368,12 @@ mod tests {
         assert!(verify_message_integrity(&msg, username, realm, password));
 
         // Verify with wrong password fails
-        assert!(!verify_message_integrity(&msg, username, realm, "wrongpass"));
+        assert!(!verify_message_integrity(
+            &msg,
+            username,
+            realm,
+            "wrongpass"
+        ));
     }
 
     #[test]
@@ -1110,5 +1395,145 @@ mod tests {
         msg.put_u8(0);
 
         assert!(verify_message_integrity(&msg, "user", "realm", "pass"));
+    }
+
+    #[test]
+    fn test_message_integrity_too_short() {
+        // Message too short to contain a valid header
+        let msg = [0u8; 10];
+        assert!(!verify_message_integrity(&msg, "user", "realm", "pass"));
+    }
+
+    #[test]
+    fn test_message_integrity_wrong_username() {
+        let mut msg = BytesMut::new();
+        msg.put_u16(ALLOCATE_REQUEST);
+        msg.put_u16(4);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&[0x33u8; 12]);
+
+        msg.put_u16(ATTR_REQUESTED_TRANSPORT);
+        msg.put_u16(4);
+        msg.put_u8(TRANSPORT_UDP);
+        msg.put_u8(0);
+        msg.put_u8(0);
+        msg.put_u8(0);
+
+        add_message_integrity(&mut msg, "correct_user", "realm", "pass");
+
+        // Wrong username should fail
+        assert!(!verify_message_integrity(
+            &msg,
+            "wrong_user",
+            "realm",
+            "pass"
+        ));
+    }
+
+    #[test]
+    fn test_message_integrity_wrong_realm() {
+        let mut msg = BytesMut::new();
+        msg.put_u16(ALLOCATE_REQUEST);
+        msg.put_u16(4);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&[0x44u8; 12]);
+
+        msg.put_u16(ATTR_REQUESTED_TRANSPORT);
+        msg.put_u16(4);
+        msg.put_u8(TRANSPORT_UDP);
+        msg.put_u8(0);
+        msg.put_u8(0);
+        msg.put_u8(0);
+
+        add_message_integrity(&mut msg, "user", "correct_realm", "pass");
+
+        // Wrong realm should fail
+        assert!(!verify_message_integrity(
+            &msg,
+            "user",
+            "wrong_realm",
+            "pass"
+        ));
+    }
+
+    // Constant tests
+    #[test]
+    fn test_magic_cookie() {
+        assert_eq!(MAGIC_COOKIE, 0x2112A442);
+    }
+
+    #[test]
+    fn test_address_families() {
+        assert_eq!(AF_IPV4, 0x01);
+        assert_eq!(AF_IPV6, 0x02);
+    }
+
+    #[test]
+    fn test_transport_udp() {
+        assert_eq!(TRANSPORT_UDP, 17);
+    }
+
+    #[test]
+    fn test_message_types() {
+        assert_eq!(ALLOCATE_REQUEST, 0x0003);
+        assert_eq!(ALLOCATE_RESPONSE, 0x0103);
+        assert_eq!(ALLOCATE_ERROR, 0x0113);
+        assert_eq!(REFRESH_REQUEST, 0x0004);
+        assert_eq!(REFRESH_RESPONSE, 0x0104);
+        assert_eq!(SEND_INDICATION, 0x0016);
+        assert_eq!(DATA_INDICATION, 0x0017);
+        assert_eq!(CREATE_PERMISSION_REQUEST, 0x0008);
+        assert_eq!(CREATE_PERMISSION_RESPONSE, 0x0108);
+    }
+
+    #[test]
+    fn test_attribute_types() {
+        assert_eq!(ATTR_XOR_MAPPED_ADDRESS, 0x0020);
+        assert_eq!(ATTR_XOR_RELAYED_ADDRESS, 0x0016);
+        assert_eq!(ATTR_XOR_PEER_ADDRESS, 0x0012);
+        assert_eq!(ATTR_LIFETIME, 0x000D);
+        assert_eq!(ATTR_DATA, 0x0013);
+        assert_eq!(ATTR_REQUESTED_TRANSPORT, 0x0019);
+        assert_eq!(ATTR_USERNAME, 0x0006);
+        assert_eq!(ATTR_REALM, 0x0014);
+        assert_eq!(ATTR_NONCE, 0x0015);
+        assert_eq!(ATTR_MESSAGE_INTEGRITY, 0x0008);
+        assert_eq!(ATTR_ERROR_CODE, 0x0009);
+    }
+
+    // Encode/decode round-trip with various addresses
+    #[test]
+    fn test_xor_address_loopback() {
+        let txn_id = [0xAA; 12];
+        let addr: SocketAddr = "127.0.0.1:1234".parse().unwrap();
+
+        let mut buf = BytesMut::new();
+        encode_xor_address(&mut buf, ATTR_XOR_MAPPED_ADDRESS, addr, &txn_id);
+        let decoded = parse_xor_address(&buf[4..], &txn_id).unwrap();
+        assert_eq!(decoded, addr);
+    }
+
+    #[test]
+    fn test_xor_address_ipv6_loopback() {
+        let txn_id = [0xBB; 12];
+        let addr: SocketAddr = "[::1]:5060".parse().unwrap();
+
+        let mut buf = BytesMut::new();
+        encode_xor_address(&mut buf, ATTR_XOR_MAPPED_ADDRESS, addr, &txn_id);
+        let decoded = parse_xor_address(&buf[4..], &txn_id).unwrap();
+        assert_eq!(decoded, addr);
+    }
+
+    #[test]
+    fn test_xor_address_full_ipv6() {
+        let txn_id = [0xCC; 12];
+        let addr: SocketAddr = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:443"
+            .parse()
+            .unwrap();
+
+        let mut buf = BytesMut::new();
+        encode_xor_address(&mut buf, ATTR_XOR_RELAYED_ADDRESS, addr, &txn_id);
+        let decoded = parse_xor_address(&buf[4..], &txn_id).unwrap();
+        assert_eq!(decoded, addr);
     }
 }

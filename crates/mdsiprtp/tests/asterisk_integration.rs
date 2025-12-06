@@ -9,8 +9,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use mdsiprtp_sip::{SipMessage, SipRequest, Method, generate_branch, generate_call_id, generate_tag};
 use mdsiprtp_session::{RegistrationConfig, RegistrationManager, RegistrationState};
+use mdsiprtp_sip::{
+    generate_branch, generate_call_id, generate_tag, Method, SipMessage, SipRequest,
+};
 use mdsiprtp_transport::UdpTransport;
 
 /// Asterisk address (from docker compose)
@@ -102,7 +104,10 @@ async fn test_register_with_asterisk() {
 
     // Send to Asterisk
     let dest: SocketAddr = ASTERISK_ADDR.parse().unwrap();
-    transport.send_to(&request.to_bytes(), dest).await.expect("Failed to send");
+    transport
+        .send_to(&request.to_bytes(), dest)
+        .await
+        .expect("Failed to send");
 
     // Wait for response (should be 401 Unauthorized)
     let response_msg = timeout(Duration::from_secs(5), transport.recv())
@@ -113,7 +118,11 @@ async fn test_register_with_asterisk() {
     let msg = SipMessage::parse(&response_msg.data).expect("Failed to parse response");
     let response = msg.as_response().expect("Expected response");
 
-    println!("Got response: {} {}", response.status_code(), response.reason());
+    println!(
+        "Got response: {} {}",
+        response.status_code(),
+        response.reason()
+    );
 
     // Handle the response (likely 401, needs auth)
     let result = reg.handle_response(response);
@@ -122,7 +131,10 @@ async fn test_register_with_asterisk() {
         Ok(Some(auth_request)) => {
             // Got 401, retry with authentication
             println!("Retrying with authentication...");
-            transport.send_to(&auth_request.to_bytes(), dest).await.expect("Failed to send auth");
+            transport
+                .send_to(&auth_request.to_bytes(), dest)
+                .await
+                .expect("Failed to send auth");
 
             // Wait for final response
             let final_msg = timeout(Duration::from_secs(5), transport.recv())
@@ -130,17 +142,30 @@ async fn test_register_with_asterisk() {
                 .expect("Timeout waiting for auth response")
                 .expect("Failed to receive auth response");
 
-            let final_parsed = SipMessage::parse(&final_msg.data).expect("Failed to parse auth response");
+            let final_parsed =
+                SipMessage::parse(&final_msg.data).expect("Failed to parse auth response");
             let final_response = final_parsed.as_response().expect("Expected response");
 
-            println!("Auth response: {} {}", final_response.status_code(), final_response.reason());
+            println!(
+                "Auth response: {} {}",
+                final_response.status_code(),
+                final_response.reason()
+            );
 
             let final_result = reg.handle_response(final_response);
-            assert!(final_result.is_ok(), "Auth handling failed: {:?}", final_result.err());
+            assert!(
+                final_result.is_ok(),
+                "Auth handling failed: {:?}",
+                final_result.err()
+            );
 
             // Should be registered now
-            assert_eq!(reg.state(), RegistrationState::Registered,
-                       "Expected Registered state, got {:?}", reg.state());
+            assert_eq!(
+                reg.state(),
+                RegistrationState::Registered,
+                "Expected Registered state, got {:?}",
+                reg.state()
+            );
             assert!(reg.is_registered());
         }
         Ok(None) => {
@@ -156,8 +181,13 @@ async fn test_register_with_asterisk() {
     println!("Registration successful!");
 
     // Now unregister
-    let unreg_request = reg.create_unregister().expect("Failed to create unregister");
-    transport.send_to(&unreg_request.to_bytes(), dest).await.expect("Failed to send unregister");
+    let unreg_request = reg
+        .create_unregister()
+        .expect("Failed to create unregister");
+    transport
+        .send_to(&unreg_request.to_bytes(), dest)
+        .await
+        .expect("Failed to send unregister");
 
     // Wait for unregister response
     let unreg_msg = timeout(Duration::from_secs(5), transport.recv())
@@ -165,10 +195,15 @@ async fn test_register_with_asterisk() {
         .expect("Timeout waiting for unregister response")
         .expect("Failed to receive unregister response");
 
-    let unreg_parsed = SipMessage::parse(&unreg_msg.data).expect("Failed to parse unregister response");
+    let unreg_parsed =
+        SipMessage::parse(&unreg_msg.data).expect("Failed to parse unregister response");
     let unreg_response = unreg_parsed.as_response().expect("Expected response");
 
-    println!("Unregister response: {} {}", unreg_response.status_code(), unreg_response.reason());
+    println!(
+        "Unregister response: {} {}",
+        unreg_response.status_code(),
+        unreg_response.reason()
+    );
 
     // Handle unregister response
     let _ = reg.handle_response(unreg_response);
@@ -211,23 +246,34 @@ async fn test_outbound_call_to_echo() {
          a=rtpmap:0 PCMU/8000\r\n\
          a=rtpmap:8 PCMA/8000\r\n\
          a=sendrecv\r\n",
-        call_id, local.ip(), local.ip(), 20000
+        call_id,
+        local.ip(),
+        local.ip(),
+        20000
     );
 
     let request = SipRequest::builder()
         .method(Method::Invite)
-        .uri(&format!("sip:*43@{}", TEST_DOMAIN))  // Echo test extension
+        .uri(&format!("sip:*43@{}", TEST_DOMAIN)) // Echo test extension
         .via(&local.ip().to_string(), local.port(), "UDP", &branch)
         .from(&format!("sip:{}@{}", TEST_USER, TEST_DOMAIN), &from_tag)
         .to(&format!("sip:*43@{}", TEST_DOMAIN))
         .call_id(&call_id)
         .cseq(1)
-        .contact(&format!("sip:{}@{}:{}", TEST_USER, local.ip(), local.port()))
+        .contact(&format!(
+            "sip:{}@{}:{}",
+            TEST_USER,
+            local.ip(),
+            local.port()
+        ))
         .body(sdp.into_bytes(), "application/sdp")
         .build()
         .expect("Failed to build INVITE");
 
-    transport.send_to(&request.to_bytes(), dest).await.expect("Failed to send INVITE");
+    transport
+        .send_to(&request.to_bytes(), dest)
+        .await
+        .expect("Failed to send INVITE");
 
     // Wait for response (could be 100, 180, 401, 200, etc.)
     let mut cseq = 1;
@@ -244,7 +290,11 @@ async fn test_outbound_call_to_echo() {
         let msg = SipMessage::parse(&response_msg.data).expect("Failed to parse response");
         let response = msg.as_response().expect("Expected response");
 
-        println!("INVITE response: {} {}", response.status_code(), response.reason());
+        println!(
+            "INVITE response: {} {}",
+            response.status_code(),
+            response.reason()
+        );
 
         match response.status_code() {
             100 => {
@@ -274,7 +324,10 @@ async fn test_outbound_call_to_echo() {
                     .build()
                     .expect("Failed to build ACK");
 
-                transport.send_to(&ack.to_bytes(), dest).await.expect("Failed to send ACK");
+                transport
+                    .send_to(&ack.to_bytes(), dest)
+                    .await
+                    .expect("Failed to send ACK");
                 println!("Sent ACK");
 
                 // Wait a moment, then send BYE
@@ -294,7 +347,10 @@ async fn test_outbound_call_to_echo() {
                     .build()
                     .expect("Failed to build BYE");
 
-                transport.send_to(&bye.to_bytes(), dest).await.expect("Failed to send BYE");
+                transport
+                    .send_to(&bye.to_bytes(), dest)
+                    .await
+                    .expect("Failed to send BYE");
                 println!("Sent BYE");
 
                 // Wait for 200 OK to BYE
@@ -303,9 +359,14 @@ async fn test_outbound_call_to_echo() {
                     .expect("Timeout waiting for BYE response")
                     .expect("Failed to receive BYE response");
 
-                let bye_msg = SipMessage::parse(&bye_response.data).expect("Failed to parse BYE response");
+                let bye_msg =
+                    SipMessage::parse(&bye_response.data).expect("Failed to parse BYE response");
                 let bye_resp = bye_msg.as_response().expect("Expected response");
-                println!("BYE response: {} {}", bye_resp.status_code(), bye_resp.reason());
+                println!(
+                    "BYE response: {} {}",
+                    bye_resp.status_code(),
+                    bye_resp.reason()
+                );
 
                 assert!(bye_resp.status_code() == 200, "Expected 200 OK to BYE");
                 println!("Call ended successfully!");
@@ -339,7 +400,10 @@ async fn test_outbound_call_to_echo() {
                     .build()
                     .expect("Failed to build ACK");
 
-                transport.send_to(&ack.to_bytes(), dest).await.expect("Failed to send ACK");
+                transport
+                    .send_to(&ack.to_bytes(), dest)
+                    .await
+                    .expect("Failed to send ACK");
 
                 // Retry with authentication
                 cseq += 1;
@@ -351,7 +415,8 @@ async fn test_outbound_call_to_echo() {
                     "INVITE",
                     &format!("sip:*43@{}", TEST_DOMAIN),
                     None,
-                ).expect("Failed to create digest response");
+                )
+                .expect("Failed to create digest response");
 
                 let auth_header = if response.status_code() == 401 {
                     ("Authorization", digest_response.to_header_value())
@@ -370,7 +435,10 @@ async fn test_outbound_call_to_echo() {
                      a=rtpmap:0 PCMU/8000\r\n\
                      a=rtpmap:8 PCMA/8000\r\n\
                      a=sendrecv\r\n",
-                    call_id, local.ip(), local.ip(), 20000
+                    call_id,
+                    local.ip(),
+                    local.ip(),
+                    20000
                 );
 
                 let mut builder = SipRequest::builder()
@@ -381,7 +449,12 @@ async fn test_outbound_call_to_echo() {
                     .to(&format!("sip:*43@{}", TEST_DOMAIN))
                     .call_id(&call_id)
                     .cseq(cseq)
-                    .contact(&format!("sip:{}@{}:{}", TEST_USER, local.ip(), local.port()))
+                    .contact(&format!(
+                        "sip:{}@{}:{}",
+                        TEST_USER,
+                        local.ip(),
+                        local.port()
+                    ))
                     .body(sdp_auth.into_bytes(), "application/sdp");
 
                 // Add auth header
@@ -393,7 +466,10 @@ async fn test_outbound_call_to_echo() {
 
                 let auth_request = builder.build().expect("Failed to build auth INVITE");
 
-                transport.send_to(&auth_request.to_bytes(), dest).await.expect("Failed to send auth INVITE");
+                transport
+                    .send_to(&auth_request.to_bytes(), dest)
+                    .await
+                    .expect("Failed to send auth INVITE");
                 authenticated = true;
                 continue;
             }
@@ -407,7 +483,10 @@ async fn test_outbound_call_to_echo() {
     }
 
     // Test passes if we got here
-    assert!(received_100 || received_18x || true, "Should have received some response");
+    assert!(
+        received_100 || received_18x || true,
+        "Should have received some response"
+    );
 }
 
 /// Test making an OPTIONS request to Asterisk
@@ -439,7 +518,10 @@ async fn test_options_request() {
         .expect("Failed to build OPTIONS");
 
     let dest: SocketAddr = ASTERISK_ADDR.parse().unwrap();
-    transport.send_to(&request.to_bytes(), dest).await.expect("Failed to send");
+    transport
+        .send_to(&request.to_bytes(), dest)
+        .await
+        .expect("Failed to send");
 
     let response_msg = timeout(Duration::from_secs(5), transport.recv())
         .await
@@ -449,11 +531,17 @@ async fn test_options_request() {
     let msg = SipMessage::parse(&response_msg.data).expect("Failed to parse");
     let response = msg.as_response().expect("Expected response");
 
-    println!("OPTIONS response: {} {}", response.status_code(), response.reason());
+    println!(
+        "OPTIONS response: {} {}",
+        response.status_code(),
+        response.reason()
+    );
 
     // Should get 200 OK or 401 Unauthorized
     assert!(
         response.status_code() == 200 || response.status_code() == 401,
-        "Unexpected response: {} {}", response.status_code(), response.reason()
+        "Unexpected response: {} {}",
+        response.status_code(),
+        response.reason()
     );
 }

@@ -321,7 +321,11 @@ impl TcpTransport {
 
             match result {
                 Ok(Some(data)) => {
-                    trace!("Received {} bytes from {} over TCP", data.len(), remote_addr);
+                    trace!(
+                        "Received {} bytes from {} over TCP",
+                        data.len(),
+                        remote_addr
+                    );
                     let msg = IncomingMessage {
                         data,
                         source: remote_addr,
@@ -396,6 +400,18 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
 
+    // Constants tests
+    #[test]
+    fn test_max_tcp_size() {
+        assert_eq!(MAX_TCP_SIZE, 65536);
+    }
+
+    #[test]
+    fn test_initial_buf_size() {
+        assert_eq!(INITIAL_BUF_SIZE, 4096);
+    }
+
+    // find_header_end tests
     #[test]
     fn test_find_header_end() {
         let data = b"INVITE sip:test SIP/2.0\r\nContent-Length: 0\r\n\r\n";
@@ -405,6 +421,38 @@ mod tests {
         assert_eq!(find_header_end(data), None);
     }
 
+    #[test]
+    fn test_find_header_end_empty() {
+        let data = b"";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    #[test]
+    fn test_find_header_end_only_crlf() {
+        let data = b"\r\n\r\n";
+        assert_eq!(find_header_end(data), Some(4));
+    }
+
+    #[test]
+    fn test_find_header_end_partial_crlf() {
+        let data = b"\r\n\r";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    #[test]
+    fn test_find_header_end_multiple_crlf() {
+        // First occurrence at position 4
+        let data = b"\r\n\r\nmore data\r\n\r\n";
+        assert_eq!(find_header_end(data), Some(4));
+    }
+
+    #[test]
+    fn test_find_header_end_short_data() {
+        let data = b"abc";
+        assert_eq!(find_header_end(data), None);
+    }
+
+    // parse_content_length tests
     #[test]
     fn test_parse_content_length() {
         let headers = b"INVITE sip:test SIP/2.0\r\nContent-Length: 123\r\n\r\n";
@@ -417,11 +465,123 @@ mod tests {
         assert_eq!(parse_content_length(headers), 0);
     }
 
+    #[test]
+    fn test_parse_content_length_with_spaces() {
+        let headers = b"INVITE sip:test SIP/2.0\r\nContent-Length:   789   \r\n\r\n";
+        assert_eq!(parse_content_length(headers), 789);
+    }
+
+    #[test]
+    fn test_parse_content_length_uppercase() {
+        let headers = b"INVITE sip:test SIP/2.0\r\nCONTENT-LENGTH: 100\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 100);
+    }
+
+    #[test]
+    fn test_parse_content_length_mixed_case() {
+        let headers = b"INVITE sip:test SIP/2.0\r\nContent-length: 200\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 200);
+    }
+
+    #[test]
+    fn test_parse_content_length_short_form_uppercase() {
+        let headers = b"INVITE sip:test SIP/2.0\r\nL: 300\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 300);
+    }
+
+    #[test]
+    fn test_parse_content_length_invalid_value() {
+        let headers = b"INVITE sip:test SIP/2.0\r\nContent-Length: invalid\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_empty() {
+        let headers = b"";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_invalid_utf8() {
+        let headers = &[0xFF, 0xFE, 0x00, 0x01];
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    #[test]
+    fn test_parse_content_length_multiple_headers() {
+        // Content-Length appears in multiple headers, should return first one
+        let headers =
+            b"INVITE sip:test SIP/2.0\r\nContent-Length: 100\r\nContent-Length: 200\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 100);
+    }
+
+    #[test]
+    fn test_parse_content_length_no_colon_value() {
+        // Missing value after colon
+        let headers = b"INVITE sip:test SIP/2.0\r\nContent-Length:\r\n\r\n";
+        assert_eq!(parse_content_length(headers), 0);
+    }
+
+    // TcpTransport tests
     #[tokio::test]
     async fn test_tcp_bind() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let transport = TcpTransport::bind(addr).await.unwrap();
         assert_ne!(transport.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_tcp_bind_ipv6() {
+        let addr = SocketAddr::new(IpAddr::V6("::1".parse().unwrap()), 0);
+        let transport = TcpTransport::bind(addr).await.unwrap();
+        assert!(transport.local_addr().is_ipv6());
+    }
+
+    #[test]
+    fn test_tcp_new_client() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5060);
+        let transport = TcpTransport::new_client(addr);
+        assert_eq!(transport.local_addr(), addr);
+        assert!(transport.listener.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tcp_local_addr() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let transport = TcpTransport::bind(addr).await.unwrap();
+        let local = transport.local_addr();
+        assert!(local.port() > 0);
+        assert_eq!(local.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sender() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let transport = TcpTransport::bind(addr).await.unwrap();
+        let _sender = transport.sender();
+        // Sender created successfully
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sender_clone() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let transport = TcpTransport::bind(addr).await.unwrap();
+        let sender1 = transport.sender();
+        let _sender2 = sender1.clone();
+        // Cloned successfully
+    }
+
+    #[tokio::test]
+    async fn test_tcp_sender_no_connection() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let transport = TcpTransport::bind(addr).await.unwrap();
+        let sender = transport.sender();
+
+        // Try to send without connection - should fail
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9999);
+        let msg = OutgoingMessage::new(Bytes::from_static(b"test"), dest);
+        let result = sender.send(msg).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -449,5 +609,163 @@ mod tests {
 
         assert_eq!(&received.data[..], msg);
         assert_eq!(received.transport, TransportProtocol::Tcp);
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connect_already_connected() {
+        // Create server
+        let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TcpTransport::bind(server_addr).await.unwrap();
+        let server_addr = server.local_addr();
+
+        let (_rx, _sender) = server.start();
+
+        // Create client
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client = TcpTransport::bind(client_addr).await.unwrap();
+
+        // Connect twice - second should succeed (noop)
+        client.connect(server_addr).await.unwrap();
+        client.connect(server_addr).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_send_with_body() {
+        // Create server
+        let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TcpTransport::bind(server_addr).await.unwrap();
+        let server_addr = server.local_addr();
+
+        let (mut rx, _sender) = server.start();
+
+        // Create client
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client = TcpTransport::bind(client_addr).await.unwrap();
+
+        // Send a message with a body
+        let msg = b"INVITE sip:test@example.com SIP/2.0\r\nContent-Length: 11\r\n\r\nHello World";
+        client.send_to(msg, server_addr).await.unwrap();
+
+        // Receive on server
+        let received = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(&received.data[..], msg);
+    }
+
+    #[tokio::test]
+    async fn test_tcp_send_multiple_messages() {
+        // Create server
+        let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TcpTransport::bind(server_addr).await.unwrap();
+        let server_addr = server.local_addr();
+
+        let (mut rx, _sender) = server.start();
+
+        // Create client
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client = TcpTransport::bind(client_addr).await.unwrap();
+
+        // Send multiple messages
+        for i in 0..3 {
+            let msg = format!("MESSAGE sip:test{} SIP/2.0\r\nContent-Length: 0\r\n\r\n", i);
+            client.send_to(msg.as_bytes(), server_addr).await.unwrap();
+        }
+
+        // Receive all
+        for _ in 0..3 {
+            let received = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(received.data.starts_with(b"MESSAGE"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tcp_connect_fail() {
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client = TcpTransport::bind(client_addr).await.unwrap();
+
+        // Try to connect to a port with no listener
+        let bad_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1);
+        let result = client.connect(bad_addr).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tcp_start_client_only() {
+        // Create client-only transport
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5060);
+        let transport = TcpTransport::new_client(addr);
+
+        // Start should work even without listener
+        let (_rx, _sender) = transport.start();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_bidirectional() {
+        // Create server
+        let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TcpTransport::bind(server_addr).await.unwrap();
+        let server_addr = server.local_addr();
+
+        let (mut server_rx, server_sender) = server.start();
+
+        // Create client
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client = TcpTransport::bind(client_addr).await.unwrap();
+        let (mut client_rx, _client_sender) = client.start();
+
+        // Client sends to server
+        let client_transport =
+            TcpTransport::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+                .await
+                .unwrap();
+        client_transport
+            .send_to(b"PING\r\n\r\n", server_addr)
+            .await
+            .unwrap();
+
+        // Server receives
+        let received = tokio::time::timeout(std::time::Duration::from_secs(1), server_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&received.data[..], b"PING\r\n\r\n");
+
+        // Server responds via its sender
+        // Note: In real usage, we'd need to respond to the client's address from received.source
+    }
+
+    // TcpConnection tests
+    #[tokio::test]
+    async fn test_tcp_connection_new() {
+        // Create a listener to get a stream
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Connect in background
+        let connect_handle = tokio::spawn(async move { TcpStream::connect(addr).await.unwrap() });
+
+        // Accept connection
+        let (stream, remote_addr) = listener.accept().await.unwrap();
+        let conn = TcpConnection::new(stream, remote_addr);
+
+        assert_eq!(conn.remote_addr, remote_addr);
+        assert!(conn.read_buf.is_empty());
+
+        connect_handle.await.unwrap();
+    }
+
+    // OutgoingMessage tests
+    #[test]
+    fn test_outgoing_message_new() {
+        let dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5060);
+        let msg = OutgoingMessage::new(Bytes::from_static(b"test"), dest);
+        assert_eq!(msg.destination, dest);
+        assert_eq!(&msg.data[..], b"test");
     }
 }

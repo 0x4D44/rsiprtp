@@ -179,6 +179,7 @@ impl ActiveTimer {
 mod tests {
     use super::*;
 
+    // TimerValues tests
     #[test]
     fn test_default_timers() {
         let tv = TimerValues::default();
@@ -188,15 +189,93 @@ mod tests {
     }
 
     #[test]
+    fn test_with_t1() {
+        let tv = TimerValues::with_t1(250);
+        assert_eq!(tv.t1, Duration::from_millis(250));
+        // T2 and T4 should still be default
+        assert_eq!(tv.t2, Duration::from_secs(4));
+        assert_eq!(tv.t4, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_timer_a() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_a(), Duration::from_millis(500));
+
+        let tv_custom = TimerValues::with_t1(100);
+        assert_eq!(tv_custom.timer_a(), Duration::from_millis(100));
+    }
+
+    #[test]
     fn test_timer_b() {
         let tv = TimerValues::default();
-        assert_eq!(tv.timer_b(), Duration::from_secs(32));
+        assert_eq!(tv.timer_b(), Duration::from_secs(32)); // 64 * 500ms
+
+        let tv_custom = TimerValues::with_t1(250);
+        assert_eq!(tv_custom.timer_b(), Duration::from_millis(16000)); // 64 * 250ms
+    }
+
+    #[test]
+    fn test_timer_c() {
+        let tv = TimerValues::default();
+        // > 3 minutes
+        assert!(tv.timer_c() > Duration::from_secs(180));
+        assert_eq!(tv.timer_c(), Duration::from_secs(181));
+    }
+
+    #[test]
+    fn test_timer_d() {
+        let tv = TimerValues::default();
+        // > 32 seconds
+        assert!(tv.timer_d() > Duration::from_secs(32));
+        assert_eq!(tv.timer_d(), Duration::from_secs(33));
+    }
+
+    #[test]
+    fn test_timer_e() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_e(), Duration::from_millis(500));
+
+        let tv_custom = TimerValues::with_t1(200);
+        assert_eq!(tv_custom.timer_e(), Duration::from_millis(200));
     }
 
     #[test]
     fn test_timer_f() {
         let tv = TimerValues::default();
         assert_eq!(tv.timer_f(), Duration::from_secs(32));
+    }
+
+    #[test]
+    fn test_timer_g() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_g(), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_timer_h() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_h(), Duration::from_secs(32)); // 64 * 500ms
+    }
+
+    #[test]
+    fn test_timer_i() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_i(), Duration::from_secs(5)); // T4
+    }
+
+    #[test]
+    fn test_timer_j() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_j(true), Duration::ZERO);
+        assert_eq!(tv.timer_j(false), Duration::from_secs(32)); // 64 * T1
+    }
+
+    #[test]
+    fn test_timer_k_reliable() {
+        let tv = TimerValues::default();
+        assert_eq!(tv.timer_k(true), Duration::ZERO);
+        assert_eq!(tv.timer_k(false), Duration::from_secs(5)); // T4
     }
 
     #[test]
@@ -214,9 +293,110 @@ mod tests {
     }
 
     #[test]
-    fn test_timer_k_reliable() {
+    fn test_retransmit_immediately_capped() {
         let tv = TimerValues::default();
-        assert_eq!(tv.timer_k(true), Duration::ZERO);
-        assert_eq!(tv.timer_k(false), Duration::from_secs(5));
+        // If current is already >= T2, should stay at T2
+        let current = Duration::from_secs(10);
+        assert_eq!(tv.next_retransmit(current), Duration::from_secs(4));
+    }
+
+    #[test]
+    fn test_timer_values_debug() {
+        let tv = TimerValues::default();
+        let debug = format!("{:?}", tv);
+        assert!(debug.contains("TimerValues"));
+    }
+
+    #[test]
+    fn test_timer_values_clone() {
+        let tv = TimerValues::default();
+        let cloned = tv;
+        assert_eq!(cloned.t1, tv.t1);
+        assert_eq!(cloned.t2, tv.t2);
+    }
+
+    // Timer enum tests
+    #[test]
+    fn test_timer_debug() {
+        assert!(format!("{:?}", Timer::A).contains("A"));
+        assert!(format!("{:?}", Timer::B).contains("B"));
+    }
+
+    #[test]
+    fn test_timer_clone() {
+        let t = Timer::A;
+        let cloned = t;
+        assert_eq!(t, cloned);
+    }
+
+    #[test]
+    fn test_timer_eq() {
+        assert_eq!(Timer::A, Timer::A);
+        assert_ne!(Timer::A, Timer::B);
+    }
+
+    #[test]
+    fn test_timer_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(Timer::A);
+        set.insert(Timer::B);
+        set.insert(Timer::A); // duplicate
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_timer_display() {
+        assert_eq!(Timer::A.to_string(), "Timer A");
+        assert_eq!(Timer::B.to_string(), "Timer B");
+        assert_eq!(Timer::C.to_string(), "Timer C");
+        assert_eq!(Timer::D.to_string(), "Timer D");
+        assert_eq!(Timer::E.to_string(), "Timer E");
+        assert_eq!(Timer::F.to_string(), "Timer F");
+        assert_eq!(Timer::G.to_string(), "Timer G");
+        assert_eq!(Timer::H.to_string(), "Timer H");
+        assert_eq!(Timer::I.to_string(), "Timer I");
+        assert_eq!(Timer::J.to_string(), "Timer J");
+        assert_eq!(Timer::K.to_string(), "Timer K");
+    }
+
+    // ActiveTimer tests
+    #[test]
+    fn test_active_timer_new() {
+        let timer = ActiveTimer::new(Timer::A, 1000000);
+        assert_eq!(timer.timer, Timer::A);
+        assert_eq!(timer.deadline_us, 1000000);
+    }
+
+    #[test]
+    fn test_active_timer_is_expired() {
+        let timer = ActiveTimer::new(Timer::B, 1000);
+
+        // Not expired yet
+        assert!(!timer.is_expired(500));
+        assert!(!timer.is_expired(999));
+
+        // Exactly at deadline - considered expired
+        assert!(timer.is_expired(1000));
+
+        // Past deadline
+        assert!(timer.is_expired(1001));
+        assert!(timer.is_expired(2000));
+    }
+
+    #[test]
+    fn test_active_timer_debug() {
+        let timer = ActiveTimer::new(Timer::A, 12345);
+        let debug = format!("{:?}", timer);
+        assert!(debug.contains("ActiveTimer"));
+        assert!(debug.contains("12345"));
+    }
+
+    #[test]
+    fn test_active_timer_clone() {
+        let timer = ActiveTimer::new(Timer::C, 5000);
+        let cloned = timer;
+        assert_eq!(cloned.timer, timer.timer);
+        assert_eq!(cloned.deadline_us, timer.deadline_us);
     }
 }

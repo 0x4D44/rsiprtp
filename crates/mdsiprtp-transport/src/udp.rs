@@ -47,11 +47,7 @@ impl UdpTransport {
 
     /// Send a message to a destination.
     pub async fn send(&self, msg: OutgoingMessage) -> Result<()> {
-        trace!(
-            "Sending {} bytes to {}",
-            msg.data.len(),
-            msg.destination
-        );
+        trace!("Sending {} bytes to {}", msg.data.len(), msg.destination);
         self.socket.send_to(&msg.data, msg.destination).await?;
         Ok(())
     }
@@ -134,11 +130,7 @@ pub struct UdpSender {
 impl UdpSender {
     /// Send a message.
     pub async fn send(&self, msg: OutgoingMessage) -> Result<()> {
-        trace!(
-            "Sending {} bytes to {}",
-            msg.data.len(),
-            msg.destination
-        );
+        trace!("Sending {} bytes to {}", msg.data.len(), msg.destination);
         self.socket.send_to(&msg.data, msg.destination).await?;
         Ok(())
     }
@@ -156,11 +148,57 @@ mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
 
+    // Constants tests
+    #[test]
+    fn test_max_udp_size() {
+        assert_eq!(MAX_UDP_SIZE, 65535);
+    }
+
+    #[test]
+    fn test_mtu_safe_size() {
+        assert_eq!(MTU_SAFE_SIZE, 1300);
+    }
+
+    // UdpTransport tests
     #[tokio::test]
     async fn test_udp_bind() {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let transport = UdpTransport::bind(addr).await.unwrap();
         assert_ne!(transport.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_udp_bind_ipv6() {
+        let addr = SocketAddr::new(IpAddr::V6("::1".parse().unwrap()), 0);
+        let transport = UdpTransport::bind(addr).await.unwrap();
+        assert!(transport.local_addr().is_ipv6());
+    }
+
+    #[tokio::test]
+    async fn test_udp_local_addr() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let transport = UdpTransport::bind(addr).await.unwrap();
+        let local = transport.local_addr();
+        assert!(local.port() > 0);
+        assert_eq!(local.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[tokio::test]
+    async fn test_udp_send() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+        let t2_addr = t2.local_addr();
+
+        // Send using OutgoingMessage
+        let msg = OutgoingMessage::new(Bytes::from_static(b"SIP/2.0 200 OK\r\n\r\n"), t2_addr);
+        t1.send(msg).await.unwrap();
+
+        // Receive on t2
+        let received = t2.recv().await.unwrap();
+        assert_eq!(&received.data[..], b"SIP/2.0 200 OK\r\n\r\n");
     }
 
     #[tokio::test]
@@ -187,6 +225,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_udp_send_recv_large() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+        let t2_addr = t2.local_addr();
+
+        // Send a larger message (close to MTU_SAFE_SIZE)
+        let data = vec![b'X'; MTU_SAFE_SIZE];
+        t1.send_to(&data, t2_addr).await.unwrap();
+
+        let received = t2.recv().await.unwrap();
+        assert_eq!(received.data.len(), MTU_SAFE_SIZE);
+    }
+
+    #[tokio::test]
     async fn test_udp_sender() {
         let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
@@ -198,14 +253,116 @@ mod tests {
         let t2_addr = t2.local_addr();
 
         // Send using the sender
-        let msg = OutgoingMessage::new(
-            Bytes::from_static(b"TEST"),
-            t2_addr,
-        );
+        let msg = OutgoingMessage::new(Bytes::from_static(b"TEST"), t2_addr);
         sender.send(msg).await.unwrap();
 
         // Receive
         let received = t2.recv().await.unwrap();
         assert_eq!(&received.data[..], b"TEST");
+    }
+
+    #[tokio::test]
+    async fn test_udp_sender_clone() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+
+        let sender1 = t1.sender();
+        let sender2 = sender1.clone();
+        let t2_addr = t2.local_addr();
+
+        // Send using the cloned sender
+        sender2.send_to(b"CLONED", t2_addr).await.unwrap();
+
+        let received = t2.recv().await.unwrap();
+        assert_eq!(&received.data[..], b"CLONED");
+    }
+
+    #[tokio::test]
+    async fn test_udp_sender_send_to() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+
+        let sender = t1.sender();
+        let t2_addr = t2.local_addr();
+
+        // Send raw bytes using sender
+        sender.send_to(b"RAW_BYTES", t2_addr).await.unwrap();
+
+        let received = t2.recv().await.unwrap();
+        assert_eq!(&received.data[..], b"RAW_BYTES");
+    }
+
+    #[tokio::test]
+    async fn test_udp_into_receiver() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+
+        let t1_addr = t1.local_addr();
+        let (mut rx, sender) = t2.into_receiver();
+
+        // Send a message to t2
+        t1.send_to(b"VIA_RECEIVER", sender.socket.local_addr().unwrap())
+            .await
+            .unwrap();
+
+        // Receive via the channel
+        let msg = rx.recv().await.unwrap();
+        assert_eq!(msg.source, t1_addr);
+        assert_eq!(&msg.data[..], b"VIA_RECEIVER");
+    }
+
+    #[tokio::test]
+    async fn test_udp_into_receiver_multiple() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+
+        let t2_local = t2.local_addr();
+        let (mut rx, _sender) = t2.into_receiver();
+
+        // Send multiple messages
+        for i in 0..3 {
+            let data = format!("MSG_{}", i);
+            t1.send_to(data.as_bytes(), t2_local).await.unwrap();
+        }
+
+        // Receive all
+        for i in 0..3 {
+            let msg = rx.recv().await.unwrap();
+            assert!(msg.data.starts_with(b"MSG_"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udp_bidirectional() {
+        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        let t1 = UdpTransport::bind(addr1).await.unwrap();
+        let t2 = UdpTransport::bind(addr2).await.unwrap();
+
+        let t1_addr = t1.local_addr();
+        let t2_addr = t2.local_addr();
+
+        // t1 -> t2
+        t1.send_to(b"PING", t2_addr).await.unwrap();
+        let msg = t2.recv().await.unwrap();
+        assert_eq!(&msg.data[..], b"PING");
+
+        // t2 -> t1
+        t2.send_to(b"PONG", t1_addr).await.unwrap();
+        let msg = t1.recv().await.unwrap();
+        assert_eq!(&msg.data[..], b"PONG");
     }
 }

@@ -57,24 +57,23 @@ pub mod prelude {
     // Session management
     pub use mdsiprtp_session::{
         Call, CallConfig, CallDirection, CallEndReason, CallEvent, CallId, CallManager, CallState,
-        Dialog, ManagerConfig, ManagerEvent, MediaSession,
-        RegistrationConfig, RegistrationError, RegistrationManager, RegistrationState,
+        Dialog, ManagerConfig, ManagerEvent, MediaSession, RegistrationConfig, RegistrationError,
+        RegistrationManager, RegistrationState,
     };
 
     // SIP messaging
     pub use mdsiprtp_sip::{
-        Method, SipMessage, SipRequest, SipResponse,
-        DigestChallenge, DigestCredentials, DigestResponse,
-        generate_branch, generate_call_id, generate_tag,
+        generate_branch, generate_call_id, generate_tag, DigestChallenge, DigestCredentials,
+        DigestResponse, Method, SipMessage, SipRequest, SipResponse,
     };
 
     // SDP negotiation
+    pub use mdsiprtp_sdp::builder::SdpBuilder;
     pub use mdsiprtp_sdp::negotiation::{Codec, NegotiatedMedia};
     pub use mdsiprtp_sdp::parser::{Direction, MediaDescription, SessionDescription};
-    pub use mdsiprtp_sdp::builder::SdpBuilder;
 
     // RTP/RTCP
-    pub use mdsiprtp_rtp::{RtpPacket, RtpSession, RtcpCompound, SenderReport, ReceiverReport};
+    pub use mdsiprtp_rtp::{ReceiverReport, RtcpCompound, RtpPacket, RtpSession, SenderReport};
 
     // Media
     pub use mdsiprtp_media::{

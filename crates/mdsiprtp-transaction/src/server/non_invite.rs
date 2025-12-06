@@ -40,10 +40,10 @@
 //!         +-------------------+
 //! ```
 
-use std::time::Duration;
-use mdsiprtp_sip::{SipRequest, SipResponse, Method};
-use crate::timer::{Timer, TimerValues};
 use crate::client::invite::TransactionId;
+use crate::timer::{Timer, TimerValues};
+use mdsiprtp_sip::{Method, SipRequest, SipResponse};
+use std::time::Duration;
 
 /// State of the non-INVITE server transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,7 +120,8 @@ impl NonInviteServerTransaction {
         };
 
         // Notify TU of the request
-        tx.actions.push(Action::Event(Event::Request(Box::new(request))));
+        tx.actions
+            .push(Action::Event(Event::Request(Box::new(request))));
 
         Some(tx)
     }
@@ -320,7 +321,9 @@ mod tests {
         assert_eq!(tx.state(), State::Completed);
         let actions = tx.poll_actions();
         assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
-        assert!(actions.iter().any(|a| matches!(a, Action::SetTimer(Timer::J, _))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer(Timer::J, _))));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! Handles candidate gathering and connectivity checks.
 
-use crate::candidate::{Candidate, CandidateType, calculate_pair_priority};
+use crate::candidate::{calculate_pair_priority, Candidate, CandidateType};
 use crate::stun::StunServer;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -257,7 +257,10 @@ impl IceAgent {
                     candidates.push(candidate);
 
                     // Store socket
-                    self.sockets.write().await.insert(local_addr, Arc::new(socket));
+                    self.sockets
+                        .write()
+                        .await
+                        .insert(local_addr, Arc::new(socket));
                 }
                 Err(e) => {
                     warn!("Failed to bind to {}: {}", bind_addr, e);
@@ -279,7 +282,10 @@ impl IceAgent {
                     Ok(mapped_addr) => {
                         if mapped_addr != *base_addr {
                             let candidate = Candidate::server_reflexive(mapped_addr, *base_addr, 1);
-                            debug!("Discovered srflx candidate: {} (base: {})", mapped_addr, base_addr);
+                            debug!(
+                                "Discovered srflx candidate: {} (base: {})",
+                                mapped_addr, base_addr
+                            );
                             candidates.push(candidate);
                         }
                     }
@@ -337,7 +343,9 @@ impl IceAgent {
         let mut buf = data;
         let msg_type = buf.get_u16();
         if msg_type != BINDING_RESPONSE {
-            return Err(crate::stun::StunError::InvalidResponse("Not a response".into()));
+            return Err(crate::stun::StunError::InvalidResponse(
+                "Not a response".into(),
+            ));
         }
 
         let msg_len = buf.get_u16() as usize;
@@ -416,9 +424,9 @@ impl IceAgent {
                 }
 
                 // Check if pair already exists
-                let exists = pairs.iter().any(|p| {
-                    p.local.address == l.address && p.remote.address == r.address
-                });
+                let exists = pairs
+                    .iter()
+                    .any(|p| p.local.address == l.address && p.remote.address == r.address);
 
                 if !exists {
                     let is_controlling = self.role == IceRole::Controlling;
@@ -507,13 +515,8 @@ impl IceAgent {
 
             let check_result = match socket {
                 Some(sock) => {
-                    self.perform_connectivity_check(
-                        &sock,
-                        &pair,
-                        &remote_ufrag,
-                        &remote_pwd,
-                    )
-                    .await
+                    self.perform_connectivity_check(&sock, &pair, &remote_ufrag, &remote_pwd)
+                        .await
                 }
                 None => {
                     warn!("No socket for local candidate {}", pair.local.address);
@@ -649,8 +652,8 @@ impl IceAgent {
             msg[2] = (new_len >> 8) as u8;
             msg[3] = (new_len & 0xFF) as u8;
 
-            let mut mac =
-                HmacSha1::new_from_slice(remote_pwd.as_bytes()).expect("HMAC can take any key size");
+            let mut mac = HmacSha1::new_from_slice(remote_pwd.as_bytes())
+                .expect("HMAC can take any key size");
             mac.update(&msg);
             let integrity = mac.finalize().into_bytes();
 
@@ -662,7 +665,10 @@ impl IceAgent {
         // Send the request
         let target_addr = pair.remote.address;
         if let Err(e) = socket.send_to(&msg, target_addr).await {
-            warn!("Failed to send connectivity check to {}: {}", target_addr, e);
+            warn!(
+                "Failed to send connectivity check to {}: {}",
+                target_addr, e
+            );
             return false;
         }
 
@@ -709,7 +715,10 @@ impl IceAgent {
                 }
                 Err(_) => {
                     // Timeout, retry
-                    debug!("Connectivity check to {} timed out, retrying...", target_addr);
+                    debug!(
+                        "Connectivity check to {} timed out, retrying...",
+                        target_addr
+                    );
                     // Retransmit
                     let _ = socket.send_to(&msg, target_addr).await;
                 }
@@ -800,6 +809,185 @@ fn get_local_addresses() -> Vec<IpAddr> {
 mod tests {
     use super::*;
 
+    // IceError tests
+    #[test]
+    fn test_ice_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let err: IceError = io_err.into();
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn test_ice_error_no_candidates() {
+        let err = IceError::NoCandidates;
+        assert!(err.to_string().contains("No candidates"));
+    }
+
+    #[test]
+    fn test_ice_error_failed() {
+        let err = IceError::Failed("test reason".to_string());
+        assert!(err.to_string().contains("test reason"));
+    }
+
+    #[test]
+    fn test_ice_error_debug() {
+        let err = IceError::NoCandidates;
+        let debug = format!("{:?}", err);
+        assert!(debug.contains("NoCandidates"));
+    }
+
+    // IceRole tests
+    #[test]
+    fn test_ice_role_debug() {
+        assert!(format!("{:?}", IceRole::Controlling).contains("Controlling"));
+        assert!(format!("{:?}", IceRole::Controlled).contains("Controlled"));
+    }
+
+    #[test]
+    fn test_ice_role_clone() {
+        let role = IceRole::Controlling;
+        let cloned = role;
+        assert_eq!(role, cloned);
+    }
+
+    #[test]
+    fn test_ice_role_eq() {
+        assert_eq!(IceRole::Controlling, IceRole::Controlling);
+        assert_ne!(IceRole::Controlling, IceRole::Controlled);
+    }
+
+    // IceState tests
+    #[test]
+    fn test_ice_state_debug() {
+        assert!(format!("{:?}", IceState::New).contains("New"));
+        assert!(format!("{:?}", IceState::Gathering).contains("Gathering"));
+        assert!(format!("{:?}", IceState::Checking).contains("Checking"));
+        assert!(format!("{:?}", IceState::Connected).contains("Connected"));
+        assert!(format!("{:?}", IceState::Completed).contains("Completed"));
+        assert!(format!("{:?}", IceState::Failed).contains("Failed"));
+        assert!(format!("{:?}", IceState::Closed).contains("Closed"));
+    }
+
+    #[test]
+    fn test_ice_state_clone() {
+        let state = IceState::Connected;
+        let cloned = state;
+        assert_eq!(state, cloned);
+    }
+
+    #[test]
+    fn test_ice_state_eq() {
+        assert_eq!(IceState::New, IceState::New);
+        assert_ne!(IceState::New, IceState::Closed);
+    }
+
+    // PairState tests
+    #[test]
+    fn test_pair_state_debug() {
+        assert!(format!("{:?}", PairState::Waiting).contains("Waiting"));
+        assert!(format!("{:?}", PairState::InProgress).contains("InProgress"));
+        assert!(format!("{:?}", PairState::Succeeded).contains("Succeeded"));
+        assert!(format!("{:?}", PairState::Failed).contains("Failed"));
+        assert!(format!("{:?}", PairState::Frozen).contains("Frozen"));
+    }
+
+    #[test]
+    fn test_pair_state_clone() {
+        let state = PairState::Succeeded;
+        let cloned = state;
+        assert_eq!(state, cloned);
+    }
+
+    #[test]
+    fn test_pair_state_eq() {
+        assert_eq!(PairState::Waiting, PairState::Waiting);
+        assert_ne!(PairState::Waiting, PairState::Failed);
+    }
+
+    // CandidatePair tests
+    #[test]
+    fn test_candidate_pair_debug() {
+        let local = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 5000),
+            1,
+        );
+        let remote = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)), 5001),
+            1,
+        );
+        let pair = CandidatePair {
+            local,
+            remote,
+            priority: 1000,
+            state: PairState::Waiting,
+            nominated: false,
+        };
+        let debug = format!("{:?}", pair);
+        assert!(debug.contains("CandidatePair"));
+    }
+
+    #[test]
+    fn test_candidate_pair_clone() {
+        let local = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 5000),
+            1,
+        );
+        let remote = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)), 5001),
+            1,
+        );
+        let pair = CandidatePair {
+            local,
+            remote,
+            priority: 1000,
+            state: PairState::Waiting,
+            nominated: false,
+        };
+        let cloned = pair.clone();
+        assert_eq!(cloned.priority, pair.priority);
+        assert_eq!(cloned.state, pair.state);
+    }
+
+    // IceConfig tests
+    #[test]
+    fn test_ice_config_default() {
+        let config = IceConfig::default();
+        assert!(!config.stun_servers.is_empty());
+        assert_eq!(config.local_ufrag.len(), 8);
+        assert_eq!(config.local_pwd.len(), 24);
+        assert_eq!(config.gather_timeout_ms, 5000);
+        assert_eq!(config.check_timeout_ms, 3000);
+    }
+
+    #[test]
+    fn test_ice_config_custom() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "myufrag1".to_string(),
+            local_pwd: "mypasswordisverysecret1!".to_string(),
+            gather_timeout_ms: 10000,
+            check_timeout_ms: 5000,
+        };
+        assert!(config.stun_servers.is_empty());
+        assert_eq!(config.local_ufrag, "myufrag1");
+        assert_eq!(config.gather_timeout_ms, 10000);
+    }
+
+    #[test]
+    fn test_ice_config_debug() {
+        let config = IceConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("IceConfig"));
+    }
+
+    #[test]
+    fn test_ice_config_clone() {
+        let config = IceConfig::default();
+        let cloned = config.clone();
+        assert_eq!(cloned.gather_timeout_ms, config.gather_timeout_ms);
+    }
+
+    // Credential generation tests
     #[test]
     fn test_generate_ufrag() {
         let ufrag = generate_ice_ufrag();
@@ -814,12 +1002,60 @@ mod tests {
         assert!(pwd.chars().all(|c| c.is_ascii_alphanumeric()));
     }
 
+    #[test]
+    fn test_generate_ufrag_uniqueness() {
+        let ufrag1 = generate_ice_ufrag();
+        let ufrag2 = generate_ice_ufrag();
+        assert_ne!(ufrag1, ufrag2);
+    }
+
+    #[test]
+    fn test_generate_pwd_uniqueness() {
+        let pwd1 = generate_ice_pwd();
+        let pwd2 = generate_ice_pwd();
+        assert_ne!(pwd1, pwd2);
+    }
+
+    // get_local_addresses tests
+    #[test]
+    fn test_get_local_addresses() {
+        let addrs = get_local_addresses();
+        // Should at least contain localhost
+        assert!(!addrs.is_empty());
+        assert!(addrs.contains(&IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)));
+    }
+
+    // IceAgent tests
     #[tokio::test]
     async fn test_ice_agent_creation() {
         let config = IceConfig::default();
         let agent = IceAgent::new(config, IceRole::Controlling);
 
         assert_eq!(agent.state().await, IceState::New);
+    }
+
+    #[tokio::test]
+    async fn test_ice_agent_controlled_role() {
+        let config = IceConfig::default();
+        let agent = IceAgent::new(config, IceRole::Controlled);
+
+        assert_eq!(agent.role, IceRole::Controlled);
+        assert_eq!(agent.state().await, IceState::New);
+    }
+
+    #[tokio::test]
+    async fn test_local_credentials() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "testufrag".to_string(),
+            local_pwd: "testpasswordverysecure".to_string(),
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        let (ufrag, pwd) = agent.local_credentials();
+        assert_eq!(ufrag, "testufrag");
+        assert_eq!(pwd, "testpasswordverysecure");
     }
 
     #[tokio::test]
@@ -835,7 +1071,25 @@ mod tests {
 
         // Should have at least one host candidate
         assert!(!candidates.is_empty());
-        assert!(candidates.iter().any(|c| c.candidate_type == CandidateType::Host));
+        assert!(candidates
+            .iter()
+            .any(|c| c.candidate_type == CandidateType::Host));
+    }
+
+    #[tokio::test]
+    async fn test_local_candidates_accessor() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Initially empty
+        assert!(agent.local_candidates().await.is_empty());
+
+        // After gathering
+        let _ = agent.gather_candidates().await;
+        assert!(!agent.local_candidates().await.is_empty());
     }
 
     #[tokio::test]
@@ -866,6 +1120,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_form_candidate_pairs_different_components() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Add local candidate for component 1
+        let local = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)), 5001),
+            1,
+        );
+        agent.local_candidates.write().await.push(local);
+
+        // Add remote candidate for component 2 (shouldn't pair)
+        let remote = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)), 5000),
+            2, // Different component
+        );
+        agent.add_remote_candidates(vec![remote]).await;
+
+        // No pairs should be formed due to component mismatch
+        let pairs = agent.candidate_pairs.read().await;
+        assert_eq!(pairs.len(), 0);
+    }
+
+    #[tokio::test]
     async fn test_set_remote_credentials() {
         let config = IceConfig {
             stun_servers: vec![],
@@ -888,6 +1169,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_selected_pair_initially_none() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        assert!(agent.selected_pair().await.is_none());
+    }
+
+    #[tokio::test]
     async fn test_fallback_selection() {
         let config = IceConfig {
             stun_servers: vec![],
@@ -904,7 +1196,11 @@ mod tests {
 
         // Create socket for the local candidate
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        agent.sockets.write().await.insert(local.address, Arc::new(socket));
+        agent
+            .sockets
+            .write()
+            .await
+            .insert(local.address, Arc::new(socket));
 
         // Add remote candidate
         let remote = Candidate::host(
@@ -926,6 +1222,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fallback_no_candidates() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // No candidates added, should fail
+        let result = agent.start_checks().await;
+        assert!(result.is_err());
+        assert!(agent.state().await == IceState::Failed);
+    }
+
+    #[tokio::test]
     async fn test_ice_state_transitions() {
         let config = IceConfig {
             stun_servers: vec![],
@@ -943,5 +1253,53 @@ mod tests {
         // Close
         agent.close().await;
         assert_eq!(agent.state().await, IceState::Closed);
+    }
+
+    #[tokio::test]
+    async fn test_close_clears_sockets() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Gather to create sockets
+        let _ = agent.gather_candidates().await;
+        assert!(!agent.sockets.read().await.is_empty());
+
+        // Close should clear sockets
+        agent.close().await;
+        assert!(agent.sockets.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_remote_candidates() {
+        let config = IceConfig {
+            stun_servers: vec![],
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlling);
+
+        // Add local candidate
+        let local = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 1)), 5001),
+            1,
+        );
+        agent.local_candidates.write().await.push(local);
+
+        // Add multiple remote candidates
+        let remote1 = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 100)), 5000),
+            1,
+        );
+        let remote2 = Candidate::host(
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 1, 101)), 5000),
+            1,
+        );
+        agent.add_remote_candidates(vec![remote1, remote2]).await;
+
+        // Should have 2 pairs
+        let pairs = agent.candidate_pairs.read().await;
+        assert_eq!(pairs.len(), 2);
     }
 }

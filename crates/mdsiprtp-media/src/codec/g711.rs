@@ -215,8 +215,16 @@ mod tests {
         let mu_silence = codec_mu.decode_sample(silence_byte(G711Variant::MuLaw));
         let a_silence = codec_a.decode_sample(silence_byte(G711Variant::ALaw));
 
-        assert!(mu_silence.abs() < 10, "Mu-law silence not quiet: {}", mu_silence);
-        assert!(a_silence.abs() < 10, "A-law silence not quiet: {}", a_silence);
+        assert!(
+            mu_silence.abs() < 10,
+            "Mu-law silence not quiet: {}",
+            mu_silence
+        );
+        assert!(
+            a_silence.abs() < 10,
+            "A-law silence not quiet: {}",
+            a_silence
+        );
     }
 
     #[test]

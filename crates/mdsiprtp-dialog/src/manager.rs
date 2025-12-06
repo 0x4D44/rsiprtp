@@ -2,12 +2,12 @@
 //!
 //! Routes messages to the appropriate dialog and handles dialog lifecycle.
 
-use std::collections::HashMap;
-use mdsiprtp_sip::{SipRequest, SipResponse, Method};
-use crate::state::{DialogId, DialogState};
-use crate::invite::{InviteDialog, Action, Event, TerminationReason};
 #[cfg(test)]
 use crate::invite::Role;
+use crate::invite::{Action, Event, InviteDialog, TerminationReason};
+use crate::state::{DialogId, DialogState};
+use mdsiprtp_sip::{Method, SipRequest, SipResponse};
+use std::collections::HashMap;
 
 /// Handle to a dialog in the manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -333,7 +333,9 @@ mod tests {
         assert_eq!(dialog.state(), DialogState::Early);
 
         let actions = mgr.poll_actions();
-        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::IncomingInvite(_)))));
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::IncomingInvite(_)))));
     }
 
     #[test]
@@ -356,5 +358,372 @@ mod tests {
 
         let dialog = mgr.dialog(handle).unwrap();
         assert_eq!(dialog.state(), DialogState::Confirmed);
+    }
+
+    // Additional tests for better coverage
+
+    #[test]
+    fn test_dialog_handle_debug() {
+        let handle = DialogHandle(1);
+        let debug = format!("{:?}", handle);
+        assert!(debug.contains("DialogHandle"));
+    }
+
+    #[test]
+    fn test_dialog_handle_clone() {
+        let handle = DialogHandle(1);
+        let cloned = handle.clone();
+        assert_eq!(handle, cloned);
+    }
+
+    #[test]
+    fn test_dialog_handle_copy() {
+        let handle = DialogHandle(1);
+        let copied: DialogHandle = handle;
+        assert_eq!(handle, copied);
+    }
+
+    #[test]
+    fn test_dialog_handle_eq() {
+        assert_eq!(DialogHandle(1), DialogHandle(1));
+        assert_ne!(DialogHandle(1), DialogHandle(2));
+    }
+
+    #[test]
+    fn test_dialog_handle_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(DialogHandle(1));
+        set.insert(DialogHandle(2));
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&DialogHandle(1)));
+    }
+
+    #[test]
+    fn test_manager_action_debug() {
+        let action = ManagerAction::Event(DialogHandle(1), ManagerEvent::Established);
+        let debug = format!("{:?}", action);
+        assert!(debug.contains("Event"));
+    }
+
+    #[test]
+    fn test_manager_action_clone() {
+        let action = ManagerAction::Event(DialogHandle(1), ManagerEvent::Established);
+        let cloned = action.clone();
+        assert!(matches!(
+            cloned,
+            ManagerAction::Event(_, ManagerEvent::Established)
+        ));
+    }
+
+    #[test]
+    fn test_manager_event_debug() {
+        assert!(format!("{:?}", ManagerEvent::Established).contains("Established"));
+        assert!(
+            format!("{:?}", ManagerEvent::Terminated(TerminationReason::ByeSent))
+                .contains("Terminated")
+        );
+    }
+
+    #[test]
+    fn test_manager_event_clone() {
+        let event = ManagerEvent::Established;
+        let cloned = event.clone();
+        assert!(matches!(cloned, ManagerEvent::Established));
+    }
+
+    #[test]
+    fn test_dialog_manager_debug() {
+        let mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let debug = format!("{:?}", mgr);
+        assert!(debug.contains("DialogManager"));
+    }
+
+    #[test]
+    fn test_create_dialog_non_invite_returns_none() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let register = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:registrar@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:alice@example.com")
+            .call_id("test@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let result = mgr.create_dialog(register);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_handle_request_bye_on_existing_dialog() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.2:5060");
+        let invite = create_invite();
+
+        // Create and establish dialog
+        let handle = mgr.handle_request(invite.clone()).unwrap();
+        mgr.poll_actions();
+
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&invite)
+            .to_tag("localtag")
+            .contact("sip:bob@192.168.1.2:5060")
+            .build()
+            .unwrap();
+        mgr.send_response(handle, response);
+        mgr.poll_actions();
+
+        // Now send BYE from the other side
+        let dialog = mgr.dialog(handle).unwrap();
+        let local_tag = dialog.id().local_tag.clone();
+
+        let bye = SipRequest::builder()
+            .method(Method::Bye)
+            .uri("sip:bob@192.168.1.2:5060")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKbye")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .to_tag(&local_tag)
+            .call_id("test@example.com")
+            .cseq(2)
+            .build()
+            .unwrap();
+
+        let result = mgr.handle_request(bye);
+        assert!(result.is_some());
+
+        let dialog = mgr.dialog(handle).unwrap();
+        assert_eq!(dialog.state(), DialogState::Terminated);
+    }
+
+    #[test]
+    fn test_handle_request_for_unknown_dialog() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.2:5060");
+
+        // BYE for non-existent dialog
+        let bye = SipRequest::builder()
+            .method(Method::Bye)
+            .uri("sip:bob@192.168.1.2:5060")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKbye")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .to_tag("unknowntag")
+            .call_id("unknown@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let result = mgr.handle_request(bye);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_handle_response_provisional() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        let handle = mgr.create_dialog(invite.clone()).unwrap();
+
+        let response = create_response(&invite, 180);
+        let result_handle = mgr.handle_response(response).unwrap();
+        assert_eq!(result_handle, handle);
+
+        let dialog = mgr.dialog(handle).unwrap();
+        assert_eq!(dialog.state(), DialogState::Early);
+    }
+
+    #[test]
+    fn test_handle_response_rejection() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        let handle = mgr.create_dialog(invite.clone()).unwrap();
+
+        let response = create_response(&invite, 486);
+        let result_handle = mgr.handle_response(response).unwrap();
+        assert_eq!(result_handle, handle);
+
+        let dialog = mgr.dialog(handle).unwrap();
+        assert_eq!(dialog.state(), DialogState::Terminated);
+    }
+
+    #[test]
+    fn test_handle_response_unknown_dialog() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        // Response for non-existent dialog
+        let response = create_response(&invite, 200);
+        let result = mgr.handle_response(response);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_send_bye() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        // Create and establish dialog
+        let handle = mgr.create_dialog(invite.clone()).unwrap();
+        let response = create_response(&invite, 200);
+        mgr.handle_response(response);
+        mgr.poll_actions();
+
+        // Send BYE
+        let bye = mgr.send_bye(handle);
+        assert!(bye.is_some());
+
+        let dialog = mgr.dialog(handle).unwrap();
+        assert_eq!(dialog.state(), DialogState::Terminating);
+    }
+
+    #[test]
+    fn test_send_bye_non_existent_dialog() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+
+        let bye = mgr.send_bye(DialogHandle(999));
+        assert!(bye.is_none());
+    }
+
+    #[test]
+    fn test_ack_sent() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        let handle = mgr.create_dialog(invite.clone()).unwrap();
+        let response = create_response(&invite, 200);
+        mgr.handle_response(response);
+
+        mgr.ack_sent(handle);
+
+        let dialog = mgr.dialog(handle).unwrap();
+        assert!(dialog.is_ack_complete());
+    }
+
+    #[test]
+    fn test_ack_sent_non_existent_dialog() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        // Should not panic
+        mgr.ack_sent(DialogHandle(999));
+    }
+
+    #[test]
+    fn test_cleanup_terminated() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+        let invite = create_invite();
+
+        // Create and reject dialog
+        let handle = mgr.create_dialog(invite.clone()).unwrap();
+        let response = create_response(&invite, 486);
+        mgr.handle_response(response);
+        mgr.poll_actions();
+
+        // Dialog should be terminated
+        let dialog = mgr.dialog(handle).unwrap();
+        assert_eq!(dialog.state(), DialogState::Terminated);
+
+        // Cleanup
+        mgr.cleanup_terminated();
+
+        // Dialog should be removed
+        assert!(mgr.dialog(handle).is_none());
+    }
+
+    #[test]
+    fn test_poll_actions_clears() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.2:5060");
+        let invite = create_invite();
+
+        mgr.handle_request(invite);
+
+        let actions = mgr.poll_actions();
+        assert!(!actions.is_empty());
+
+        let actions2 = mgr.poll_actions();
+        assert!(actions2.is_empty());
+    }
+
+    #[test]
+    fn test_send_response_with_invalid_handle() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.2:5060");
+        let invite = create_invite();
+
+        let response = create_response(&invite, 200);
+
+        // Should not panic
+        mgr.send_response(DialogHandle(999), response);
+    }
+
+    #[test]
+    fn test_multiple_dialogs() {
+        let mut mgr = DialogManager::new("sip:me@192.168.1.1:5060");
+
+        // Create first dialog
+        let invite1 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest1")
+            .from("sip:alice@example.com", "fromtag1")
+            .to("sip:bob@example.com")
+            .call_id("call1@example.com")
+            .cseq(1)
+            .contact("sip:alice@192.168.1.1:5060")
+            .build()
+            .unwrap();
+        let handle1 = mgr.create_dialog(invite1).unwrap();
+
+        // Create second dialog
+        let invite2 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:carol@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest2")
+            .from("sip:alice@example.com", "fromtag2")
+            .to("sip:carol@example.com")
+            .call_id("call2@example.com")
+            .cseq(1)
+            .contact("sip:alice@192.168.1.1:5060")
+            .build()
+            .unwrap();
+        let handle2 = mgr.create_dialog(invite2).unwrap();
+
+        assert_ne!(handle1, handle2);
+        assert!(mgr.dialog(handle1).is_some());
+        assert!(mgr.dialog(handle2).is_some());
+    }
+
+    #[test]
+    fn test_manager_event_variants() {
+        let invite = create_invite();
+        let response = create_response(&invite, 180);
+
+        let event1 = ManagerEvent::IncomingInvite(invite.clone());
+        assert!(format!("{:?}", event1).contains("IncomingInvite"));
+
+        let event2 = ManagerEvent::Provisional(response.clone());
+        assert!(format!("{:?}", event2).contains("Provisional"));
+
+        let event3 = ManagerEvent::SessionProgress(response.clone());
+        assert!(format!("{:?}", event3).contains("SessionProgress"));
+
+        let event4 = ManagerEvent::ReInvite(invite.clone());
+        assert!(format!("{:?}", event4).contains("ReInvite"));
+
+        let event5 = ManagerEvent::ByeReceived(invite);
+        assert!(format!("{:?}", event5).contains("ByeReceived"));
+    }
+
+    #[test]
+    fn test_manager_action_variants() {
+        let invite = create_invite();
+        let response = create_response(&invite, 200);
+
+        let action1 = ManagerAction::SendRequest(invite);
+        assert!(format!("{:?}", action1).contains("SendRequest"));
+
+        let action2 = ManagerAction::SendResponse(response);
+        assert!(format!("{:?}", action2).contains("SendResponse"));
     }
 }

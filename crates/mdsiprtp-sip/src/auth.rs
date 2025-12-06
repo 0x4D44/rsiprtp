@@ -342,7 +342,9 @@ fn generate_cnonce() -> String {
 }
 
 /// Parse authentication parameters from header value.
-fn parse_auth_params(params_str: &str) -> Result<std::collections::HashMap<String, String>, DigestAuthError> {
+fn parse_auth_params(
+    params_str: &str,
+) -> Result<std::collections::HashMap<String, String>, DigestAuthError> {
     let mut params = std::collections::HashMap::new();
     let mut remaining = params_str.trim();
 
@@ -373,9 +375,7 @@ fn parse_auth_params(params_str: &str) -> Result<std::collections::HashMap<Strin
             value
         } else {
             // Unquoted value (ends at comma or end of string)
-            let end = remaining
-                .find(',')
-                .unwrap_or(remaining.len());
+            let end = remaining.find(',').unwrap_or(remaining.len());
             let value = remaining[..end].trim().to_string();
             remaining = &remaining[end..];
             value
@@ -393,9 +393,8 @@ mod tests {
 
     #[test]
     fn test_parse_simple_challenge() {
-        let challenge = DigestChallenge::parse(
-            r#"Digest realm="asterisk", nonce="1234567890""#
-        ).unwrap();
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="asterisk", nonce="1234567890""#).unwrap();
 
         assert_eq!(challenge.realm, "asterisk");
         assert_eq!(challenge.nonce, "1234567890");
@@ -419,9 +418,9 @@ mod tests {
 
     #[test]
     fn test_parse_md5_sess() {
-        let challenge = DigestChallenge::parse(
-            r#"Digest realm="test", nonce="abc", algorithm=MD5-sess"#
-        ).unwrap();
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", algorithm=MD5-sess"#)
+                .unwrap();
 
         assert_eq!(challenge.algorithm, Algorithm::Md5Sess);
     }
@@ -486,7 +485,8 @@ mod tests {
             "REGISTER",
             "sip:asterisk@192.168.1.1",
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let header = response.to_header_value();
         assert!(header.starts_with("Digest username=\"alice\""));
@@ -514,7 +514,8 @@ mod tests {
             "REGISTER",
             "sip:asterisk@192.168.1.1",
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         let header = response.to_header_value();
         assert!(header.contains("qop=auth"));
@@ -532,12 +533,380 @@ mod tests {
     #[test]
     fn test_missing_realm() {
         let result = DigestChallenge::parse("Digest nonce=\"abc\"");
-        assert!(matches!(result, Err(DigestAuthError::MissingField("realm"))));
+        assert!(matches!(
+            result,
+            Err(DigestAuthError::MissingField("realm"))
+        ));
     }
 
     #[test]
     fn test_missing_nonce() {
         let result = DigestChallenge::parse("Digest realm=\"test\"");
-        assert!(matches!(result, Err(DigestAuthError::MissingField("nonce"))));
+        assert!(matches!(
+            result,
+            Err(DigestAuthError::MissingField("nonce"))
+        ));
+    }
+
+    // Additional tests for uncovered code paths
+
+    #[test]
+    fn test_qop_display() {
+        assert_eq!(format!("{}", Qop::None), "");
+        assert_eq!(format!("{}", Qop::Auth), "auth");
+        assert_eq!(format!("{}", Qop::AuthInt), "auth-int");
+    }
+
+    #[test]
+    fn test_algorithm_display() {
+        assert_eq!(format!("{}", Algorithm::Md5), "MD5");
+        assert_eq!(format!("{}", Algorithm::Md5Sess), "MD5-sess");
+    }
+
+    #[test]
+    fn test_digest_auth_error_display() {
+        let err = DigestAuthError::MissingField("realm");
+        assert!(err.to_string().contains("realm"));
+
+        let err = DigestAuthError::UnsupportedAlgorithm("SHA512".to_string());
+        assert!(err.to_string().contains("SHA512"));
+
+        let err = DigestAuthError::UnsupportedQop("auth-int-256".to_string());
+        assert!(err.to_string().contains("auth-int-256"));
+
+        let err = DigestAuthError::ParseError("bad format".to_string());
+        assert!(err.to_string().contains("bad format"));
+    }
+
+    #[test]
+    fn test_parse_unsupported_algorithm() {
+        let result =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", algorithm=SHA256"#);
+        assert!(matches!(
+            result,
+            Err(DigestAuthError::UnsupportedAlgorithm(_))
+        ));
+    }
+
+    #[test]
+    fn test_parse_qop_auth_int() {
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", qop="auth-int""#).unwrap();
+
+        assert_eq!(challenge.qop, Some(Qop::AuthInt));
+    }
+
+    #[test]
+    fn test_parse_qop_multiple_values() {
+        // When multiple qop values are offered, prefer "auth"
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", qop="auth,auth-int""#)
+                .unwrap();
+
+        assert_eq!(challenge.qop, Some(Qop::Auth));
+    }
+
+    #[test]
+    fn test_parse_qop_unknown() {
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", qop="unknown""#).unwrap();
+
+        // Unknown qop values result in Qop::None
+        assert_eq!(challenge.qop, Some(Qop::None));
+    }
+
+    #[test]
+    fn test_parse_stale_false() {
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", stale=false"#).unwrap();
+
+        assert!(!challenge.stale);
+    }
+
+    #[test]
+    fn test_parse_with_domain() {
+        let challenge =
+            DigestChallenge::parse(r#"Digest realm="test", nonce="abc", domain="sip:example.com""#)
+                .unwrap();
+
+        assert_eq!(challenge.domain, Some("sip:example.com".to_string()));
+    }
+
+    #[test]
+    fn test_compute_digest_md5_sess() {
+        // MD5-sess uses a different HA1 calculation
+        let response = compute_digest(
+            "user",
+            "password",
+            "realm",
+            "REGISTER",
+            "sip:example.com",
+            "servernonce",
+            Algorithm::Md5Sess,
+            Some(Qop::Auth),
+            Some("clientnonce"),
+            Some(1),
+            None,
+        );
+
+        // Just verify it produces a 32-char hex string
+        assert_eq!(response.len(), 32);
+        assert!(response.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_compute_digest_auth_int_with_body() {
+        let body = b"test body content";
+        let response = compute_digest(
+            "user",
+            "password",
+            "realm",
+            "INVITE",
+            "sip:example.com",
+            "nonce123",
+            Algorithm::Md5,
+            Some(Qop::AuthInt),
+            Some("cnonce"),
+            Some(1),
+            Some(body),
+        );
+
+        // Verify it produces a 32-char hex string
+        assert_eq!(response.len(), 32);
+        assert!(response.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_compute_digest_auth_int_without_body() {
+        // When auth-int is used without body, empty body is hashed
+        let response = compute_digest(
+            "user",
+            "password",
+            "realm",
+            "INVITE",
+            "sip:example.com",
+            "nonce123",
+            Algorithm::Md5,
+            Some(Qop::AuthInt),
+            Some("cnonce"),
+            Some(1),
+            None,
+        );
+
+        assert_eq!(response.len(), 32);
+    }
+
+    #[test]
+    fn test_compute_digest_md5_sess_empty_cnonce() {
+        // MD5-sess with empty cnonce
+        let response = compute_digest(
+            "user",
+            "password",
+            "realm",
+            "REGISTER",
+            "sip:example.com",
+            "servernonce",
+            Algorithm::Md5Sess,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(response.len(), 32);
+    }
+
+    #[test]
+    fn test_digest_response_with_auth_int() {
+        let challenge = DigestChallenge {
+            realm: "asterisk".to_string(),
+            nonce: "abc123".to_string(),
+            opaque: None,
+            stale: false,
+            algorithm: Algorithm::Md5,
+            qop: Some(Qop::AuthInt),
+            domain: None,
+        };
+
+        let creds = DigestCredentials::new("alice", "secret");
+        let body = b"v=0\r\no=- 12345\r\n";
+        let response = DigestResponse::from_challenge(
+            &challenge,
+            &creds,
+            "INVITE",
+            "sip:bob@example.com",
+            Some(body),
+        )
+        .unwrap();
+
+        let header = response.to_header_value();
+        assert!(header.contains("qop=auth-int"));
+    }
+
+    #[test]
+    fn test_digest_response_with_md5_sess() {
+        let challenge = DigestChallenge {
+            realm: "asterisk".to_string(),
+            nonce: "abc123".to_string(),
+            opaque: None,
+            stale: false,
+            algorithm: Algorithm::Md5Sess,
+            qop: Some(Qop::Auth),
+            domain: None,
+        };
+
+        let creds = DigestCredentials::new("alice", "secret");
+        let response = DigestResponse::from_challenge(
+            &challenge,
+            &creds,
+            "REGISTER",
+            "sip:asterisk@192.168.1.1",
+            None,
+        )
+        .unwrap();
+
+        let header = response.to_header_value();
+        assert!(header.contains("algorithm=MD5-sess"));
+    }
+
+    #[test]
+    fn test_parse_auth_params_no_equals() {
+        // Test malformed params without equals sign
+        let result = parse_auth_params("realm");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_auth_params_unterminated_quote() {
+        let result = parse_auth_params("realm=\"test");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_auth_params_unquoted_value() {
+        let result = parse_auth_params("algorithm=MD5").unwrap();
+        assert_eq!(result.get("algorithm"), Some(&"MD5".to_string()));
+    }
+
+    #[test]
+    fn test_parse_challenge_case_insensitive() {
+        // "digest" instead of "Digest"
+        let challenge = DigestChallenge::parse(r#"digest realm="test", nonce="abc""#).unwrap();
+        assert_eq!(challenge.realm, "test");
+    }
+
+    #[test]
+    fn test_parse_challenge_with_whitespace() {
+        let challenge = DigestChallenge::parse(r#"  Digest realm="test", nonce="abc"  "#).unwrap();
+        assert_eq!(challenge.realm, "test");
+    }
+
+    #[test]
+    fn test_digest_credentials_new() {
+        let creds = DigestCredentials::new("user", "pass");
+        assert_eq!(creds.username, "user");
+        assert_eq!(creds.password, "pass");
+
+        // Test with String types
+        let creds2 = DigestCredentials::new("user".to_string(), "pass".to_string());
+        assert_eq!(creds2.username, "user");
+    }
+
+    #[test]
+    fn test_qop_default() {
+        let qop = Qop::default();
+        assert_eq!(qop, Qop::None);
+    }
+
+    #[test]
+    fn test_algorithm_default() {
+        let alg = Algorithm::default();
+        assert_eq!(alg, Algorithm::Md5);
+    }
+
+    #[test]
+    fn test_digest_response_clone() {
+        let response = DigestResponse {
+            username: "alice".to_string(),
+            realm: "test".to_string(),
+            nonce: "nonce".to_string(),
+            uri: "sip:example.com".to_string(),
+            response: "abcd1234".to_string(),
+            algorithm: Algorithm::Md5,
+            opaque: Some("opaque".to_string()),
+            qop: Some(Qop::Auth),
+            cnonce: Some("cnonce".to_string()),
+            nc: Some(1),
+        };
+
+        let cloned = response.clone();
+        assert_eq!(cloned.username, "alice");
+        assert_eq!(cloned.opaque, Some("opaque".to_string()));
+    }
+
+    #[test]
+    fn test_digest_challenge_clone() {
+        let challenge = DigestChallenge {
+            realm: "test".to_string(),
+            nonce: "abc".to_string(),
+            opaque: Some("xyz".to_string()),
+            stale: true,
+            algorithm: Algorithm::Md5Sess,
+            qop: Some(Qop::AuthInt),
+            domain: Some("sip:example.com".to_string()),
+        };
+
+        let cloned = challenge.clone();
+        assert_eq!(cloned.realm, "test");
+        assert_eq!(cloned.algorithm, Algorithm::Md5Sess);
+        assert_eq!(cloned.qop, Some(Qop::AuthInt));
+    }
+
+    #[test]
+    fn test_digest_credentials_clone() {
+        let creds = DigestCredentials::new("user", "pass");
+        let cloned = creds.clone();
+        assert_eq!(cloned.username, "user");
+        assert_eq!(cloned.password, "pass");
+    }
+
+    #[test]
+    fn test_digest_response_no_qop_header() {
+        let response = DigestResponse {
+            username: "alice".to_string(),
+            realm: "test".to_string(),
+            nonce: "nonce".to_string(),
+            uri: "sip:example.com".to_string(),
+            response: "abcd1234".to_string(),
+            algorithm: Algorithm::Md5,
+            opaque: None,
+            qop: Some(Qop::None),
+            cnonce: None,
+            nc: None,
+        };
+
+        let header = response.to_header_value();
+        // When qop is None, no qop field should be in header
+        assert!(!header.contains("qop="));
+    }
+
+    #[test]
+    fn test_compute_digest_qop_none_explicit() {
+        // When qop is explicitly Qop::None, use simple response format
+        let response = compute_digest(
+            "user",
+            "password",
+            "realm",
+            "REGISTER",
+            "sip:example.com",
+            "nonce",
+            Algorithm::Md5,
+            Some(Qop::None),
+            None,
+            None,
+            None,
+        );
+
+        assert_eq!(response.len(), 32);
     }
 }

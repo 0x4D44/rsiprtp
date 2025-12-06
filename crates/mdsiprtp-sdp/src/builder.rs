@@ -6,8 +6,8 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::parser::{
-    Attribute, Connection, Direction, MediaDescription, MediaType, Origin,
-    SessionDescription, Timing,
+    Attribute, Connection, Direction, MediaDescription, MediaType, Origin, SessionDescription,
+    Timing,
 };
 use mdsiprtp_core::random_u64;
 
@@ -79,7 +79,11 @@ impl SdpBuilder {
 
     /// Build the SDP.
     pub fn build(self) -> SessionDescription {
-        let addr_type = if self.local_addr.is_ipv4() { "IP4" } else { "IP6" };
+        let addr_type = if self.local_addr.is_ipv4() {
+            "IP4"
+        } else {
+            "IP6"
+        };
 
         let origin = Origin {
             username: self.username,
@@ -125,7 +129,7 @@ pub struct MediaBuilder {
     formats: Vec<String>,
     direction: Direction,
     rtpmaps: Vec<(u8, String, u32, Option<u8>)>, // (pt, encoding, rate, channels)
-    fmtps: Vec<(u8, String)>,                     // (pt, params)
+    fmtps: Vec<(u8, String)>,                    // (pt, params)
     ptime: Option<u32>,
 }
 
@@ -180,7 +184,8 @@ impl MediaBuilder {
     /// Add telephone-event (DTMF).
     pub fn telephone_event(mut self, pt: u8) -> Self {
         self.formats.push(pt.to_string());
-        self.rtpmaps.push((pt, "telephone-event".to_string(), 8000, None));
+        self.rtpmaps
+            .push((pt, "telephone-event".to_string(), 8000, None));
         self.fmtps.push((pt, "0-16".to_string()));
         self
     }
@@ -194,7 +199,8 @@ impl MediaBuilder {
         channels: Option<u8>,
     ) -> Self {
         self.formats.push(pt.to_string());
-        self.rtpmaps.push((pt, encoding.into(), clock_rate, channels));
+        self.rtpmaps
+            .push((pt, encoding.into(), clock_rate, channels));
         self
     }
 
@@ -329,7 +335,11 @@ fn write_media(f: &mut std::fmt::Formatter<'_>, media: &MediaDescription) -> std
     };
 
     let mut line = String::new();
-    write!(&mut line, "m={} {} {}", media_type, media.port, media.protocol)?;
+    write!(
+        &mut line,
+        "m={} {} {}",
+        media_type, media.port, media.protocol
+    )?;
     for fmt in &media.formats {
         write!(&mut line, " {}", fmt)?;
     }
@@ -357,12 +367,301 @@ fn write_media(f: &mut std::fmt::Formatter<'_>, media: &MediaDescription) -> std
     Ok(())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
+    // SdpBuilder tests
+    #[test]
+    fn test_sdp_builder_new() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let builder = SdpBuilder::new(addr);
+        let sdp = builder.build();
+
+        assert_eq!(sdp.version, 0);
+        assert_eq!(sdp.origin.username, "-");
+        assert_eq!(sdp.session_name, "-");
+    }
+
+    #[test]
+    fn test_sdp_builder_username() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr).username("alice").build();
+
+        assert_eq!(sdp.origin.username, "alice");
+    }
+
+    #[test]
+    fn test_sdp_builder_session_id() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr).session_id(123456789).build();
+
+        assert_eq!(sdp.origin.session_id, "123456789");
+    }
+
+    #[test]
+    fn test_sdp_builder_session_version() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr).session_version(42).build();
+
+        assert_eq!(sdp.origin.session_version, "42");
+    }
+
+    #[test]
+    fn test_sdp_builder_session_name() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr).session_name("My Test Call").build();
+
+        assert_eq!(sdp.session_name, "My Test Call");
+    }
+
+    #[test]
+    fn test_sdp_builder_audio_shorthand() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr).audio(49170).build();
+
+        assert_eq!(sdp.media.len(), 1);
+        assert_eq!(sdp.media[0].port, 49170);
+    }
+
+    #[test]
+    fn test_sdp_builder_add_media() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let media = MediaBuilder::audio(5000).pcmu();
+        let sdp = SdpBuilder::new(addr).add_media(media).build();
+
+        assert_eq!(sdp.media.len(), 1);
+        assert_eq!(sdp.media[0].port, 5000);
+    }
+
+    #[test]
+    fn test_sdp_builder_multiple_media() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr)
+            .add_media(MediaBuilder::audio(5000).pcmu())
+            .add_media(MediaBuilder::audio(5002).pcma())
+            .build();
+
+        assert_eq!(sdp.media.len(), 2);
+    }
+
+    #[test]
+    fn test_sdp_builder_ipv6() {
+        let addr = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+        let sdp = SdpBuilder::new(addr).build();
+
+        assert_eq!(sdp.origin.addr_type, "IP6");
+        assert!(sdp
+            .connection
+            .as_ref()
+            .unwrap()
+            .address
+            .contains("2001:db8"));
+    }
+
+    #[test]
+    fn test_sdp_builder_build_string() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let s = SdpBuilder::new(addr).session_id(123).build_string();
+
+        assert!(s.contains("v=0"));
+        assert!(s.contains("123"));
+    }
+
+    #[test]
+    fn test_sdp_builder_debug() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let builder = SdpBuilder::new(addr);
+        let debug = format!("{:?}", builder);
+        assert!(debug.contains("SdpBuilder"));
+    }
+
+    #[test]
+    fn test_sdp_builder_clone() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let builder = SdpBuilder::new(addr).session_name("Test");
+        let cloned = builder.clone();
+        let sdp = cloned.build();
+        assert_eq!(sdp.session_name, "Test");
+    }
+
+    // MediaBuilder tests
+    #[test]
+    fn test_media_builder_audio() {
+        let media = MediaBuilder::audio(49170).build();
+        assert_eq!(media.media_type, MediaType::Audio);
+        assert_eq!(media.port, 49170);
+        assert_eq!(media.protocol, "RTP/AVP");
+    }
+
+    #[test]
+    fn test_media_builder_protocol() {
+        let media = MediaBuilder::audio(49170).protocol("RTP/SAVP").build();
+        assert_eq!(media.protocol, "RTP/SAVP");
+    }
+
+    #[test]
+    fn test_media_builder_direction() {
+        let media = MediaBuilder::audio(49170)
+            .direction(Direction::SendOnly)
+            .build();
+
+        let has_sendonly = media.attributes.iter().any(|a| a.name == "sendonly");
+        assert!(has_sendonly);
+    }
+
+    #[test]
+    fn test_media_builder_all_directions() {
+        // SendRecv
+        let media = MediaBuilder::audio(49170)
+            .direction(Direction::SendRecv)
+            .build();
+        assert!(media.attributes.iter().any(|a| a.name == "sendrecv"));
+
+        // RecvOnly
+        let media = MediaBuilder::audio(49170)
+            .direction(Direction::RecvOnly)
+            .build();
+        assert!(media.attributes.iter().any(|a| a.name == "recvonly"));
+
+        // Inactive
+        let media = MediaBuilder::audio(49170)
+            .direction(Direction::Inactive)
+            .build();
+        assert!(media.attributes.iter().any(|a| a.name == "inactive"));
+    }
+
+    #[test]
+    fn test_media_builder_pcmu() {
+        let media = MediaBuilder::audio(49170).pcmu().build();
+        assert!(media.formats.contains(&"0".to_string()));
+
+        let has_rtpmap = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "rtpmap" && a.value.as_ref().map_or(false, |v| v.contains("PCMU")));
+        assert!(has_rtpmap);
+    }
+
+    #[test]
+    fn test_media_builder_pcma() {
+        let media = MediaBuilder::audio(49170).pcma().build();
+        assert!(media.formats.contains(&"8".to_string()));
+
+        let has_rtpmap = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "rtpmap" && a.value.as_ref().map_or(false, |v| v.contains("PCMA")));
+        assert!(has_rtpmap);
+    }
+
+    #[test]
+    fn test_media_builder_g722() {
+        let media = MediaBuilder::audio(49170).g722().build();
+        assert!(media.formats.contains(&"9".to_string()));
+
+        let has_rtpmap = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "rtpmap" && a.value.as_ref().map_or(false, |v| v.contains("G722")));
+        assert!(has_rtpmap);
+    }
+
+    #[test]
+    fn test_media_builder_telephone_event() {
+        let media = MediaBuilder::audio(49170).telephone_event(101).build();
+        assert!(media.formats.contains(&"101".to_string()));
+
+        let has_rtpmap = media.attributes.iter().any(|a| {
+            a.name == "rtpmap"
+                && a.value
+                    .as_ref()
+                    .map_or(false, |v| v.contains("telephone-event"))
+        });
+        assert!(has_rtpmap);
+
+        let has_fmtp = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "fmtp" && a.value.as_ref().map_or(false, |v| v.contains("0-16")));
+        assert!(has_fmtp);
+    }
+
+    #[test]
+    fn test_media_builder_codec() {
+        let media = MediaBuilder::audio(49170)
+            .codec(96, "opus", 48000, Some(2))
+            .build();
+
+        assert!(media.formats.contains(&"96".to_string()));
+
+        let has_rtpmap = media.attributes.iter().any(|a| {
+            a.name == "rtpmap"
+                && a.value
+                    .as_ref()
+                    .map_or(false, |v| v.contains("opus/48000/2"))
+        });
+        assert!(has_rtpmap);
+    }
+
+    #[test]
+    fn test_media_builder_codec_without_channels() {
+        let media = MediaBuilder::audio(49170)
+            .codec(97, "iLBC", 8000, None)
+            .build();
+
+        // Check that the rtpmap is "97 iLBC/8000" (without channel count)
+        let has_rtpmap = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "rtpmap" && a.value.as_ref().map_or(false, |v| v == "97 iLBC/8000"));
+        assert!(has_rtpmap);
+    }
+
+    #[test]
+    fn test_media_builder_fmtp() {
+        let media = MediaBuilder::audio(49170)
+            .codec(96, "opus", 48000, Some(2))
+            .fmtp(96, "useinbandfec=1")
+            .build();
+
+        let has_fmtp = media.attributes.iter().any(|a| {
+            a.name == "fmtp"
+                && a.value
+                    .as_ref()
+                    .map_or(false, |v| v.contains("useinbandfec"))
+        });
+        assert!(has_fmtp);
+    }
+
+    #[test]
+    fn test_media_builder_ptime() {
+        let media = MediaBuilder::audio(49170).pcmu().ptime(20).build();
+
+        let has_ptime = media
+            .attributes
+            .iter()
+            .any(|a| a.name == "ptime" && a.value == Some("20".to_string()));
+        assert!(has_ptime);
+    }
+
+    #[test]
+    fn test_media_builder_debug() {
+        let builder = MediaBuilder::audio(49170);
+        let debug = format!("{:?}", builder);
+        assert!(debug.contains("MediaBuilder"));
+    }
+
+    #[test]
+    fn test_media_builder_clone() {
+        let builder = MediaBuilder::audio(49170).pcmu();
+        let cloned = builder.clone();
+        let media = cloned.build();
+        assert_eq!(media.port, 49170);
+    }
+
+    // SessionDescription Display tests
     #[test]
     fn test_build_basic_sdp() {
         let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
@@ -397,6 +696,77 @@ mod tests {
     }
 
     #[test]
+    fn test_sdp_display_with_session_info() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let mut sdp = SdpBuilder::new(addr).build();
+        sdp.session_info = Some("A test session".to_string());
+
+        let s = sdp.to_string();
+        assert!(s.contains("i=A test session"));
+    }
+
+    #[test]
+    fn test_sdp_display_without_connection() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let mut sdp = SdpBuilder::new(addr).build();
+        sdp.connection = None;
+
+        let s = sdp.to_string();
+        // Should not have c= line at session level
+        assert!(!s.contains("c=IN IP4"));
+    }
+
+    #[test]
+    fn test_sdp_display_with_session_attributes() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let mut sdp = SdpBuilder::new(addr).build();
+        sdp.attributes.push(Attribute {
+            name: "ice-ufrag".to_string(),
+            value: Some("abcd1234".to_string()),
+        });
+        sdp.attributes.push(Attribute {
+            name: "rtcp-mux".to_string(),
+            value: None,
+        });
+
+        let s = sdp.to_string();
+        assert!(s.contains("a=ice-ufrag:abcd1234"));
+        assert!(s.contains("a=rtcp-mux"));
+    }
+
+    #[test]
+    fn test_sdp_display_media_with_connection() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let mut sdp = SdpBuilder::new(addr)
+            .add_media(MediaBuilder::audio(5000).pcmu())
+            .build();
+
+        // Add media-level connection
+        sdp.media[0].connection = Some(Connection {
+            net_type: "IN".to_string(),
+            addr_type: "IP4".to_string(),
+            address: "10.0.0.1".to_string(),
+        });
+
+        let s = sdp.to_string();
+        assert!(s.contains("c=IN IP4 10.0.0.1"));
+    }
+
+    #[test]
+    fn test_sdp_display_media_with_bandwidth() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let mut sdp = SdpBuilder::new(addr)
+            .add_media(MediaBuilder::audio(5000).pcmu())
+            .build();
+
+        // Add bandwidth
+        sdp.media[0].bandwidth.insert("AS".to_string(), 64);
+
+        let s = sdp.to_string();
+        assert!(s.contains("b=AS:64"));
+    }
+
+    #[test]
     fn test_roundtrip() {
         use crate::parser::SessionDescription as ParsedSdp;
 
@@ -416,5 +786,94 @@ mod tests {
         let audio = parsed.audio_media().unwrap();
         assert_eq!(audio.port, 5000);
         assert_eq!(audio.formats, vec!["0", "8", "101"]);
+    }
+
+    #[test]
+    fn test_media_all_directions_in_string() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Test all direction strings in output
+        let sdp = SdpBuilder::new(addr)
+            .add_media(
+                MediaBuilder::audio(5000)
+                    .pcmu()
+                    .direction(Direction::SendOnly),
+            )
+            .build();
+        let s = sdp.to_string();
+        assert!(s.contains("a=sendonly"));
+
+        let sdp = SdpBuilder::new(addr)
+            .add_media(
+                MediaBuilder::audio(5000)
+                    .pcmu()
+                    .direction(Direction::RecvOnly),
+            )
+            .build();
+        let s = sdp.to_string();
+        assert!(s.contains("a=recvonly"));
+
+        let sdp = SdpBuilder::new(addr)
+            .add_media(
+                MediaBuilder::audio(5000)
+                    .pcmu()
+                    .direction(Direction::Inactive),
+            )
+            .build();
+        let s = sdp.to_string();
+        assert!(s.contains("a=inactive"));
+    }
+
+    #[test]
+    fn test_multiple_codecs_roundtrip() {
+        use crate::parser::SessionDescription as ParsedSdp;
+
+        let addr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let sdp = SdpBuilder::new(addr)
+            .session_id(1000)
+            .add_media(
+                MediaBuilder::audio(5000)
+                    .pcmu()
+                    .pcma()
+                    .g722()
+                    .codec(96, "opus", 48000, Some(2))
+                    .fmtp(96, "useinbandfec=1")
+                    .telephone_event(101)
+                    .ptime(20),
+            )
+            .build();
+
+        let sdp_str = sdp.to_string();
+
+        // Verify string content
+        assert!(sdp_str.contains("a=rtpmap:0 PCMU/8000"));
+        assert!(sdp_str.contains("a=rtpmap:8 PCMA/8000"));
+        assert!(sdp_str.contains("a=rtpmap:9 G722/8000"));
+        assert!(sdp_str.contains("a=rtpmap:96 opus/48000/2"));
+        assert!(sdp_str.contains("a=fmtp:96 useinbandfec=1"));
+        assert!(sdp_str.contains("a=ptime:20"));
+
+        // Verify it can be parsed back
+        let parsed = ParsedSdp::parse(&sdp_str).unwrap();
+        let audio = parsed.audio_media().unwrap();
+        assert_eq!(audio.formats, vec!["0", "8", "9", "96", "101"]);
+    }
+
+    #[test]
+    fn test_chained_builder() {
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        let sdp = SdpBuilder::new(addr)
+            .username("user")
+            .session_id(123)
+            .session_version(1)
+            .session_name("Call")
+            .audio(5000)
+            .build();
+
+        assert_eq!(sdp.origin.username, "user");
+        assert_eq!(sdp.origin.session_id, "123");
+        assert_eq!(sdp.origin.session_version, "1");
+        assert_eq!(sdp.session_name, "Call");
+        assert_eq!(sdp.media.len(), 1);
     }
 }

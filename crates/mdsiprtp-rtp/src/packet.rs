@@ -175,7 +175,10 @@ impl RtpPacket {
         let mut buf = BytesMut::with_capacity(
             RTP_HEADER_SIZE
                 + self.csrc.len() * 4
-                + self.extension_header.as_ref().map_or(0, |e| 4 + e.data.len())
+                + self
+                    .extension_header
+                    .as_ref()
+                    .map_or(0, |e| 4 + e.data.len())
                 + self.payload.len(),
         );
 
@@ -264,7 +267,10 @@ impl RtpPacket {
     pub fn header_size(&self) -> usize {
         RTP_HEADER_SIZE
             + self.csrc.len() * 4
-            + self.extension_header.as_ref().map_or(0, |e| 4 + e.data.len().div_ceil(4) * 4)
+            + self
+                .extension_header
+                .as_ref()
+                .map_or(0, |e| 4 + e.data.len().div_ceil(4) * 4)
     }
 }
 
@@ -311,9 +317,7 @@ mod tests {
     fn test_parse_with_marker() {
         let data = [
             0x80, 0x80, // V=2, M=1, PT=0
-            0x00, 0x01,
-            0x00, 0x00, 0x00, 0xA0,
-            0x00, 0x00, 0x30, 0x39,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39,
         ];
 
         let pkt = RtpPacket::parse(&data).unwrap();
@@ -325,9 +329,7 @@ mod tests {
     fn test_parse_with_payload_type() {
         let data = [
             0x80, 0x08, // V=2, PT=8 (PCMA)
-            0x00, 0x01,
-            0x00, 0x00, 0x00, 0xA0,
-            0x00, 0x00, 0x30, 0x39,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39,
         ];
 
         let pkt = RtpPacket::parse(&data).unwrap();
@@ -393,11 +395,289 @@ mod tests {
     fn test_invalid_version() {
         let data = [
             0x40, 0x00, // V=1 (invalid)
-            0x00, 0x01,
-            0x00, 0x00, 0x00, 0xA0,
-            0x00, 0x00, 0x30, 0x39,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39,
         ];
         let result = RtpPacket::parse(&data);
         assert!(matches!(result, Err(RtpParseError::InvalidVersion(1))));
+    }
+
+    // Additional tests for better coverage
+
+    #[test]
+    fn test_rtp_packet_debug() {
+        let pkt = RtpPacket::new(0, 1, 160, 12345);
+        let debug = format!("{:?}", pkt);
+        assert!(debug.contains("RtpPacket"));
+    }
+
+    #[test]
+    fn test_rtp_packet_clone() {
+        let pkt = RtpPacket::new(0, 1, 160, 12345)
+            .with_marker(true)
+            .with_payload(vec![0x01, 0x02]);
+        let cloned = pkt.clone();
+        assert_eq!(pkt.sequence_number, cloned.sequence_number);
+        assert_eq!(pkt.timestamp, cloned.timestamp);
+        assert_eq!(pkt.marker, cloned.marker);
+        assert_eq!(pkt.payload, cloned.payload);
+    }
+
+    #[test]
+    fn test_extension_header_debug() {
+        let ext = ExtensionHeader {
+            profile: 0xBEDE,
+            data: Bytes::from_static(&[0x01, 0x02, 0x03, 0x04]),
+        };
+        let debug = format!("{:?}", ext);
+        assert!(debug.contains("ExtensionHeader"));
+    }
+
+    #[test]
+    fn test_extension_header_clone() {
+        let ext = ExtensionHeader {
+            profile: 0xBEDE,
+            data: Bytes::from_static(&[0x01, 0x02, 0x03, 0x04]),
+        };
+        let cloned = ext.clone();
+        assert_eq!(ext.profile, cloned.profile);
+        assert_eq!(ext.data, cloned.data);
+    }
+
+    #[test]
+    fn test_rtp_parse_error_display() {
+        let err1 = RtpParseError::TooShort(5);
+        assert!(err1.to_string().contains("5"));
+
+        let err2 = RtpParseError::InvalidVersion(1);
+        assert!(err2.to_string().contains("1"));
+
+        let err3 = RtpParseError::ExtensionTruncated;
+        assert!(err3.to_string().contains("Extension"));
+
+        let err4 = RtpParseError::PayloadTruncated;
+        assert!(err4.to_string().contains("Payload"));
+    }
+
+    #[test]
+    fn test_rtp_parse_error_debug() {
+        assert!(format!("{:?}", RtpParseError::TooShort(5)).contains("TooShort"));
+        assert!(format!("{:?}", RtpParseError::InvalidVersion(1)).contains("InvalidVersion"));
+        assert!(format!("{:?}", RtpParseError::ExtensionTruncated).contains("ExtensionTruncated"));
+        assert!(format!("{:?}", RtpParseError::PayloadTruncated).contains("PayloadTruncated"));
+    }
+
+    #[test]
+    fn test_rtp_parse_error_clone() {
+        let err = RtpParseError::TooShort(5);
+        let cloned = err.clone();
+        assert!(matches!(cloned, RtpParseError::TooShort(5)));
+    }
+
+    #[test]
+    fn test_parse_with_extension() {
+        // Build packet with extension
+        let mut pkt = RtpPacket::new(0, 1, 160, 12345);
+        pkt.extension_header = Some(ExtensionHeader {
+            profile: 0xBEDE,
+            data: Bytes::from_static(&[0x01, 0x02, 0x03, 0x04]),
+        });
+
+        let bytes = pkt.build();
+        let parsed = RtpPacket::parse(&bytes).unwrap();
+
+        assert!(parsed.extension_header.is_some());
+        let ext = parsed.extension_header.unwrap();
+        assert_eq!(ext.profile, 0xBEDE);
+        assert_eq!(&ext.data[..], &[0x01, 0x02, 0x03, 0x04]);
+    }
+
+    #[test]
+    fn test_parse_with_padding() {
+        // RTP packet with padding flag set
+        // 4 bytes of padding means last byte = 4, and 4 bytes total are padding
+        let data = [
+            0xA0, 0x00, // V=2, P=1, X=0, CC=0, M=0, PT=0
+            0x00, 0x01, // seq=1
+            0x00, 0x00, 0x00, 0xA0, // timestamp=160
+            0x00, 0x00, 0x30, 0x39, // ssrc=12345
+            0xAA, 0xBB, 0xCC, 0xDD, // payload (4 bytes)
+            0x00, 0x00, 0x00, 0x04, // 4 bytes of padding (last byte = count)
+        ];
+
+        let pkt = RtpPacket::parse(&data).unwrap();
+        assert!(pkt.padding);
+        // Payload should not include padding
+        assert_eq!(&pkt.payload[..], &[0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_csrc_truncated() {
+        // CC=1 but no CSRC data
+        let data = [
+            0x81, 0x00, // V=2, P=0, X=0, CC=1
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39,
+            // Missing CSRC
+        ];
+
+        let result = RtpPacket::parse(&data);
+        assert!(matches!(result, Err(RtpParseError::TooShort(_))));
+    }
+
+    #[test]
+    fn test_extension_truncated_header() {
+        // X=1 but no extension header data
+        let data = [
+            0x90, 0x00, // V=2, P=0, X=1, CC=0
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30,
+            0x39,
+            // Missing extension header (need at least 4 bytes)
+        ];
+
+        let result = RtpPacket::parse(&data);
+        assert!(matches!(result, Err(RtpParseError::ExtensionTruncated)));
+    }
+
+    #[test]
+    fn test_extension_truncated_data() {
+        // X=1 with extension header but truncated data
+        let data = [
+            0x90, 0x00, // V=2, P=0, X=1, CC=0
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39, 0xBE, 0xDE, // profile
+            0x00, 0x02, // length = 2 words = 8 bytes
+            // Only 4 bytes of data (need 8)
+            0x01, 0x02, 0x03, 0x04,
+        ];
+
+        let result = RtpPacket::parse(&data);
+        assert!(matches!(result, Err(RtpParseError::ExtensionTruncated)));
+    }
+
+    #[test]
+    fn test_payload_truncated_with_padding() {
+        // Padding flag set but padding count exceeds remaining data
+        let data = [
+            0xA0, 0x00, // V=2, P=1
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39,
+            0xFF, // Last byte claims 255 bytes of padding (but only 1 byte)
+        ];
+
+        let result = RtpPacket::parse(&data);
+        assert!(matches!(result, Err(RtpParseError::PayloadTruncated)));
+    }
+
+    #[test]
+    fn test_header_size() {
+        // Basic packet
+        let pkt = RtpPacket::new(0, 1, 160, 12345);
+        assert_eq!(pkt.header_size(), 12);
+
+        // With 2 CSRC
+        let pkt2 = RtpPacket::new(0, 1, 160, 12345)
+            .with_csrc(11111)
+            .with_csrc(22222);
+        assert_eq!(pkt2.header_size(), 20); // 12 + 8
+
+        // With extension
+        let mut pkt3 = RtpPacket::new(0, 1, 160, 12345);
+        pkt3.extension_header = Some(ExtensionHeader {
+            profile: 0xBEDE,
+            data: Bytes::from_static(&[0x01, 0x02, 0x03, 0x04]),
+        });
+        assert_eq!(pkt3.header_size(), 20); // 12 + 4 (ext header) + 4 (data rounded to 32-bit)
+    }
+
+    #[test]
+    fn test_with_csrc_max() {
+        let mut pkt = RtpPacket::new(0, 1, 160, 12345);
+
+        // Add MAX_CSRC entries
+        for i in 0..MAX_CSRC {
+            pkt = pkt.with_csrc(i as u32);
+        }
+        assert_eq!(pkt.csrc.len(), MAX_CSRC);
+
+        // Try to add one more (should be ignored)
+        pkt = pkt.with_csrc(99999);
+        assert_eq!(pkt.csrc.len(), MAX_CSRC);
+    }
+
+    #[test]
+    fn test_build_with_extension_padding() {
+        // Extension data not aligned to 32-bit boundary
+        let mut pkt = RtpPacket::new(0, 1, 160, 12345);
+        pkt.extension_header = Some(ExtensionHeader {
+            profile: 0xBEDE,
+            data: Bytes::from_static(&[0x01, 0x02, 0x03]), // 3 bytes, needs 1 byte padding
+        });
+
+        let bytes = pkt.build();
+        let parsed = RtpPacket::parse(&bytes).unwrap();
+
+        assert!(parsed.extension_header.is_some());
+        // Extension data is padded to 4 bytes in the packet
+        let ext = parsed.extension_header.unwrap();
+        assert_eq!(ext.data.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_with_csrc() {
+        // Packet with 2 CSRC entries
+        let data = [
+            0x82, 0x00, // V=2, P=0, X=0, CC=2
+            0x00, 0x01, 0x00, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x30, 0x39, // ssrc
+            0x00, 0x00, 0x2B, 0x67, // csrc1 = 11111
+            0x00, 0x00, 0x56, 0xCE, // csrc2 = 22222
+            0xAA, 0xBB, // payload
+        ];
+
+        let pkt = RtpPacket::parse(&data).unwrap();
+        assert_eq!(pkt.csrc.len(), 2);
+        assert_eq!(pkt.csrc[0], 11111);
+        assert_eq!(pkt.csrc[1], 22222);
+        assert_eq!(&pkt.payload[..], &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn test_sequence_diff_edge_cases() {
+        // Same sequence number
+        assert_eq!(sequence_diff(100, 100), 0);
+
+        // Near wraparound
+        assert_eq!(sequence_diff(5, 65530), 11);
+        assert_eq!(sequence_diff(65530, 5), -11);
+    }
+
+    #[test]
+    fn test_sequence_newer_edge_cases() {
+        // Same sequence number
+        assert!(!sequence_newer(100, 100));
+
+        // Near half range - 32768 is ambiguous due to i16 range
+        // 32767 from 0 should be "newer" (positive diff)
+        assert!(sequence_newer(32767, 0));
+        // 32769 from 0 wraps to negative, so not newer
+        assert!(!sequence_newer(32769, 0));
+    }
+
+    #[test]
+    fn test_new_packet_defaults() {
+        let pkt = RtpPacket::new(8, 1000, 80000, 0xCAFEBABE);
+        assert_eq!(pkt.version, 2);
+        assert!(!pkt.padding);
+        assert!(!pkt.extension);
+        assert!(!pkt.marker);
+        assert_eq!(pkt.payload_type, 8);
+        assert_eq!(pkt.sequence_number, 1000);
+        assert_eq!(pkt.timestamp, 80000);
+        assert_eq!(pkt.ssrc, 0xCAFEBABE);
+        assert!(pkt.csrc.is_empty());
+        assert!(pkt.extension_header.is_none());
+        assert!(pkt.payload.is_empty());
+    }
+
+    #[test]
+    fn test_with_payload_bytes() {
+        let pkt = RtpPacket::new(0, 1, 160, 12345).with_payload(Bytes::from_static(&[0x01, 0x02]));
+        assert_eq!(&pkt.payload[..], &[0x01, 0x02]);
     }
 }

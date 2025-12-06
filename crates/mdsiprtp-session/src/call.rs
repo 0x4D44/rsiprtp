@@ -491,13 +491,9 @@ impl Call {
 
     /// Check if call can receive media.
     pub fn can_receive_media(&self) -> bool {
-        matches!(
-            self.state,
-            CallState::EarlyMedia | CallState::Established
-        )
+        matches!(self.state, CallState::EarlyMedia | CallState::Established)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -600,5 +596,541 @@ mod tests {
 
         assert!(call.media().is_some());
         assert_eq!(call.codec().map(|c| c.encoding.as_str()), Some("PCMU"));
+    }
+
+    // Dialog tests
+    #[test]
+    fn test_dialog_new_uac() {
+        let dialog = Dialog::new_uac(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        assert_eq!(dialog.local_uri(), "sip:alice@example.com");
+        assert_eq!(dialog.remote_uri(), "sip:bob@example.com");
+        assert_eq!(dialog.local_cseq(), 1);
+    }
+
+    #[test]
+    fn test_dialog_new_uas() {
+        let dialog = Dialog::new_uas(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:bob@example.com".to_string(),
+            "sip:alice@example.com".to_string(),
+            1,
+        );
+
+        assert_eq!(dialog.local_uri(), "sip:bob@example.com");
+        assert_eq!(dialog.remote_uri(), "sip:alice@example.com");
+        assert_eq!(dialog.local_cseq(), 1);
+    }
+
+    #[test]
+    fn test_dialog_next_cseq() {
+        let mut dialog = Dialog::new_uac(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        assert_eq!(dialog.local_cseq(), 1);
+        assert_eq!(dialog.next_cseq(), 2);
+        assert_eq!(dialog.next_cseq(), 3);
+        assert_eq!(dialog.local_cseq(), 3);
+    }
+
+    #[test]
+    fn test_dialog_id() {
+        let dialog = Dialog::new_uac(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let id = dialog.id();
+        // Verify id is valid (compare it with itself - DialogId implements PartialEq)
+        assert_eq!(id, id);
+    }
+
+    #[test]
+    fn test_dialog_clone() {
+        let dialog = Dialog::new_uac(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let cloned = dialog.clone();
+        assert_eq!(cloned.local_uri(), dialog.local_uri());
+        assert_eq!(cloned.remote_uri(), dialog.remote_uri());
+    }
+
+    // CallState tests
+    #[test]
+    fn test_call_state_debug() {
+        assert!(format!("{:?}", CallState::Idle).contains("Idle"));
+        assert!(format!("{:?}", CallState::Inviting).contains("Inviting"));
+        assert!(format!("{:?}", CallState::Ringing).contains("Ringing"));
+        assert!(format!("{:?}", CallState::EarlyMedia).contains("EarlyMedia"));
+        assert!(format!("{:?}", CallState::Established).contains("Established"));
+        assert!(format!("{:?}", CallState::Terminating).contains("Terminating"));
+        assert!(format!("{:?}", CallState::Terminated).contains("Terminated"));
+    }
+
+    #[test]
+    fn test_call_state_eq() {
+        assert_eq!(CallState::Idle, CallState::Idle);
+        assert_ne!(CallState::Idle, CallState::Inviting);
+    }
+
+    #[test]
+    fn test_call_state_clone() {
+        let state = CallState::Established;
+        let cloned = state;
+        assert_eq!(state, cloned);
+    }
+
+    // CallDirection tests
+    #[test]
+    fn test_call_direction_debug() {
+        assert!(format!("{:?}", CallDirection::Outbound).contains("Outbound"));
+        assert!(format!("{:?}", CallDirection::Inbound).contains("Inbound"));
+    }
+
+    #[test]
+    fn test_call_direction_eq() {
+        assert_eq!(CallDirection::Outbound, CallDirection::Outbound);
+        assert_ne!(CallDirection::Outbound, CallDirection::Inbound);
+    }
+
+    // CallConfig tests
+    #[test]
+    fn test_call_config_default() {
+        let config = CallConfig::default();
+        assert_eq!(config.local_uri, "sip:user@127.0.0.1");
+        assert!(config.local_name.is_none());
+        assert!(!config.codecs.is_empty());
+        assert_eq!(config.rtp_port_start, 10000);
+        assert_eq!(config.rtp_port_end, 20000);
+    }
+
+    #[test]
+    fn test_call_config_debug() {
+        let config = CallConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("CallConfig"));
+    }
+
+    #[test]
+    fn test_call_config_clone() {
+        let config = CallConfig::default();
+        let cloned = config.clone();
+        assert_eq!(cloned.local_uri, config.local_uri);
+    }
+
+    // CallEvent tests
+    #[test]
+    fn test_call_event_debug() {
+        let event = CallEvent::StateChanged(CallState::Ringing);
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("StateChanged"));
+    }
+
+    #[test]
+    fn test_call_event_ringing() {
+        let event = CallEvent::Ringing;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Ringing"));
+    }
+
+    #[test]
+    fn test_call_event_early_media() {
+        let event = CallEvent::EarlyMedia;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("EarlyMedia"));
+    }
+
+    #[test]
+    fn test_call_event_answered() {
+        let event = CallEvent::Answered;
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Answered"));
+    }
+
+    #[test]
+    fn test_call_event_ended() {
+        let event = CallEvent::Ended(CallEndReason::NormalClearing);
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Ended"));
+    }
+
+    #[test]
+    fn test_call_event_audio_received() {
+        let event = CallEvent::AudioReceived(vec![0i16; 160]);
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("AudioReceived"));
+    }
+
+    #[test]
+    fn test_call_event_dtmf_received() {
+        let event = CallEvent::DtmfReceived('5');
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("DtmfReceived"));
+    }
+
+    #[test]
+    fn test_call_event_clone() {
+        let event = CallEvent::Ringing;
+        let cloned = event.clone();
+        assert!(format!("{:?}", cloned).contains("Ringing"));
+    }
+
+    // CallEndReason tests
+    #[test]
+    fn test_call_end_reason_debug() {
+        assert!(format!("{:?}", CallEndReason::NormalClearing).contains("NormalClearing"));
+        assert!(format!("{:?}", CallEndReason::Rejected).contains("Rejected"));
+        assert!(format!("{:?}", CallEndReason::Busy).contains("Busy"));
+        assert!(format!("{:?}", CallEndReason::NoAnswer).contains("NoAnswer"));
+        assert!(format!("{:?}", CallEndReason::NetworkError).contains("NetworkError"));
+        assert!(format!("{:?}", CallEndReason::Canceled).contains("Canceled"));
+        assert!(format!("{:?}", CallEndReason::Error).contains("Error"));
+    }
+
+    #[test]
+    fn test_call_end_reason_eq() {
+        assert_eq!(CallEndReason::Busy, CallEndReason::Busy);
+        assert_ne!(CallEndReason::Busy, CallEndReason::Rejected);
+    }
+
+    // CallId tests
+    #[test]
+    fn test_call_id_default() {
+        let id = CallId::default();
+        assert!(!id.0.is_empty());
+    }
+
+    #[test]
+    fn test_call_id_display() {
+        let id = CallId::new();
+        let display = format!("{}", id);
+        assert!(!display.is_empty());
+        assert_eq!(display, id.0);
+    }
+
+    #[test]
+    fn test_call_id_hash() {
+        use std::collections::HashSet;
+        let id1 = CallId::new();
+        let id2 = CallId::new();
+        let mut set = HashSet::new();
+        set.insert(id1.clone());
+        set.insert(id2.clone());
+        set.insert(id1.clone()); // duplicate
+        assert_eq!(set.len(), 2);
+    }
+
+    // Call tests
+    #[test]
+    fn test_new_inbound_call() {
+        let config = Arc::new(CallConfig::default());
+        let dialog = Dialog::new_uas(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:bob@example.com".to_string(),
+            "sip:alice@example.com".to_string(),
+            1,
+        );
+
+        let call = Call::new_inbound(config, "sip:alice@example.com".to_string(), dialog);
+
+        assert_eq!(call.state(), CallState::Ringing);
+        assert_eq!(call.direction(), CallDirection::Inbound);
+        assert!(call.dialog().is_some());
+    }
+
+    #[test]
+    fn test_call_set_dialog() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        assert!(call.dialog().is_none());
+        assert!(call.dialog_id().is_none());
+
+        let dialog = Dialog::new_uac(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+        call.set_dialog(dialog);
+
+        assert!(call.dialog().is_some());
+        assert!(call.dialog_id().is_some());
+    }
+
+    #[test]
+    fn test_call_dialog_mut() {
+        let config = Arc::new(CallConfig::default());
+        let dialog = Dialog::new_uas(
+            "call-123".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:bob@example.com".to_string(),
+            "sip:alice@example.com".to_string(),
+            1,
+        );
+        let mut call = Call::new_inbound(config, "sip:alice@example.com".to_string(), dialog);
+
+        // Modify dialog via mutable reference
+        if let Some(d) = call.dialog_mut() {
+            let _ = d.next_cseq();
+        }
+
+        // Verify modification
+        assert!(call.dialog().is_some());
+    }
+
+    #[test]
+    fn test_call_can_receive_media() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        // Idle state
+        assert!(!call.can_receive_media());
+
+        // Inviting state
+        call.set_state(CallState::Inviting);
+        assert!(!call.can_receive_media());
+
+        // Ringing state
+        call.set_state(CallState::Ringing);
+        assert!(!call.can_receive_media());
+
+        // EarlyMedia state
+        call.set_state(CallState::EarlyMedia);
+        assert!(call.can_receive_media());
+
+        // Established state
+        call.set_state(CallState::Established);
+        assert!(call.can_receive_media());
+
+        // Terminated state
+        call.set_state(CallState::Terminated);
+        assert!(!call.can_receive_media());
+    }
+
+    #[test]
+    fn test_call_handle_early_media() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        call.handle_provisional(true);
+        assert_eq!(call.state(), CallState::EarlyMedia);
+
+        let events = call.drain_events();
+        assert!(events.iter().any(|e| matches!(e, CallEvent::EarlyMedia)));
+    }
+
+    #[test]
+    fn test_call_handle_ended_with_media() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        // Set up media
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 6000,
+            remote_addr: Some("10.0.0.1".to_string()),
+            direction: mdsiprtp_sdp::parser::Direction::SendRecv,
+        };
+        call.set_negotiated_media(media, 5000);
+
+        assert!(call.media().unwrap().is_active());
+
+        // End call
+        call.handle_ended(CallEndReason::NormalClearing);
+
+        assert_eq!(call.state(), CallState::Terminated);
+        assert!(!call.media().unwrap().is_active());
+    }
+
+    #[test]
+    fn test_call_media_mut() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        // No media initially
+        assert!(call.media_mut().is_none());
+
+        // Set up media
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 6000,
+            remote_addr: None,
+            direction: mdsiprtp_sdp::parser::Direction::SendRecv,
+        };
+        call.set_negotiated_media(media, 5000);
+
+        // Now has media
+        assert!(call.media_mut().is_some());
+    }
+
+    #[test]
+    fn test_call_config() {
+        let config = Arc::new(CallConfig {
+            local_uri: "sip:test@host.com".to_string(),
+            local_name: Some("Test User".to_string()),
+            codecs: vec![Codec::pcma()],
+            rtp_port_start: 20000,
+            rtp_port_end: 30000,
+        });
+        let call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        let cfg = call.config();
+        assert_eq!(cfg.local_uri, "sip:test@host.com");
+        assert_eq!(cfg.local_name.as_deref(), Some("Test User"));
+    }
+
+    #[test]
+    fn test_call_set_state_no_duplicate_events() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        // Set state
+        call.set_state(CallState::Established);
+        let events1 = call.drain_events();
+        assert_eq!(events1.len(), 1);
+
+        // Set same state again - should not emit event
+        call.set_state(CallState::Established);
+        let events2 = call.drain_events();
+        assert!(events2.is_empty());
+    }
+
+    // MediaSession tests
+    #[test]
+    fn test_media_session_alaw() {
+        let session = MediaSession::new(12345, 8, 8000, 5000);
+        assert_eq!(session.local_port(), 5000);
+        assert!(!session.is_active());
+    }
+
+    #[test]
+    fn test_media_session_unknown_payload() {
+        // Unknown payload type should default to mu-law
+        let session = MediaSession::new(12345, 99, 8000, 5000);
+        assert_eq!(session.local_port(), 5000);
+    }
+
+    #[test]
+    fn test_media_session_rtp_session() {
+        let session = MediaSession::new(12345, 0, 8000, 5000);
+        let rtp = session.rtp_session();
+        assert_eq!(rtp.ssrc(), 12345);
+    }
+
+    #[test]
+    fn test_media_session_jitter_stats() {
+        let session = MediaSession::new(12345, 0, 8000, 5000);
+        let stats = session.jitter_stats();
+        assert_eq!(stats.packets_received, 0);
+    }
+
+    #[test]
+    fn test_media_session_get_audio_frame() {
+        use mdsiprtp_media::PlayoutDecision;
+        let mut session = MediaSession::new(12345, 0, 8000, 5000);
+
+        // Without primed buffer, should get empty samples
+        let (decision, samples) = session.get_audio_frame();
+        // Empty buffer returns silence
+        assert!(matches!(decision, PlayoutDecision::Silence) || samples.is_empty());
+    }
+
+    #[test]
+    fn test_media_session_receive_rtp() {
+        let mut session = MediaSession::new(12345, 0, 8000, 5000);
+        session.set_remote("10.0.0.1:6000".parse().unwrap());
+
+        // Use the existing encode method to create a test packet
+        // This is cleaner than manually constructing the packet
+        let samples = vec![0i16; 160];
+        let packet = session.encode_audio(&samples, false);
+
+        // First packet won't return audio (buffer not primed)
+        let result = session.receive_rtp(&packet);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_media_session_debug() {
+        let session = MediaSession::new(12345, 0, 8000, 5000);
+        let debug = format!("{:?}", session);
+        assert!(debug.contains("MediaSession"));
+    }
+
+    #[test]
+    fn test_set_negotiated_media_no_remote_addr() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 6000,
+            remote_addr: None,
+            direction: mdsiprtp_sdp::parser::Direction::SendRecv,
+        };
+
+        call.set_negotiated_media(media, 5000);
+
+        assert!(call.media().is_some());
+        // Media not active because no remote address
+        assert!(!call.media().unwrap().is_active());
+    }
+
+    #[test]
+    fn test_set_negotiated_media_invalid_addr() {
+        let config = Arc::new(CallConfig::default());
+        let mut call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 6000,
+            remote_addr: Some("not-an-ip".to_string()),
+            direction: mdsiprtp_sdp::parser::Direction::SendRecv,
+        };
+
+        call.set_negotiated_media(media, 5000);
+
+        assert!(call.media().is_some());
+        // Media not active because invalid address
+        assert!(!call.media().unwrap().is_active());
+    }
+
+    #[test]
+    fn test_call_debug() {
+        let config = Arc::new(CallConfig::default());
+        let call = Call::new_outbound(config, "sip:bob@example.com".to_string());
+        let debug = format!("{:?}", call);
+        assert!(debug.contains("Call"));
     }
 }

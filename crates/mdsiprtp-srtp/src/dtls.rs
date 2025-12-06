@@ -61,7 +61,7 @@
 //! let srtp_ctx = SrtpContext::from_dtls_keys(keys)?;
 //! ```
 
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 /// DTLS-SRTP errors.
@@ -200,7 +200,8 @@ impl Fingerprint {
 
     /// Format fingerprint for SDP.
     pub fn to_sdp(&self) -> String {
-        let hex = self.value
+        let hex = self
+            .value
             .iter()
             .map(|b| format!("{:02X}", b))
             .collect::<Vec<_>>()
@@ -236,9 +237,7 @@ impl DtlsSrtpKeys {
             DtlsRole::Client | DtlsRole::ActPass => {
                 (&self.client_write_key, &self.client_write_salt)
             }
-            DtlsRole::Server => {
-                (&self.server_write_key, &self.server_write_salt)
-            }
+            DtlsRole::Server => (&self.server_write_key, &self.server_write_salt),
         }
     }
 
@@ -248,9 +247,7 @@ impl DtlsSrtpKeys {
             DtlsRole::Client | DtlsRole::ActPass => {
                 (&self.server_write_key, &self.server_write_salt)
             }
-            DtlsRole::Server => {
-                (&self.client_write_key, &self.client_write_salt)
-            }
+            DtlsRole::Server => (&self.client_write_key, &self.client_write_salt),
         }
     }
 }
@@ -440,6 +437,29 @@ mod tests {
     }
 
     #[test]
+    fn test_fingerprint_parse_sha1() {
+        let s = "sha-1 AB:CD:EF:01:23:45:67:89:AB:CD:EF:01:23:45:67:89:AB:CD:EF:01";
+        let fp = Fingerprint::parse(s).unwrap();
+
+        assert_eq!(fp.algorithm, FingerprintHash::Sha1);
+        assert_eq!(fp.value.len(), 20);
+    }
+
+    #[test]
+    fn test_fingerprint_parse_invalid_algorithm() {
+        let s = "sha-512 AB:CD:EF";
+        assert!(Fingerprint::parse(s).is_none());
+    }
+
+    #[test]
+    fn test_fingerprint_parse_missing_parts() {
+        // Missing hex part
+        assert!(Fingerprint::parse("sha-256").is_none());
+        // Empty string
+        assert!(Fingerprint::parse("").is_none());
+    }
+
+    #[test]
     fn test_fingerprint_to_sdp() {
         let fp = Fingerprint {
             algorithm: FingerprintHash::Sha256,
@@ -452,22 +472,117 @@ mod tests {
     }
 
     #[test]
+    fn test_fingerprint_to_sdp_sha1() {
+        let fp = Fingerprint {
+            algorithm: FingerprintHash::Sha1,
+            value: vec![0x01, 0x02],
+        };
+
+        let sdp = fp.to_sdp();
+        assert!(sdp.starts_with("sha-1 "));
+        assert!(sdp.contains("01:02"));
+    }
+
+    #[test]
+    fn test_fingerprint_from_certificate_der_sha256() {
+        let cert_der = b"test certificate data";
+        let fp = Fingerprint::from_certificate_der(cert_der, FingerprintHash::Sha256);
+
+        assert_eq!(fp.algorithm, FingerprintHash::Sha256);
+        assert_eq!(fp.value.len(), 32); // SHA-256 produces 32 bytes
+    }
+
+    #[test]
+    fn test_fingerprint_from_certificate_der_sha1() {
+        let cert_der = b"test certificate data";
+        let fp = Fingerprint::from_certificate_der(cert_der, FingerprintHash::Sha1);
+
+        assert_eq!(fp.algorithm, FingerprintHash::Sha1);
+        assert_eq!(fp.value.len(), 20); // SHA-1 produces 20 bytes
+    }
+
+    #[test]
+    fn test_fingerprint_verify_match() {
+        let fp1 = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3, 4],
+        };
+        let fp2 = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3, 4],
+        };
+
+        assert!(fp1.verify(&fp2));
+    }
+
+    #[test]
+    fn test_fingerprint_verify_mismatch_value() {
+        let fp1 = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3, 4],
+        };
+        let fp2 = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3, 5],
+        };
+
+        assert!(!fp1.verify(&fp2));
+    }
+
+    #[test]
+    fn test_fingerprint_verify_mismatch_algorithm() {
+        let fp1 = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3, 4],
+        };
+        let fp2 = Fingerprint {
+            algorithm: FingerprintHash::Sha1,
+            value: vec![1, 2, 3, 4],
+        };
+
+        assert!(!fp1.verify(&fp2));
+    }
+
+    #[test]
     fn test_dtls_role_sdp() {
-        assert_eq!(
-            DtlsRole::from_sdp_setup("active"),
-            Some(DtlsRole::Client)
-        );
-        assert_eq!(
-            DtlsRole::from_sdp_setup("passive"),
-            Some(DtlsRole::Server)
-        );
-        assert_eq!(
-            DtlsRole::from_sdp_setup("actpass"),
-            Some(DtlsRole::ActPass)
-        );
+        assert_eq!(DtlsRole::from_sdp_setup("active"), Some(DtlsRole::Client));
+        assert_eq!(DtlsRole::from_sdp_setup("passive"), Some(DtlsRole::Server));
+        assert_eq!(DtlsRole::from_sdp_setup("actpass"), Some(DtlsRole::ActPass));
 
         assert_eq!(DtlsRole::Client.to_sdp_setup(), "active");
         assert_eq!(DtlsRole::Server.to_sdp_setup(), "passive");
+    }
+
+    #[test]
+    fn test_dtls_role_sdp_case_insensitive() {
+        assert_eq!(DtlsRole::from_sdp_setup("ACTIVE"), Some(DtlsRole::Client));
+        assert_eq!(DtlsRole::from_sdp_setup("Passive"), Some(DtlsRole::Server));
+        assert_eq!(DtlsRole::from_sdp_setup("ActPass"), Some(DtlsRole::ActPass));
+    }
+
+    #[test]
+    fn test_dtls_role_sdp_invalid() {
+        assert_eq!(DtlsRole::from_sdp_setup("invalid"), None);
+        assert_eq!(DtlsRole::from_sdp_setup(""), None);
+        assert_eq!(DtlsRole::from_sdp_setup("holdconn"), None);
+    }
+
+    #[test]
+    fn test_dtls_role_actpass_to_sdp() {
+        assert_eq!(DtlsRole::ActPass.to_sdp_setup(), "actpass");
+    }
+
+    #[test]
+    fn test_fingerprint_hash_from_sdp_case_insensitive() {
+        assert_eq!(
+            FingerprintHash::from_sdp("SHA-256"),
+            Some(FingerprintHash::Sha256)
+        );
+        assert_eq!(
+            FingerprintHash::from_sdp("SHA-1"),
+            Some(FingerprintHash::Sha1)
+        );
+        assert_eq!(FingerprintHash::from_sdp("sha-384"), None);
     }
 
     #[test]
@@ -478,7 +593,59 @@ mod tests {
         assert_eq!(profile.salt_length(), 14);
         assert_eq!(profile.keying_material_length(), 60);
 
-        assert_eq!(SrtpProfile::from_id(0x0001), Some(SrtpProfile::Aes128CmHmacSha1_80));
+        assert_eq!(
+            SrtpProfile::from_id(0x0001),
+            Some(SrtpProfile::Aes128CmHmacSha1_80)
+        );
+    }
+
+    #[test]
+    fn test_srtp_profile_aes128_32() {
+        let profile = SrtpProfile::Aes128CmHmacSha1_32;
+        assert_eq!(profile.id(), 0x0002);
+        assert_eq!(profile.key_length(), 16);
+        assert_eq!(profile.salt_length(), 14);
+        assert_eq!(profile.keying_material_length(), 60);
+
+        assert_eq!(
+            SrtpProfile::from_id(0x0002),
+            Some(SrtpProfile::Aes128CmHmacSha1_32)
+        );
+    }
+
+    #[test]
+    fn test_srtp_profile_aes256_80() {
+        let profile = SrtpProfile::Aes256CmHmacSha1_80;
+        assert_eq!(profile.id(), 0x0003);
+        assert_eq!(profile.key_length(), 32);
+        assert_eq!(profile.salt_length(), 14);
+        assert_eq!(profile.keying_material_length(), 92); // 2 * (32 + 14)
+
+        assert_eq!(
+            SrtpProfile::from_id(0x0003),
+            Some(SrtpProfile::Aes256CmHmacSha1_80)
+        );
+    }
+
+    #[test]
+    fn test_srtp_profile_aes256_32() {
+        let profile = SrtpProfile::Aes256CmHmacSha1_32;
+        assert_eq!(profile.id(), 0x0004);
+        assert_eq!(profile.key_length(), 32);
+        assert_eq!(profile.salt_length(), 14);
+        assert_eq!(profile.keying_material_length(), 92);
+
+        assert_eq!(
+            SrtpProfile::from_id(0x0004),
+            Some(SrtpProfile::Aes256CmHmacSha1_32)
+        );
+    }
+
+    #[test]
+    fn test_srtp_profile_from_id_invalid() {
+        assert_eq!(SrtpProfile::from_id(0x0000), None);
+        assert_eq!(SrtpProfile::from_id(0x0005), None);
+        assert_eq!(SrtpProfile::from_id(0xFFFF), None);
     }
 
     #[test]
@@ -494,6 +661,58 @@ mod tests {
         assert_eq!(ext.len(), 7);
 
         let parsed = parse_use_srtp_extension(&ext);
+        assert_eq!(parsed, Some(SrtpProfile::Aes128CmHmacSha1_80));
+    }
+
+    #[test]
+    fn test_use_srtp_extension_single_profile() {
+        let profiles = vec![SrtpProfile::Aes256CmHmacSha1_80];
+        let ext = build_use_srtp_extension(&profiles);
+
+        // Length (2 bytes) + profile (2 bytes) + mki length (1 byte) = 5 bytes
+        assert_eq!(ext.len(), 5);
+
+        let parsed = parse_use_srtp_extension(&ext);
+        assert_eq!(parsed, Some(SrtpProfile::Aes256CmHmacSha1_80));
+    }
+
+    #[test]
+    fn test_use_srtp_extension_empty() {
+        let profiles: Vec<SrtpProfile> = vec![];
+        let ext = build_use_srtp_extension(&profiles);
+
+        // Length (2 bytes, value 0) + mki length (1 byte) = 3 bytes
+        assert_eq!(ext.len(), 3);
+        assert_eq!(ext, vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn test_parse_use_srtp_extension_too_short() {
+        // Too short (less than 4 bytes)
+        assert!(parse_use_srtp_extension(&[0, 2]).is_none());
+        assert!(parse_use_srtp_extension(&[]).is_none());
+        assert!(parse_use_srtp_extension(&[0]).is_none());
+    }
+
+    #[test]
+    fn test_parse_use_srtp_extension_invalid_length() {
+        // Length says 4 bytes but only 2 provided
+        let data = [0, 4, 0, 1];
+        assert!(parse_use_srtp_extension(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_use_srtp_extension_unsupported_profile() {
+        // Valid format but unsupported profile ID 0x0010
+        let data = [0, 2, 0, 0x10, 0];
+        assert!(parse_use_srtp_extension(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_use_srtp_extension_second_profile() {
+        // First profile is unsupported (0x0010), second is supported
+        let data = [0, 4, 0, 0x10, 0, 1, 0];
+        let parsed = parse_use_srtp_extension(&data);
         assert_eq!(parsed, Some(SrtpProfile::Aes128CmHmacSha1_80));
     }
 
@@ -514,6 +733,40 @@ mod tests {
         assert_eq!(keys.server_write_key, vec![2u8; 16]);
         assert_eq!(keys.client_write_salt, vec![3u8; 14]);
         assert_eq!(keys.server_write_salt, vec![4u8; 14]);
+        assert_eq!(keys.profile, SrtpProfile::Aes128CmHmacSha1_80);
+    }
+
+    #[test]
+    fn test_extract_srtp_keys_aes256() {
+        let profile = SrtpProfile::Aes256CmHmacSha1_80;
+
+        // Create fake exported material for AES-256
+        let mut exported = Vec::new();
+        exported.extend_from_slice(&[1u8; 32]); // client key (32 bytes)
+        exported.extend_from_slice(&[2u8; 32]); // server key (32 bytes)
+        exported.extend_from_slice(&[3u8; 14]); // client salt
+        exported.extend_from_slice(&[4u8; 14]); // server salt
+
+        let keys = extract_srtp_keys(&exported, profile).unwrap();
+
+        assert_eq!(keys.client_write_key.len(), 32);
+        assert_eq!(keys.server_write_key.len(), 32);
+        assert_eq!(keys.profile, SrtpProfile::Aes256CmHmacSha1_80);
+    }
+
+    #[test]
+    fn test_extract_srtp_keys_insufficient_length() {
+        let profile = SrtpProfile::Aes128CmHmacSha1_80;
+
+        // Only provide 30 bytes, need 60
+        let exported = vec![0u8; 30];
+        assert!(extract_srtp_keys(&exported, profile).is_none());
+    }
+
+    #[test]
+    fn test_extract_srtp_keys_empty() {
+        let profile = SrtpProfile::Aes128CmHmacSha1_80;
+        assert!(extract_srtp_keys(&[], profile).is_none());
     }
 
     #[test]
@@ -533,5 +786,202 @@ mod tests {
         let (remote_key, remote_salt) = keys.remote_keys(DtlsRole::Client);
         assert_eq!(remote_key, &[2]);
         assert_eq!(remote_salt, &[4]);
+    }
+
+    #[test]
+    fn test_dtls_keys_by_role_server() {
+        let keys = DtlsSrtpKeys {
+            client_write_key: vec![1],
+            server_write_key: vec![2],
+            client_write_salt: vec![3],
+            server_write_salt: vec![4],
+            profile: SrtpProfile::Aes128CmHmacSha1_80,
+        };
+
+        // Server uses server_write_key for local
+        let (local_key, local_salt) = keys.local_keys(DtlsRole::Server);
+        assert_eq!(local_key, &[2]);
+        assert_eq!(local_salt, &[4]);
+
+        // Server uses client_write_key for remote
+        let (remote_key, remote_salt) = keys.remote_keys(DtlsRole::Server);
+        assert_eq!(remote_key, &[1]);
+        assert_eq!(remote_salt, &[3]);
+    }
+
+    #[test]
+    fn test_dtls_keys_by_role_actpass() {
+        let keys = DtlsSrtpKeys {
+            client_write_key: vec![1],
+            server_write_key: vec![2],
+            client_write_salt: vec![3],
+            server_write_salt: vec![4],
+            profile: SrtpProfile::Aes128CmHmacSha1_80,
+        };
+
+        // ActPass behaves like Client
+        let (local_key, local_salt) = keys.local_keys(DtlsRole::ActPass);
+        assert_eq!(local_key, &[1]);
+        assert_eq!(local_salt, &[3]);
+
+        let (remote_key, remote_salt) = keys.remote_keys(DtlsRole::ActPass);
+        assert_eq!(remote_key, &[2]);
+        assert_eq!(remote_salt, &[4]);
+    }
+
+    #[test]
+    fn test_dtls_config_default() {
+        let config = DtlsConfig::default();
+
+        assert_eq!(config.role, DtlsRole::ActPass);
+        assert_eq!(config.srtp_profiles.len(), 2);
+        assert_eq!(config.srtp_profiles[0], SrtpProfile::Aes128CmHmacSha1_80);
+        assert_eq!(config.srtp_profiles[1], SrtpProfile::Aes128CmHmacSha1_32);
+        assert_eq!(config.fingerprint_hash, FingerprintHash::Sha256);
+    }
+
+    #[test]
+    fn test_dtls_state_values() {
+        // Just ensure all states can be created and compared
+        let states = [
+            DtlsState::New,
+            DtlsState::Connecting,
+            DtlsState::Connected,
+            DtlsState::Failed,
+            DtlsState::Closed,
+        ];
+
+        assert_eq!(states[0], DtlsState::New);
+        assert_ne!(states[0], DtlsState::Connected);
+    }
+
+    #[test]
+    fn test_dtls_state_debug() {
+        let state = DtlsState::Connecting;
+        let debug = format!("{:?}", state);
+        assert_eq!(debug, "Connecting");
+    }
+
+    #[test]
+    fn test_dtls_error_display() {
+        let err = DtlsError::HandshakeFailed("timeout".to_string());
+        assert!(err.to_string().contains("timeout"));
+
+        let err = DtlsError::FingerprintMismatch;
+        assert!(err.to_string().contains("fingerprint"));
+
+        let err = DtlsError::KeyExportFailed("export error".to_string());
+        assert!(err.to_string().contains("export error"));
+
+        let err = DtlsError::InvalidState("bad state".to_string());
+        assert!(err.to_string().contains("bad state"));
+
+        let err = DtlsError::OpenSsl("ssl error".to_string());
+        assert!(err.to_string().contains("ssl error"));
+    }
+
+    #[test]
+    fn test_dtls_error_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test io error");
+        let dtls_err: DtlsError = io_err.into();
+        assert!(matches!(dtls_err, DtlsError::Io(_)));
+        assert!(dtls_err.to_string().contains("test io error"));
+    }
+
+    #[test]
+    fn test_fingerprint_hash_to_sdp() {
+        assert_eq!(FingerprintHash::Sha256.to_sdp(), "sha-256");
+        assert_eq!(FingerprintHash::Sha1.to_sdp(), "sha-1");
+    }
+
+    #[test]
+    fn test_fingerprint_roundtrip() {
+        let cert_der = b"fake certificate bytes for testing";
+        let fp = Fingerprint::from_certificate_der(cert_der, FingerprintHash::Sha256);
+
+        let sdp = fp.to_sdp();
+        let parsed = Fingerprint::parse(&sdp).unwrap();
+
+        assert!(fp.verify(&parsed));
+    }
+
+    #[test]
+    fn test_dtls_config_custom() {
+        let config = DtlsConfig {
+            role: DtlsRole::Server,
+            srtp_profiles: vec![SrtpProfile::Aes256CmHmacSha1_80],
+            fingerprint_hash: FingerprintHash::Sha1,
+        };
+
+        assert_eq!(config.role, DtlsRole::Server);
+        assert_eq!(config.srtp_profiles.len(), 1);
+        assert_eq!(config.fingerprint_hash, FingerprintHash::Sha1);
+    }
+
+    #[test]
+    fn test_dtls_role_clone_copy() {
+        let role = DtlsRole::Client;
+        let cloned = role.clone();
+        let copied = role;
+        assert_eq!(role, cloned);
+        assert_eq!(role, copied);
+    }
+
+    #[test]
+    fn test_fingerprint_hash_clone_copy() {
+        let hash = FingerprintHash::Sha256;
+        let cloned = hash.clone();
+        let copied = hash;
+        assert_eq!(hash, cloned);
+        assert_eq!(hash, copied);
+    }
+
+    #[test]
+    fn test_srtp_profile_clone_copy() {
+        let profile = SrtpProfile::Aes128CmHmacSha1_80;
+        let cloned = profile.clone();
+        let copied = profile;
+        assert_eq!(profile, cloned);
+        assert_eq!(profile, copied);
+    }
+
+    #[test]
+    fn test_dtls_state_clone_copy() {
+        let state = DtlsState::Connected;
+        let cloned = state.clone();
+        let copied = state;
+        assert_eq!(state, cloned);
+        assert_eq!(state, copied);
+    }
+
+    #[test]
+    fn test_dtls_config_clone() {
+        let config = DtlsConfig::default();
+        let cloned = config.clone();
+        assert_eq!(cloned.role, DtlsRole::ActPass);
+    }
+
+    #[test]
+    fn test_fingerprint_clone() {
+        let fp = Fingerprint {
+            algorithm: FingerprintHash::Sha256,
+            value: vec![1, 2, 3],
+        };
+        let cloned = fp.clone();
+        assert_eq!(cloned.algorithm, FingerprintHash::Sha256);
+        assert_eq!(cloned.value, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_dtls_srtp_keys_clone() {
+        let keys = DtlsSrtpKeys {
+            client_write_key: vec![1],
+            server_write_key: vec![2],
+            client_write_salt: vec![3],
+            server_write_salt: vec![4],
+            profile: SrtpProfile::Aes128CmHmacSha1_80,
+        };
+        let cloned = keys.clone();
+        assert_eq!(cloned.client_write_key, vec![1]);
     }
 }

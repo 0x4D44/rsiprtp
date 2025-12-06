@@ -26,13 +26,13 @@ pub mod rtcp;
 pub mod session;
 
 // Re-export main types
+pub use dtmf::{DtmfDigit, DtmfEvent, DtmfReceiver, DtmfSender};
 pub use packet::{
-    ExtensionHeader, RtpPacket, RtpParseError, RTP_HEADER_SIZE, MAX_CSRC,
-    sequence_diff, sequence_newer,
+    sequence_diff, sequence_newer, ExtensionHeader, RtpPacket, RtpParseError, MAX_CSRC,
+    RTP_HEADER_SIZE,
 };
 pub use rtcp::{
-    Goodbye, NtpTimestamp, ReceiverReport, ReportBlock, RtcpCompound,
-    RtcpPacket, RtcpParseError, RtcpType, SenderReport, SourceDescription,
+    Goodbye, NtpTimestamp, ReceiverReport, ReportBlock, RtcpCompound, RtcpPacket, RtcpParseError,
+    RtcpType, SenderReport, SourceDescription,
 };
 pub use session::{ReceiverState, RtpSession};
-pub use dtmf::{DtmfDigit, DtmfEvent, DtmfReceiver, DtmfSender};

@@ -34,11 +34,7 @@ pub struct SrtpContext {
 
 impl SrtpContext {
     /// Create a new SRTP context from master key and salt.
-    pub fn new(
-        suite: CryptoSuite,
-        master_key: &[u8],
-        master_salt: &[u8],
-    ) -> Result<Self, String> {
+    pub fn new(suite: CryptoSuite, master_key: &[u8], master_salt: &[u8]) -> Result<Self, String> {
         let keys = SessionKeys::derive(suite, master_key, master_salt)?;
         Ok(Self {
             suite,
@@ -159,8 +155,8 @@ impl SrtpContext {
 
     /// Compute authentication tag using HMAC-SHA1.
     fn compute_auth_tag(&self, packet: &[u8], roc: u32) -> [u8; 20] {
-        let mut mac = HmacSha1::new_from_slice(&self.keys.srtp_auth_key)
-            .expect("HMAC key length is valid");
+        let mut mac =
+            HmacSha1::new_from_slice(&self.keys.srtp_auth_key).expect("HMAC key length is valid");
 
         mac.update(packet);
         mac.update(&roc.to_be_bytes());
@@ -184,11 +180,7 @@ pub struct SrtcpContext {
 
 impl SrtcpContext {
     /// Create a new SRTCP context from master key and salt.
-    pub fn new(
-        suite: CryptoSuite,
-        master_key: &[u8],
-        master_salt: &[u8],
-    ) -> Result<Self, String> {
+    pub fn new(suite: CryptoSuite, master_key: &[u8], master_salt: &[u8]) -> Result<Self, String> {
         let keys = SessionKeys::derive(suite, master_key, master_salt)?;
         Ok(Self {
             suite,
@@ -292,8 +284,8 @@ impl SrtcpContext {
 
     /// Compute authentication tag using HMAC-SHA1.
     fn compute_auth_tag(&self, packet: &[u8]) -> [u8; 20] {
-        let mut mac = HmacSha1::new_from_slice(&self.keys.srtcp_auth_key)
-            .expect("HMAC key length is valid");
+        let mut mac =
+            HmacSha1::new_from_slice(&self.keys.srtcp_auth_key).expect("HMAC key length is valid");
 
         mac.update(packet);
 
@@ -448,19 +440,11 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 14];
 
-        let mut ctx_send = SrtpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_send =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
-        let mut ctx_recv = SrtpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_recv =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
         let rtp = make_test_rtp();
 
@@ -482,19 +466,11 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 14];
 
-        let mut ctx_send = SrtpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_send =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
-        let mut ctx_recv = SrtpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_recv =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
         let rtp = make_test_rtp();
         let mut srtp = ctx_send.protect(&rtp).unwrap().to_vec();
@@ -512,12 +488,8 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 14];
 
-        let mut ctx = SrtpContext::new(
-            CryptoSuite::AesCm128HmacSha1_32,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_32, &master_key, &master_salt).unwrap();
 
         let rtp = make_test_rtp();
         let srtp = ctx.protect(&rtp).unwrap();
@@ -531,19 +503,11 @@ mod tests {
         let master_key = [0u8; 16];
         let master_salt = [0u8; 14];
 
-        let mut ctx_send = SrtcpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_send =
+            SrtcpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
-        let mut ctx_recv = SrtcpContext::new(
-            CryptoSuite::AesCm128HmacSha1_80,
-            &master_key,
-            &master_salt,
-        )
-        .unwrap();
+        let mut ctx_recv =
+            SrtcpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
 
         // Simple RTCP packet (SR)
         let rtcp = vec![

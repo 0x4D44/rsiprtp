@@ -208,7 +208,12 @@ impl WavReader {
 }
 
 /// Build a WAV file header.
-fn build_wav_header(sample_rate: u32, channels: u16, bits_per_sample: u16, data_size: u32) -> Vec<u8> {
+fn build_wav_header(
+    sample_rate: u32,
+    channels: u16,
+    bits_per_sample: u16,
+    data_size: u32,
+) -> Vec<u8> {
     let byte_rate = sample_rate * channels as u32 * (bits_per_sample / 8) as u32;
     let block_align = channels * (bits_per_sample / 8);
     let file_size = 36 + data_size;
@@ -244,15 +249,24 @@ fn parse_wav_header<R: Read + Seek>(reader: &mut R) -> io::Result<(u32, u16, u16
 
     // Verify RIFF header
     if &buf[0..4] != b"RIFF" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Not a RIFF file"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a RIFF file",
+        ));
     }
     if &buf[8..12] != b"WAVE" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Not a WAVE file"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Not a WAVE file",
+        ));
     }
 
     // Verify fmt chunk
     if &buf[12..16] != b"fmt " {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing fmt chunk"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Missing fmt chunk",
+        ));
     }
 
     // Parse format
@@ -270,7 +284,10 @@ fn parse_wav_header<R: Read + Seek>(reader: &mut R) -> io::Result<(u32, u16, u16
 
     // Verify data chunk
     if &buf[36..40] != b"data" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing data chunk"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Missing data chunk",
+        ));
     }
 
     let data_size = u32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]);
@@ -285,7 +302,12 @@ fn parse_wav_header<R: Read + Seek>(reader: &mut R) -> io::Result<(u32, u16, u16
 /// * `duration_ms` - Duration in milliseconds
 /// * `sample_rate` - Sample rate in Hz
 /// * `amplitude` - Amplitude (0.0 to 1.0)
-pub fn generate_tone(frequency: f64, duration_ms: u32, sample_rate: u32, amplitude: f64) -> Vec<i16> {
+pub fn generate_tone(
+    frequency: f64,
+    duration_ms: u32,
+    sample_rate: u32,
+    amplitude: f64,
+) -> Vec<i16> {
     let num_samples = (sample_rate * duration_ms / 1000) as usize;
     let amplitude = (amplitude * i16::MAX as f64) as i16;
 
