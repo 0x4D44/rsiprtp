@@ -504,4 +504,203 @@ mod tests {
 
         std::fs::remove_file(&temp_path).ok();
     }
+
+    #[test]
+    fn test_wav_parse_invalid_riff() {
+        // Invalid RIFF header
+        let mut data = vec![0u8; 44];
+        data[0..4].copy_from_slice(b"XXXX"); // Invalid magic
+        data[8..12].copy_from_slice(b"WAVE");
+        let mut cursor = Cursor::new(data);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_parse_invalid_wave() {
+        // Invalid WAVE header
+        let mut data = vec![0u8; 44];
+        data[0..4].copy_from_slice(b"RIFF");
+        data[8..12].copy_from_slice(b"XXXX"); // Invalid WAVE
+        let mut cursor = Cursor::new(data);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_parse_missing_fmt() {
+        // Missing fmt chunk
+        let mut data = vec![0u8; 44];
+        data[0..4].copy_from_slice(b"RIFF");
+        data[8..12].copy_from_slice(b"WAVE");
+        data[12..16].copy_from_slice(b"xxxx"); // Invalid fmt
+        let mut cursor = Cursor::new(data);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_parse_non_pcm_format() {
+        // Non-PCM format (e.g., compressed)
+        let mut header = build_wav_header(8000, 1, 16, 1000);
+        header[20] = 3; // Float format instead of PCM (1)
+        header[21] = 0;
+        let mut cursor = Cursor::new(header);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_parse_missing_data() {
+        // Missing data chunk
+        let mut data = vec![0u8; 44];
+        data[0..4].copy_from_slice(b"RIFF");
+        data[4..8].copy_from_slice(&40u32.to_le_bytes());
+        data[8..12].copy_from_slice(b"WAVE");
+        data[12..16].copy_from_slice(b"fmt ");
+        data[16..20].copy_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        data[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM format
+        data[22..24].copy_from_slice(&1u16.to_le_bytes()); // channels
+        data[24..28].copy_from_slice(&8000u32.to_le_bytes()); // sample rate
+        data[28..32].copy_from_slice(&16000u32.to_le_bytes()); // byte rate
+        data[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
+        data[34..36].copy_from_slice(&16u16.to_le_bytes()); // bits per sample
+        data[36..40].copy_from_slice(b"xxxx"); // Invalid data marker
+        let mut cursor = Cursor::new(data);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_parse_truncated_header() {
+        // Truncated header (less than 44 bytes)
+        let data = vec![0u8; 20];
+        let mut cursor = Cursor::new(data);
+        let result = parse_wav_header(&mut cursor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_wav_stereo_roundtrip() {
+        let temp_path = std::env::temp_dir().join("test_wav_stereo.wav");
+
+        {
+            let mut writer = WavWriter::create(&temp_path, 44100, 2, 16).unwrap();
+            // Stereo samples: L, R, L, R...
+            let samples: Vec<i16> = (0..200).map(|i| (i * 50) as i16).collect();
+            writer.write_samples(&samples).unwrap();
+            assert!(writer.duration_secs() > 0.0);
+            writer.finish().unwrap();
+        }
+
+        {
+            let mut reader = WavReader::open(&temp_path).unwrap();
+            assert_eq!(reader.sample_rate, 44100);
+            assert_eq!(reader.channels, 2);
+            assert_eq!(reader.bits_per_sample, 16);
+            let samples = reader.read_samples(200).unwrap();
+            assert_eq!(samples.len(), 200);
+        }
+
+        std::fs::remove_file(&temp_path).ok();
+    }
+
+    #[test]
+    fn test_wav_read_frame() {
+        let temp_path = std::env::temp_dir().join("test_wav_frame.wav");
+
+        {
+            let mut writer = WavWriter::create_mono(&temp_path, 8000).unwrap();
+            let samples: Vec<i16> = (0..1600).map(|i| i as i16).collect();
+            writer.write_samples(&samples).unwrap();
+            writer.finish().unwrap();
+        }
+
+        {
+            let mut reader = WavReader::open(&temp_path).unwrap();
+            // Read 20ms frame at 8kHz = 160 samples
+            let frame = reader.read_frame(20).unwrap();
+            assert_eq!(frame.len(), 160);
+            assert_eq!(frame[0], 0);
+            assert_eq!(frame[159], 159);
+        }
+
+        std::fs::remove_file(&temp_path).ok();
+    }
+
+    #[test]
+    fn test_wav_write_bytes() {
+        let temp_path = std::env::temp_dir().join("test_wav_bytes.wav");
+
+        {
+            let mut writer = WavWriter::create_mono(&temp_path, 8000).unwrap();
+            // Write raw bytes (little-endian i16)
+            let bytes: Vec<u8> = vec![0x00, 0x01, 0x00, 0x02]; // 256, 512
+            writer.write_bytes(&bytes).unwrap();
+            writer.finish().unwrap();
+        }
+
+        {
+            let mut reader = WavReader::open(&temp_path).unwrap();
+            let samples = reader.read_samples(2).unwrap();
+            assert_eq!(samples[0], 256);
+            assert_eq!(samples[1], 512);
+        }
+
+        std::fs::remove_file(&temp_path).ok();
+    }
+
+    #[test]
+    fn test_wav_seek_beyond_end() {
+        let temp_path = std::env::temp_dir().join("test_wav_seek_beyond.wav");
+
+        {
+            let mut writer = WavWriter::create_mono(&temp_path, 8000).unwrap();
+            let samples: Vec<i16> = vec![100; 800]; // 0.1 seconds
+            writer.write_samples(&samples).unwrap();
+            writer.finish().unwrap();
+        }
+
+        {
+            let mut reader = WavReader::open(&temp_path).unwrap();
+            // Seek beyond end should clamp to end
+            reader.seek_secs(10.0).unwrap();
+            // Position should be at or near end
+            assert!(reader.position_secs() <= reader.duration_secs() + 0.001);
+        }
+
+        std::fs::remove_file(&temp_path).ok();
+    }
+
+    #[test]
+    fn test_generate_dtmf_invalid_digit() {
+        let tone = generate_dtmf_tone('X', 100, 8000);
+        assert!(tone.is_empty());
+    }
+
+    #[test]
+    fn test_generate_dtmf_all_digits() {
+        let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '#', 'A', 'B', 'C', 'D'];
+        for digit in digits {
+            let tone = generate_dtmf_tone(digit, 50, 8000);
+            assert_eq!(tone.len(), 400); // 50ms at 8kHz
+            assert!(tone.iter().any(|&s| s != 0));
+        }
+    }
+
+    #[test]
+    fn test_generate_tone_zero_amplitude() {
+        let tone = generate_tone(440.0, 100, 8000, 0.0);
+        assert_eq!(tone.len(), 800);
+        assert!(tone.iter().all(|&s| s == 0));
+    }
+
+    #[test]
+    fn test_generate_tone_various_rates() {
+        for &rate in &[8000u32, 16000, 44100, 48000] {
+            let tone = generate_tone(440.0, 100, rate, 0.5);
+            let expected_len = (rate * 100 / 1000) as usize;
+            assert_eq!(tone.len(), expected_len);
+        }
+    }
 }

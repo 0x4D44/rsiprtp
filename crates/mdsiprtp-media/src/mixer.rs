@@ -614,4 +614,324 @@ mod tests {
         let energy = calculate_rms_energy(&max);
         assert!((energy - 1.0).abs() < 0.01);
     }
+
+    #[test]
+    fn test_rms_energy_empty() {
+        let empty: Vec<i16> = vec![];
+        assert_eq!(calculate_rms_energy(&empty), 0.0);
+    }
+
+    #[test]
+    fn test_mixer_empty_source() {
+        let mut mixer = AudioMixer::new(8000);
+
+        // Add an empty samples array
+        mixer.add_source(1, &[]);
+
+        let (mixed, csrc) = mixer.mix(10);
+
+        // Empty source should not contribute to mix
+        assert_eq!(mixed.len(), 10);
+        assert!(mixed.iter().all(|&s| s == 0));
+        assert!(csrc.is_empty());
+    }
+
+    #[test]
+    fn test_mixer_remove_source() {
+        let mut mixer = AudioMixer::new(8000);
+
+        mixer.add_source(1, &[100, 200]);
+        mixer.add_source(2, &[50, 100]);
+        mixer.remove_source(1);
+
+        let (mixed, csrc) = mixer.mix(2);
+        assert_eq!(mixed, vec![50, 100]);
+        assert_eq!(csrc, vec![2]);
+    }
+
+    #[test]
+    fn test_mixer_clear() {
+        let mut mixer = AudioMixer::new(8000);
+
+        mixer.add_source(1, &[100]);
+        mixer.add_source(2, &[200]);
+        mixer.clear();
+
+        assert_eq!(mixer.active_source_count(), 0);
+        assert!(mixer.source_ssrcs().is_empty());
+    }
+
+    #[test]
+    fn test_mixer_source_ssrcs() {
+        let mut mixer = AudioMixer::new(8000);
+
+        mixer.add_source(100, &[1]);
+        mixer.add_source(200, &[2]);
+        mixer.add_source(300, &[3]);
+
+        let ssrcs = mixer.source_ssrcs();
+        assert_eq!(ssrcs.len(), 3);
+        assert!(ssrcs.contains(&100));
+        assert!(ssrcs.contains(&200));
+        assert!(ssrcs.contains(&300));
+    }
+
+    #[test]
+    fn test_mixer_underflow_clamp() {
+        let mut mixer = AudioMixer::new(8000);
+
+        // Values that would underflow when summed
+        let samples1: Vec<i16> = vec![i16::MIN, i16::MIN];
+        let samples2: Vec<i16> = vec![i16::MIN, -1000];
+
+        mixer.add_source(1, &samples1);
+        mixer.add_source(2, &samples2);
+
+        let (mixed, _) = mixer.mix(2);
+
+        // Should be clamped to i16::MIN
+        assert_eq!(mixed[0], i16::MIN);
+        assert_eq!(mixed[1], i16::MIN);
+    }
+
+    #[test]
+    fn test_mixer_different_length_sources() {
+        let mut mixer = AudioMixer::new(8000);
+
+        mixer.add_source(1, &[100, 200, 300, 400, 500]);
+        mixer.add_source(2, &[50, 100]); // Shorter
+
+        let (mixed, _) = mixer.mix(5);
+
+        // First 2 samples should be mixed
+        assert_eq!(mixed[0], 150);
+        assert_eq!(mixed[1], 300);
+        // Remaining should be from source 1 only
+        assert_eq!(mixed[2], 300);
+        assert_eq!(mixed[3], 400);
+        assert_eq!(mixed[4], 500);
+    }
+
+    #[test]
+    fn test_mixer_max_csrc_list() {
+        let mut mixer = AudioMixer::new(8000);
+        mixer.set_max_sources(15);
+
+        // Add 20 sources
+        for i in 1..=20 {
+            mixer.add_source(i, &[100]);
+        }
+
+        let (_, csrc) = mixer.mix(1);
+
+        // CSRC list should be limited to 15 per RFC 3550
+        assert!(csrc.len() <= 15);
+    }
+
+    #[test]
+    fn test_mixer_max_sources_eviction() {
+        let mut mixer = AudioMixer::new(8000);
+        mixer.set_max_sources(2);
+
+        // Add two sources
+        mixer.add_source(1, &[100]);
+        mixer.add_source(2, &[200]);
+
+        // Mark source 1 as silent (making it inactive)
+        mixer.mark_silent(1);
+
+        // Add third source - should evict source 1 (oldest inactive)
+        mixer.add_source(3, &[300]);
+
+        let ssrcs = mixer.source_ssrcs();
+        assert!(ssrcs.len() <= 2);
+        assert!(ssrcs.contains(&2));
+        assert!(ssrcs.contains(&3));
+    }
+
+    #[test]
+    fn test_conference_mixer_basic() {
+        let mut conf = ConferenceMixer::new(8000, 20);
+
+        // Add participants
+        let audio1: Vec<i16> = vec![1000; 160];
+        let audio2: Vec<i16> = vec![2000; 160];
+        let audio3: Vec<i16> = vec![3000; 160];
+
+        conf.submit_audio(1, &audio1);
+        conf.submit_audio(2, &audio2);
+        conf.submit_audio(3, &audio3);
+
+        assert_eq!(conf.participant_count(), 3);
+
+        // Each participant should hear others
+        let (mix1, _) = conf.get_mix_for(1);
+        assert_eq!(mix1[0], 5000); // 2000 + 3000
+
+        let (mix2, _) = conf.get_mix_for(2);
+        assert_eq!(mix2[0], 4000); // 1000 + 3000
+
+        let (mix3, _) = conf.get_mix_for(3);
+        assert_eq!(mix3[0], 3000); // 1000 + 2000
+    }
+
+    #[test]
+    fn test_conference_mixer_remove() {
+        let mut conf = ConferenceMixer::new(8000, 20);
+
+        conf.submit_audio(1, &vec![100; 160]);
+        conf.submit_audio(2, &vec![200; 160]);
+
+        conf.remove_participant(1);
+
+        assert_eq!(conf.participant_count(), 1);
+    }
+
+    #[test]
+    fn test_conference_mixer_mark_silent() {
+        let mut conf = ConferenceMixer::new(8000, 20);
+
+        conf.submit_audio(1, &vec![100; 160]);
+        conf.submit_audio(2, &vec![200; 160]);
+        conf.mark_silent(1);
+
+        // Participant count may still show 2 but source 1 won't contribute
+        let (mix2, csrc) = conf.get_mix_for(2);
+        // Source 1 is silent, so mix should be zeros or very small
+        assert!(!csrc.contains(&1));
+    }
+
+    #[test]
+    fn test_active_speaker_empty_history() {
+        let detector = ActiveSpeakerDetector::new();
+
+        // No sources added
+        assert!(detector.get_active_speaker().is_none());
+        assert!(detector.get_active_speakers().is_empty());
+        assert!(!detector.is_speaking(1));
+        assert_eq!(detector.get_smoothed_energy(1), 0.0);
+    }
+
+    #[test]
+    fn test_active_speaker_remove() {
+        let mut detector = ActiveSpeakerDetector::new();
+
+        detector.update(1, &vec![10000i16; 100]);
+        detector.update(2, &vec![5000i16; 100]);
+
+        detector.remove(1);
+
+        // Source 1 should no longer be tracked
+        assert_eq!(detector.get_smoothed_energy(1), 0.0);
+        assert!(!detector.is_speaking(1));
+    }
+
+    #[test]
+    fn test_active_speaker_clear() {
+        let mut detector = ActiveSpeakerDetector::new();
+
+        detector.update(1, &vec![10000i16; 100]);
+        detector.update(2, &vec![5000i16; 100]);
+
+        detector.clear();
+
+        assert!(detector.get_active_speaker().is_none());
+        assert!(detector.get_active_speakers().is_empty());
+    }
+
+    #[test]
+    fn test_active_speaker_set_threshold() {
+        let mut detector = ActiveSpeakerDetector::new();
+
+        // Medium energy samples - not super loud but not silent
+        let samples: Vec<i16> = vec![500; 100];
+        detector.update(1, &samples);
+
+        let energy = detector.get_smoothed_energy(1);
+
+        // Very high threshold should not detect as speaking
+        detector.set_threshold(0.5);
+        assert!(!detector.is_speaking(1), "Energy {} should be below 0.5", energy);
+
+        // Very low threshold should detect as speaking
+        detector.set_threshold(0.001);
+        assert!(detector.is_speaking(1), "Energy {} should be above 0.001", energy);
+    }
+
+    #[test]
+    fn test_active_speaker_history_length() {
+        let mut detector = ActiveSpeakerDetector::new();
+
+        // Send many updates to test history trimming
+        for _ in 0..20 {
+            detector.update(1, &vec![5000i16; 100]);
+        }
+
+        // Should still work (history internally bounded)
+        let energy = detector.get_smoothed_energy(1);
+        assert!(energy > 0.0);
+    }
+
+    #[test]
+    fn test_is_silence_threshold() {
+        // Test various thresholds
+        let samples: Vec<i16> = vec![100; 100];
+
+        assert!(is_silence(&samples, 0.1)); // High threshold
+        assert!(is_silence(&samples, 0.01)); // Medium threshold
+        assert!(!is_silence(&samples, 0.0001)); // Very low threshold
+    }
+
+    #[test]
+    fn test_auto_gain_control_empty() {
+        let mut empty: Vec<i16> = vec![];
+        auto_gain_control(&mut empty, 0.5, 10.0);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_auto_gain_control_silent() {
+        let mut silence: Vec<i16> = vec![0; 100];
+        auto_gain_control(&mut silence, 0.5, 10.0);
+        // Silent audio should remain silent
+        assert!(silence.iter().all(|&s| s == 0));
+    }
+
+    #[test]
+    fn test_auto_gain_control_already_at_target() {
+        let target_peak = (0.5 * i16::MAX as f32) as i16;
+        let mut samples: Vec<i16> = vec![target_peak, -target_peak, target_peak / 2];
+
+        let original = samples.clone();
+        auto_gain_control(&mut samples, 0.5, 10.0);
+
+        // Should be nearly unchanged (gain ~1.0)
+        for (orig, new) in original.iter().zip(samples.iter()) {
+            let diff = (*orig as i32 - *new as i32).abs();
+            assert!(diff < 200, "Unexpected change: {} -> {}", orig, new);
+        }
+    }
+
+    #[test]
+    fn test_auto_gain_control_clipping() {
+        // Audio that will clip when amplified
+        let mut samples: Vec<i16> = vec![20000, -20000, 15000];
+        auto_gain_control(&mut samples, 1.0, 10.0);
+
+        // Should be clamped to valid range
+        for &s in &samples {
+            assert!(s >= i16::MIN && s <= i16::MAX);
+        }
+    }
+
+    #[test]
+    fn test_auto_gain_control_max_gain_limit() {
+        let mut samples: Vec<i16> = vec![100, -100, 50]; // Very quiet
+
+        auto_gain_control(&mut samples, 1.0, 2.0); // Max gain of 2x
+
+        // Peak should not exceed 2x original (200)
+        let peak = samples.iter().map(|s| s.abs()).max().unwrap();
+        assert!(peak <= 200);
+    }
 }

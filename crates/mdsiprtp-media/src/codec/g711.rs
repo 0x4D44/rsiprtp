@@ -233,4 +233,181 @@ mod tests {
         assert_eq!(frame.len(), 160);
         assert!(frame.iter().all(|&b| b == 0xFF));
     }
+
+    #[test]
+    fn test_pcmu_boundary_values() {
+        let codec = G711Codec::pcmu();
+
+        // Test boundary values
+        let boundary_values = [0i16, 1, -1, 32767, -32768, 16383, -16384, 8191, -8192];
+        for &value in &boundary_values {
+            let encoded = codec.encode_sample(value);
+            let decoded = codec.decode_sample(encoded);
+            // G.711 quantization allows some error
+            let error = (value as i32 - decoded as i32).abs();
+            assert!(
+                error < 1000,
+                "PCMU boundary {} -> {} -> {}, error = {}",
+                value,
+                encoded,
+                decoded,
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_pcma_boundary_values() {
+        let codec = G711Codec::pcma();
+
+        // Test boundary values
+        let boundary_values = [0i16, 1, -1, 32767, -32768, 16383, -16384, 8191, -8192];
+        for &value in &boundary_values {
+            let encoded = codec.encode_sample(value);
+            let decoded = codec.decode_sample(encoded);
+            let error = (value as i32 - decoded as i32).abs();
+            assert!(
+                error < 1000,
+                "PCMA boundary {} -> {} -> {}, error = {}",
+                value,
+                encoded,
+                decoded,
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn test_pcmu_full_range_monotonic() {
+        let codec = G711Codec::pcmu();
+
+        // Encode ascending values and verify decoded values are generally non-decreasing
+        let mut last_decoded: i32 = i16::MIN as i32;
+        for value in (-32000i16..=32000).step_by(100) {
+            let encoded = codec.encode_sample(value);
+            let decoded = codec.decode_sample(encoded) as i32;
+            // Allow small non-monotonicity due to quantization
+            assert!(
+                decoded >= last_decoded - 200,
+                "Non-monotonic: {} -> {}",
+                last_decoded,
+                decoded
+            );
+            last_decoded = decoded;
+        }
+    }
+
+    #[test]
+    fn test_pcma_full_range_monotonic() {
+        let codec = G711Codec::pcma();
+
+        let mut last_decoded: i32 = i16::MIN as i32;
+        for value in (-32000i16..=32000).step_by(100) {
+            let encoded = codec.encode_sample(value);
+            let decoded = codec.decode_sample(encoded) as i32;
+            assert!(
+                decoded >= last_decoded - 200,
+                "Non-monotonic: {} -> {}",
+                last_decoded,
+                decoded
+            );
+            last_decoded = decoded;
+        }
+    }
+
+    #[test]
+    fn test_codec_names() {
+        assert_eq!(G711Variant::MuLaw.name(), "PCMU");
+        assert_eq!(G711Variant::ALaw.name(), "PCMA");
+    }
+
+    #[test]
+    fn test_codec_variant_accessors() {
+        let codec_mu = G711Codec::pcmu();
+        let codec_a = G711Codec::pcma();
+
+        assert_eq!(codec_mu.variant(), G711Variant::MuLaw);
+        assert_eq!(codec_a.variant(), G711Variant::ALaw);
+    }
+
+    #[test]
+    fn test_empty_encode_decode() {
+        let codec = G711Codec::pcmu();
+
+        let empty: Vec<i16> = vec![];
+        let encoded = codec.encode(&empty);
+        assert!(encoded.is_empty());
+
+        let decoded = codec.decode(&encoded);
+        assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_single_sample_encode_decode() {
+        let codec_mu = G711Codec::pcmu();
+        let codec_a = G711Codec::pcma();
+
+        let sample = 1000i16;
+
+        // PCMU single sample
+        let encoded_mu = codec_mu.encode(&[sample]);
+        assert_eq!(encoded_mu.len(), 1);
+        let decoded_mu = codec_mu.decode(&encoded_mu);
+        assert_eq!(decoded_mu.len(), 1);
+
+        // PCMA single sample
+        let encoded_a = codec_a.encode(&[sample]);
+        assert_eq!(encoded_a.len(), 1);
+        let decoded_a = codec_a.decode(&encoded_a);
+        assert_eq!(decoded_a.len(), 1);
+    }
+
+    #[test]
+    fn test_silence_frame_alaw() {
+        let frame = silence_frame(G711Variant::ALaw, 160);
+        assert_eq!(frame.len(), 160);
+        assert!(frame.iter().all(|&b| b == 0xD5));
+    }
+
+    #[test]
+    fn test_all_encoded_values_decode() {
+        let codec_mu = G711Codec::pcmu();
+        let codec_a = G711Codec::pcma();
+
+        // Ensure all 256 possible encoded values decode without panic
+        for byte in 0u8..=255 {
+            let decoded_mu = codec_mu.decode_sample(byte);
+            let decoded_a = codec_a.decode_sample(byte);
+            // Just verify they're in valid i16 range (which they always will be)
+            assert!(decoded_mu >= i16::MIN && decoded_mu <= i16::MAX);
+            assert!(decoded_a >= i16::MIN && decoded_a <= i16::MAX);
+        }
+    }
+
+    #[test]
+    fn test_frame_size_constants() {
+        let codec = G711Codec::pcmu();
+
+        // 20ms at 8kHz = 160 samples = 160 bytes
+        assert_eq!(codec.samples_per_frame(), 160);
+        assert_eq!(codec.bytes_per_frame(), 160);
+
+        // 160 samples encoded should give 160 bytes
+        let samples: Vec<i16> = vec![1000; 160];
+        let encoded = codec.encode(&samples);
+        assert_eq!(encoded.len(), 160);
+    }
+
+    #[test]
+    fn test_codec_clone() {
+        let codec1 = G711Codec::pcmu();
+        let codec2 = codec1.clone();
+
+        assert_eq!(codec1.variant(), codec2.variant());
+        assert_eq!(codec1.sample_rate(), codec2.sample_rate());
+
+        // Both should produce same output
+        let sample = 5000i16;
+        assert_eq!(codec1.encode_sample(sample), codec2.encode_sample(sample));
+    }
 }
