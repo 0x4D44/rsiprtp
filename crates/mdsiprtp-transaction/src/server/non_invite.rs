@@ -387,4 +387,265 @@ mod tests {
         // For reliable transport, goes directly to Terminated (Timer J = 0)
         assert_eq!(tx.state(), State::Terminated);
     }
+
+    #[test]
+    fn test_handle_transport_error_in_trying() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req, false).unwrap();
+        tx.poll_actions();
+
+        tx.handle_transport_error();
+
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::TransportError))));
+    }
+
+    #[test]
+    fn test_handle_transport_error_in_proceeding() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(100, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Proceeding);
+
+        tx.handle_transport_error();
+
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::TransportError))));
+    }
+
+    #[test]
+    fn test_handle_transport_error_in_completed() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Completed);
+
+        tx.handle_transport_error();
+
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, Action::Event(Event::TransportError))));
+    }
+
+    #[test]
+    fn test_handle_transport_error_in_terminated_noop() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), true).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Terminated);
+
+        // Transport error in Terminated should be no-op
+        tx.handle_transport_error();
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_handle_request_in_trying_no_retransmit() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        // Retransmit in Trying should not send anything (no response yet)
+        tx.handle_request(req);
+
+        let actions = tx.poll_actions();
+        assert!(actions.iter().all(|a| !matches!(a, Action::Send(_))));
+    }
+
+    #[test]
+    fn test_handle_request_in_proceeding_retransmits() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(100, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Proceeding);
+
+        // Retransmit in Proceeding should resend last response
+        tx.handle_request(req);
+
+        let actions = tx.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+    }
+
+    #[test]
+    fn test_handle_request_in_terminated_ignored() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), true).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Terminated);
+
+        // Retransmit in Terminated should be ignored
+        tx.handle_request(req);
+
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_provisional_in_proceeding() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        let resp1 = create_response(100, &req);
+        tx.send_response(resp1);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Proceeding);
+
+        // Another provisional in Proceeding
+        let resp2 = create_response(183, &req);
+        tx.send_response(resp2);
+
+        assert_eq!(tx.state(), State::Proceeding);
+        let actions = tx.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, Action::Send(_))));
+    }
+
+    #[test]
+    fn test_send_response_in_completed_ignored() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Completed);
+
+        // Response in Completed should be ignored
+        let resp2 = create_response(404, &req);
+        tx.send_response(resp2);
+
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_send_response_in_terminated_ignored() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), true).unwrap();
+        tx.poll_actions();
+
+        let resp = create_response(200, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        assert_eq!(tx.state(), State::Terminated);
+
+        // Response in Terminated should be ignored
+        let resp2 = create_response(404, &req);
+        tx.send_response(resp2);
+
+        let actions = tx.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_unexpected_timer_ignored() {
+        let req = create_register();
+        let mut tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        tx.poll_actions();
+
+        // Timer in Trying should be ignored
+        tx.handle_timeout(Timer::J);
+        assert_eq!(tx.state(), State::Trying);
+
+        // Send response to move to Proceeding
+        let resp = create_response(100, &req);
+        tx.send_response(resp);
+        tx.poll_actions();
+
+        // Timer J in Proceeding should be ignored
+        tx.handle_timeout(Timer::J);
+        assert_eq!(tx.state(), State::Proceeding);
+
+        // Timer A in Proceeding should be ignored
+        tx.handle_timeout(Timer::A);
+        assert_eq!(tx.state(), State::Proceeding);
+    }
+
+    #[test]
+    fn test_state_debug() {
+        let state = State::Trying;
+        let debug_str = format!("{:?}", state);
+        assert!(debug_str.contains("Trying"));
+    }
+
+    #[test]
+    fn test_action_debug() {
+        let action = Action::CancelTimer(Timer::J);
+        let debug_str = format!("{:?}", action);
+        assert!(debug_str.contains("CancelTimer"));
+    }
+
+    #[test]
+    fn test_event_debug() {
+        let event = Event::TransportError;
+        let debug_str = format!("{:?}", event);
+        assert!(debug_str.contains("TransportError"));
+    }
+
+    #[test]
+    fn test_request_accessor() {
+        let req = create_register();
+        let tx = NonInviteServerTransaction::new(req.clone(), false).unwrap();
+        assert_eq!(tx.request().method(), Method::Register);
+    }
+
+    #[test]
+    fn test_id_accessor() {
+        let req = create_register();
+        let tx = NonInviteServerTransaction::new(req, false).unwrap();
+        let id = tx.id();
+        assert!(id.branch.contains("z9hG4bK"));
+    }
+
+    #[test]
+    fn test_action_event_clone() {
+        let action = Action::Event(Event::TransportError);
+        let cloned = action.clone();
+        assert!(matches!(cloned, Action::Event(Event::TransportError)));
+    }
+
+    #[test]
+    fn test_action_send_clone() {
+        let action = Action::Send(bytes::Bytes::from("test"));
+        let cloned = action.clone();
+        assert!(matches!(cloned, Action::Send(_)));
+    }
 }

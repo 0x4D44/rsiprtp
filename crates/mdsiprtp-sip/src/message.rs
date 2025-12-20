@@ -1738,4 +1738,840 @@ Content-Length: 0\r\n\
         let debug = format!("{:?}", builder);
         assert!(debug.contains("SipResponseBuilder"));
     }
+
+    // Display trait tests for SipMessage, SipRequest, and SipResponse
+    #[test]
+    fn test_sip_message_debug_request() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let debug = format!("{:?}", msg);
+        assert!(debug.contains("Request"));
+    }
+
+    #[test]
+    fn test_sip_message_debug_response() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let debug = format!("{:?}", msg);
+        assert!(debug.contains("Response"));
+    }
+
+    #[test]
+    fn test_sip_request_debug() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let debug = format!("{:?}", req);
+        assert!(debug.contains("SipRequest"));
+    }
+
+    #[test]
+    fn test_sip_request_clone() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+        let cloned = req.clone();
+        assert_eq!(cloned.method(), req.method());
+        assert_eq!(cloned.call_id().unwrap(), req.call_id().unwrap());
+    }
+
+    #[test]
+    fn test_sip_response_debug() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let debug = format!("{:?}", resp);
+        assert!(debug.contains("SipResponse"));
+    }
+
+    #[test]
+    fn test_sip_response_clone() {
+        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
+        let resp = msg.as_response().unwrap();
+        let cloned = resp.clone();
+        assert_eq!(cloned.status_code(), resp.status_code());
+        assert_eq!(cloned.call_id().unwrap(), resp.call_id().unwrap());
+    }
+
+    // Edge case tests for message parsing
+    #[test]
+    fn test_parse_request_missing_call_id() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.call_id().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_missing_from() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.from_tag().is_err());
+        assert!(req.from_uri().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_missing_to() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.to_uri().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_missing_via() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.via_branch().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_missing_cseq() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+Call-ID: test@example.com\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.cseq().is_err());
+        assert!(req.cseq_method().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_from_missing_tag() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+From: Alice <sip:alice@atlanta.com>\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.from_tag().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_via_missing_branch() {
+        let bad_msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_msg).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.via_branch().is_err());
+    }
+
+    #[test]
+    fn test_parse_request_no_contact() {
+        let msg_no_contact = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(msg_no_contact).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.contact_uri().is_none());
+    }
+
+    #[test]
+    fn test_parse_request_no_content_type() {
+        let msg_no_ct = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(msg_no_ct).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(req.content_type().is_none());
+    }
+
+    #[test]
+    fn test_parse_request_with_record_route() {
+        let msg_with_rr = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+Record-Route: <sip:proxy1.example.com;lr>\r\n\
+Record-Route: <sip:proxy2.example.com;lr>\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(msg_with_rr).unwrap();
+        let req = msg.as_request().unwrap();
+        let routes = req.record_routes();
+        assert_eq!(routes.len(), 2);
+        assert!(routes[0].contains("proxy1.example.com"));
+        assert!(routes[1].contains("proxy2.example.com"));
+    }
+
+    #[test]
+    fn test_parse_request_multiple_via_headers() {
+        let msg_multi_via = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP proxy1.example.com;branch=z9hG4bKproxy1\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(msg_multi_via).unwrap();
+        let req = msg.as_request().unwrap();
+        let vias = req.via_headers_raw();
+        assert_eq!(vias.len(), 2);
+        assert!(vias[0].contains("proxy1.example.com"));
+        assert!(vias[1].contains("pc33.atlanta.com"));
+    }
+
+    #[test]
+    fn test_parse_request_with_body() {
+        let msg_with_body = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Type: application/sdp\r\n\
+Content-Length: 9\r\n\
+\r\n\
+v=0\r\ntest";
+        let msg = SipMessage::parse(msg_with_body).unwrap();
+        let req = msg.as_request().unwrap();
+        assert!(!req.body().is_empty());
+        assert!(req.body().len() > 0);
+    }
+
+    // Response error handling tests
+    #[test]
+    fn test_parse_response_missing_call_id() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.call_id().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_missing_from() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.from_tag().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_missing_via() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.via_branch().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_missing_cseq() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: test@example.com\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.cseq().is_err());
+        assert!(resp.cseq_method().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_from_missing_tag() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.from_tag().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_via_missing_branch() {
+        let bad_resp = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: test@example.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(bad_resp).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.via_branch().is_err());
+    }
+
+    #[test]
+    fn test_parse_response_no_to_tag() {
+        let resp_no_tag = b"SIP/2.0 100 Trying\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_no_tag).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.to_tag().is_none());
+    }
+
+    #[test]
+    fn test_parse_response_no_contact() {
+        let resp_no_contact = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_no_contact).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.contact_uri().is_none());
+    }
+
+    #[test]
+    fn test_parse_response_with_www_authenticate() {
+        let resp_with_auth = b"SIP/2.0 401 Unauthorized\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+WWW-Authenticate: Digest realm=\"example.com\", nonce=\"abc123\"\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_with_auth).unwrap();
+        let resp = msg.as_response().unwrap();
+        let auth = resp.www_authenticate();
+        assert!(auth.is_some());
+        let auth_str = auth.unwrap();
+        assert!(auth_str.contains("Digest"));
+        assert!(auth_str.contains("example.com"));
+    }
+
+    #[test]
+    fn test_parse_response_with_proxy_authenticate() {
+        let resp_with_auth = b"SIP/2.0 407 Proxy Authentication Required\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Proxy-Authenticate: Digest realm=\"proxy.example.com\", nonce=\"def456\"\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_with_auth).unwrap();
+        let resp = msg.as_response().unwrap();
+        let auth = resp.proxy_authenticate();
+        assert!(auth.is_some());
+        let auth_str = auth.unwrap();
+        assert!(auth_str.contains("Digest"));
+        assert!(auth_str.contains("proxy.example.com"));
+    }
+
+    #[test]
+    fn test_parse_response_with_record_route() {
+        let resp_with_rr = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Record-Route: <sip:proxy1.example.com;lr>\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_with_rr).unwrap();
+        let resp = msg.as_response().unwrap();
+        let routes = resp.record_routes();
+        assert_eq!(routes.len(), 1);
+        assert!(routes[0].contains("proxy1.example.com"));
+    }
+
+    #[test]
+    fn test_parse_response_multiple_via_headers() {
+        let resp_multi_via = b"SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP proxy1.example.com;branch=z9hG4bKproxy1\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_multi_via).unwrap();
+        let resp = msg.as_response().unwrap();
+        let vias = resp.via_headers_raw();
+        assert_eq!(vias.len(), 2);
+        assert!(vias[0].contains("proxy1.example.com"));
+    }
+
+    #[test]
+    fn test_parse_response_3xx_is_failure() {
+        let redirect = b"SIP/2.0 302 Moved Temporarily\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(redirect).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.is_failure());
+        assert!(!resp.is_success());
+        assert!(!resp.is_provisional());
+    }
+
+    #[test]
+    fn test_parse_response_5xx_is_failure() {
+        let server_error = b"SIP/2.0 500 Server Internal Error\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(server_error).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.is_failure());
+        assert!(!resp.is_success());
+        assert!(!resp.is_provisional());
+    }
+
+    #[test]
+    fn test_parse_response_6xx_is_failure() {
+        let global_failure = b"SIP/2.0 603 Decline\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(global_failure).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert!(resp.is_failure());
+        assert!(!resp.is_success());
+        assert!(!resp.is_provisional());
+    }
+
+    #[test]
+    fn test_response_reason_edge_case() {
+        // Test reason parsing - the rsip library has a fixed set of reason phrases
+        let resp_long_reason = b"SIP/2.0 488 Not Acceptable Here\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let msg = SipMessage::parse(resp_long_reason).unwrap();
+        let resp = msg.as_response().unwrap();
+        assert_eq!(resp.status_code(), 488);
+        let reason = resp.reason();
+        assert!(!reason.is_empty());
+    }
+
+    // Builder edge cases and error paths
+    #[test]
+    fn test_build_request_with_empty_body() {
+        // Test request with empty body doesn't add Content-Type
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .body(vec![], "application/sdp")
+            .build()
+            .unwrap();
+
+        // Empty body should not have content type added
+        let bytes = req.to_bytes();
+        let msg_str = String::from_utf8_lossy(&bytes);
+        // Content-Length should still be present
+        assert!(msg_str.contains("Content-Length: 0"));
+    }
+
+    #[test]
+    fn test_build_request_with_non_empty_body() {
+        // Test request with body adds Content-Type
+        let body_data = b"test body".to_vec();
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .body(body_data.clone(), "application/test")
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        let msg_str = String::from_utf8_lossy(&bytes);
+        assert!(msg_str.contains("Content-Type: application/test"));
+        assert!(msg_str.contains("Content-Length: 9"));
+    }
+
+    #[test]
+    fn test_build_request_builder_new() {
+        // Test that builder can be created via new()
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        assert_eq!(req.method(), Method::Invite);
+    }
+
+    #[test]
+    fn test_build_request_missing_via_host() {
+        // Create a builder without calling via()
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_call_id() {
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .cseq(1)
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_cseq() {
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .build();
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_request_missing_from_tag() {
+        // Using empty string for tag
+        let result = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build();
+
+        // Should succeed even with empty tag (though not recommended)
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_request_invalid_contact_uri() {
+        // Contact URI parsing failure should be silently ignored
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .contact("<>invalid<>")
+            .build()
+            .unwrap();
+
+        // Invalid contact URIs are silently ignored by the builder
+        assert!(req.contact_uri().is_none());
+    }
+
+    #[test]
+    fn test_build_request_default_via_port() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("192.168.1.1:5060"));
+    }
+
+    #[test]
+    fn test_build_request_default_max_forwards() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        assert!(String::from_utf8_lossy(&bytes).contains("Max-Forwards: 70"));
+    }
+
+    #[test]
+    fn test_build_response_invalid_contact_uri() {
+        let msg = SipMessage::parse(INVITE_MSG).unwrap();
+        let req = msg.as_request().unwrap();
+
+        let resp = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(req)
+            .contact("<>invalid<>")
+            .build()
+            .unwrap();
+
+        // Invalid contact URIs are silently ignored by the builder
+        assert!(resp.contact_uri().is_none());
+    }
+
+    #[test]
+    fn test_build_response_empty_via() {
+        // Test builder with no request (empty via list)
+        let resp = SipResponse::builder()
+            .status(200, "OK")
+            .build()
+            .unwrap();
+
+        let vias = resp.via_headers_raw();
+        assert!(vias.is_empty());
+    }
+
+    // Test different SIP methods
+    #[test]
+    fn test_parse_register_request() {
+        let register = b"REGISTER sip:registrar.example.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Alice <sip:alice@atlanta.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 REGISTER\r\n\
+Contact: <sip:alice@pc33.atlanta.com>\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(register).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Register);
+        assert_eq!(req.cseq_method().unwrap(), Method::Register);
+    }
+
+    #[test]
+    fn test_parse_bye_request() {
+        let bye = b"BYE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314160 BYE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(bye).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Bye);
+        assert_eq!(req.cseq_method().unwrap(), Method::Bye);
+    }
+
+    #[test]
+    fn test_parse_cancel_request() {
+        let cancel = b"CANCEL sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 CANCEL\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(cancel).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Cancel);
+        assert_eq!(req.cseq_method().unwrap(), Method::Cancel);
+    }
+
+    #[test]
+    fn test_parse_options_request() {
+        let options = b"OPTIONS sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 OPTIONS\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(options).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Options);
+        assert!(!req.method().creates_dialog());
+    }
+
+    #[test]
+    fn test_parse_subscribe_request() {
+        let subscribe = b"SUBSCRIBE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 SUBSCRIBE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(subscribe).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Subscribe);
+        assert!(req.method().creates_dialog());
+    }
+
+    #[test]
+    fn test_parse_notify_request() {
+        let notify = b"NOTIFY sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 NOTIFY\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(notify).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Notify);
+    }
+
+    #[test]
+    fn test_parse_ack_request() {
+        let ack = b"ACK sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 ACK\r\n\
+Content-Length: 0\r\n\
+\r\n";
+
+        let msg = SipMessage::parse(ack).unwrap();
+        let req = msg.as_request().unwrap();
+        assert_eq!(req.method(), Method::Ack);
+    }
 }

@@ -1471,18 +1471,33 @@ mod tests {
     #[test]
     fn test_rtcp_type_unknown() {
         let result = RtcpType::try_from(199u8);
-        assert!(matches!(result, Err(RtcpParseError::UnknownPacketType(199))));
+        assert!(matches!(
+            result,
+            Err(RtcpParseError::UnknownPacketType(199))
+        ));
     }
 
     #[test]
     fn test_rtcp_type_all_values() {
         assert_eq!(RtcpType::try_from(200u8).unwrap(), RtcpType::SenderReport);
         assert_eq!(RtcpType::try_from(201u8).unwrap(), RtcpType::ReceiverReport);
-        assert_eq!(RtcpType::try_from(202u8).unwrap(), RtcpType::SourceDescription);
+        assert_eq!(
+            RtcpType::try_from(202u8).unwrap(),
+            RtcpType::SourceDescription
+        );
         assert_eq!(RtcpType::try_from(203u8).unwrap(), RtcpType::Goodbye);
-        assert_eq!(RtcpType::try_from(204u8).unwrap(), RtcpType::ApplicationDefined);
-        assert_eq!(RtcpType::try_from(205u8).unwrap(), RtcpType::TransportFeedback);
-        assert_eq!(RtcpType::try_from(206u8).unwrap(), RtcpType::PayloadFeedback);
+        assert_eq!(
+            RtcpType::try_from(204u8).unwrap(),
+            RtcpType::ApplicationDefined
+        );
+        assert_eq!(
+            RtcpType::try_from(205u8).unwrap(),
+            RtcpType::TransportFeedback
+        );
+        assert_eq!(
+            RtcpType::try_from(206u8).unwrap(),
+            RtcpType::PayloadFeedback
+        );
     }
 
     #[test]
@@ -1668,9 +1683,18 @@ mod tests {
             sender_ssrc: 111111,
             media_ssrc: 0,
             entries: vec![
-                FirEntry { ssrc: 222222, seq_nr: 1 },
-                FirEntry { ssrc: 333333, seq_nr: 2 },
-                FirEntry { ssrc: 444444, seq_nr: 3 },
+                FirEntry {
+                    ssrc: 222222,
+                    seq_nr: 1,
+                },
+                FirEntry {
+                    ssrc: 333333,
+                    seq_nr: 2,
+                },
+                FirEntry {
+                    ssrc: 444444,
+                    seq_nr: 3,
+                },
             ],
         };
         let bytes = fir.build();
@@ -1840,9 +1864,18 @@ mod tests {
             chunks: vec![SdesChunk {
                 ssrc: 12345,
                 items: vec![
-                    SdesItem { item_type: SdesType::CName, value: "user@host".to_string() },
-                    SdesItem { item_type: SdesType::Name, value: "Test User".to_string() },
-                    SdesItem { item_type: SdesType::Email, value: "test@example.com".to_string() },
+                    SdesItem {
+                        item_type: SdesType::CName,
+                        value: "user@host".to_string(),
+                    },
+                    SdesItem {
+                        item_type: SdesType::Name,
+                        value: "Test User".to_string(),
+                    },
+                    SdesItem {
+                        item_type: SdesType::Email,
+                        value: "test@example.com".to_string(),
+                    },
                 ],
             }],
         };

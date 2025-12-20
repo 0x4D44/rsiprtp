@@ -13,8 +13,8 @@ pub struct SttProcessor {
 impl SttProcessor {
     /// Create a new STT processor with the given model.
     pub fn new(model: &Arc<Model>, sample_rate: f32) -> Result<Self, SttError> {
-        let recognizer = Recognizer::new(model, sample_rate)
-            .ok_or(SttError::RecognizerCreationFailed)?;
+        let recognizer =
+            Recognizer::new(model, sample_rate).ok_or(SttError::RecognizerCreationFailed)?;
 
         Ok(Self { recognizer })
     }

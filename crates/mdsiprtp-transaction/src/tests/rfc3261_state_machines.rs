@@ -204,12 +204,9 @@ mod invite_client_transaction {
         tx.handle_response(response);
         let actions = tx.poll_actions();
 
-        let has_success = actions.iter().any(|a| {
-            matches!(
-                a,
-                InviteClientAction::Event(InviteClientEvent::Success(_))
-            )
-        });
+        let has_success = actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Event(InviteClientEvent::Success(_))));
         let has_cancel_timer_a = actions
             .iter()
             .any(|a| matches!(a, InviteClientAction::CancelTimer(Timer::A)));
@@ -238,12 +235,9 @@ mod invite_client_transaction {
         tx.handle_response(create_response(&invite, 200));
         let actions = tx.poll_actions();
 
-        let has_success = actions.iter().any(|a| {
-            matches!(
-                a,
-                InviteClientAction::Event(InviteClientEvent::Success(_))
-            )
-        });
+        let has_success = actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Event(InviteClientEvent::Success(_))));
 
         assert!(has_success);
         assert_eq!(tx.state(), InviteClientState::Terminated);
@@ -260,12 +254,9 @@ mod invite_client_transaction {
         tx.handle_response(response);
         let actions = tx.poll_actions();
 
-        let has_failure = actions.iter().any(|a| {
-            matches!(
-                a,
-                InviteClientAction::Event(InviteClientEvent::Failure(_))
-            )
-        });
+        let has_failure = actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Event(InviteClientEvent::Failure(_))));
         let has_send = actions
             .iter()
             .any(|a| matches!(a, InviteClientAction::Send(_)));

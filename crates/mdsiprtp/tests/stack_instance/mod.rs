@@ -103,7 +103,6 @@ pub struct StackInstance {
 
     // Events for test assertions
     events: Vec<StackEvent>,
-
 }
 
 impl StackInstance {
@@ -191,8 +190,9 @@ impl StackInstance {
                 let dialog = self.create_dialog_from_invite(&pending.request, true);
 
                 // Create call in CallManager and get SDP answer
-                if let Some((_call_id, answer_sdp, _port)) =
-                    self.call_manager.handle_incoming_invite(dialog.clone(), &offer)
+                if let Some((_call_id, answer_sdp, _port)) = self
+                    .call_manager
+                    .handle_incoming_invite(dialog.clone(), &offer)
                 {
                     // Build and send 200 OK
                     let response = self.build_200_ok(&pending.request, &answer_sdp);
@@ -265,8 +265,11 @@ impl StackInstance {
     pub async fn step(&mut self) -> Option<StackEvent> {
         // Check for incoming SIP messages (non-blocking)
         let mut buf = vec![0u8; 65535];
-        match tokio::time::timeout(Duration::from_millis(1), self.sip_socket.recv_from(&mut buf))
-            .await
+        match tokio::time::timeout(
+            Duration::from_millis(1),
+            self.sip_socket.recv_from(&mut buf),
+        )
+        .await
         {
             Ok(Ok((len, source))) => {
                 buf.truncate(len);
@@ -416,8 +419,11 @@ impl StackInstance {
                     // Parse SDP answer
                     if let Some(answer_sdp) = self.parse_sdp_from_response(&response) {
                         // Update call manager
-                        self.call_manager
-                            .handle_invite_success(&call_id, dialog.clone(), &answer_sdp);
+                        self.call_manager.handle_invite_success(
+                            &call_id,
+                            dialog.clone(),
+                            &answer_sdp,
+                        );
 
                         // Build and send ACK
                         let ack = self.build_ack(&response, &dialog);
@@ -586,10 +592,7 @@ impl StackInstance {
             .to(target_uri)
             .call_id(&call_id.0)
             .cseq(1)
-            .contact(&format!(
-                "sip:{}@{}",
-                self.config.user, self.local_sip_addr
-            ))
+            .contact(&format!("sip:{}@{}", self.config.user, self.local_sip_addr))
             .body(sdp_bytes, "application/sdp")
             .build()
             .unwrap()
@@ -608,7 +611,11 @@ impl StackInstance {
         let cseq = invite.cseq().unwrap_or(1);
 
         // Get the Via info from INVITE
-        let invite_via = invite.via_headers_raw().into_iter().next().unwrap_or_default();
+        let invite_via = invite
+            .via_headers_raw()
+            .into_iter()
+            .next()
+            .unwrap_or_default();
         let via_value = if invite_via.starts_with("Via: ") {
             invite_via[5..].to_string()
         } else {
@@ -628,11 +635,14 @@ impl StackInstance {
              Content-Length: {}\r\n\
              \r\n",
             via_value,
-            from_uri, from_tag,
-            to_uri, to_tag,
+            from_uri,
+            from_tag,
+            to_uri,
+            to_tag,
             call_id,
             cseq,
-            self.config.user, self.local_sip_addr,
+            self.config.user,
+            self.local_sip_addr,
             sdp_bytes.len()
         );
 
@@ -659,7 +669,11 @@ impl StackInstance {
         let cseq = invite.cseq().unwrap_or(1);
 
         // Get the Via info from INVITE
-        let invite_via = invite.via_headers_raw().into_iter().next().unwrap_or_default();
+        let invite_via = invite
+            .via_headers_raw()
+            .into_iter()
+            .next()
+            .unwrap_or_default();
         let via_value = if invite_via.starts_with("Via: ") {
             invite_via[5..].to_string()
         } else {
@@ -676,12 +690,7 @@ impl StackInstance {
              CSeq: {} INVITE\r\n\
              Content-Length: 0\r\n\
              \r\n",
-            code, reason,
-            via_value,
-            from_uri, from_tag,
-            to_uri, to_tag,
-            call_id,
-            cseq
+            code, reason, via_value, from_uri, from_tag, to_uri, to_tag, call_id, cseq
         );
 
         SipMessage::parse(response_str.as_bytes())
@@ -783,7 +792,10 @@ impl StackInstance {
         let call_id = request.call_id().unwrap_or_default();
         let from_tag = request.from_tag().unwrap_or_default();
         let to_tag = format!("tag-{}", uuid::Uuid::new_v4());
-        let from_uri = request.from_uri().map(|u| u.to_string()).unwrap_or_default();
+        let from_uri = request
+            .from_uri()
+            .map(|u| u.to_string())
+            .unwrap_or_default();
         let to_uri = request.to_uri().map(|u| u.to_string()).unwrap_or_default();
         let cseq = request.cseq().unwrap_or(1);
 

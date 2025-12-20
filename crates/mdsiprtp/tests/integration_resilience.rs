@@ -4,17 +4,17 @@
 //! network packet loss, retransmissions, timeouts, and recovery.
 
 use mdsiprtp::sip::{Method, SipRequest, SipResponse};
-use mdsiprtp::transaction::{
-    InviteClientTransaction, InviteServerTransaction,
-    NonInviteClientTransaction, NonInviteServerTransaction,
-};
 use mdsiprtp::transaction::client::invite::{
     Action as InviteClientAction, State as InviteClientState,
 };
-use mdsiprtp::transaction::server::invite::State as InviteServerState;
 use mdsiprtp::transaction::client::non_invite::State as NonInviteClientState;
+use mdsiprtp::transaction::server::invite::State as InviteServerState;
 use mdsiprtp::transaction::server::non_invite::State as NonInviteServerState;
 use mdsiprtp::transaction::timer::Timer;
+use mdsiprtp::transaction::{
+    InviteClientTransaction, InviteServerTransaction, NonInviteClientTransaction,
+    NonInviteServerTransaction,
+};
 
 // Helper functions
 fn create_invite() -> SipRequest {
@@ -67,18 +67,30 @@ fn test_network_failure_lost_invite() {
 
     // Initial transmission
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Send(_))));
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::SetTimer(Timer::A, _))));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, InviteClientAction::Send(_))));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, InviteClientAction::SetTimer(Timer::A, _))));
 
     // Simulate Timer A firing (lost packet, need retransmission)
     tx.handle_timeout(Timer::A);
     let actions = tx.poll_actions();
 
     // Should retransmit and reset Timer A
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Send(_))),
-            "Should retransmit INVITE on Timer A");
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::SetTimer(Timer::A, _))),
-            "Should reset Timer A");
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Send(_))),
+        "Should retransmit INVITE on Timer A"
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::SetTimer(Timer::A, _))),
+        "Should reset Timer A"
+    );
 
     // Still in Calling state
     assert!(matches!(tx.state(), InviteClientState::Calling));
@@ -115,12 +127,19 @@ fn test_network_failure_invite_timeout() {
     tx.handle_timeout(Timer::B);
 
     // Should transition to Terminated
-    assert!(tx.is_terminated(), "Transaction should terminate on Timer B");
+    assert!(
+        tx.is_terminated(),
+        "Transaction should terminate on Timer B"
+    );
 
     // Should emit timeout event
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Event(_))),
-            "Should emit timeout event");
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Event(_))),
+        "Should emit timeout event"
+    );
 }
 
 /// Test: INVITE server handles retransmitted INVITE (simulating packet loss)
@@ -138,8 +157,12 @@ fn test_network_failure_retransmitted_invite() {
 
     // Should retransmit the last response
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::server::invite::Action::Send(_))),
-            "Should retransmit response for retransmitted INVITE");
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, mdsiprtp::transaction::server::invite::Action::Send(_))),
+        "Should retransmit response for retransmitted INVITE"
+    );
 
     // Should still be in Proceeding state
     assert!(matches!(tx.state(), InviteServerState::Proceeding));
@@ -163,8 +186,12 @@ fn test_network_failure_retransmitted_invite_after_error() {
 
     // Should retransmit error response
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::server::invite::Action::Send(_))),
-            "Should retransmit error response");
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, mdsiprtp::transaction::server::invite::Action::Send(_))),
+        "Should retransmit error response"
+    );
 }
 
 /// Test: Non-INVITE client handles lost request (Timer E retransmission)
@@ -178,15 +205,23 @@ fn test_network_failure_non_invite_lost_request() {
 
     // Initial transmission
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::client::non_invite::Action::Send(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        mdsiprtp::transaction::client::non_invite::Action::Send(_)
+    )));
 
     // Simulate Timer E firing (lost packet)
     tx.handle_timeout(Timer::E);
     let actions = tx.poll_actions();
 
     // Should retransmit
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::client::non_invite::Action::Send(_))),
-            "Should retransmit on Timer E");
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            mdsiprtp::transaction::client::non_invite::Action::Send(_)
+        )),
+        "Should retransmit on Timer E"
+    );
 }
 
 /// Test: Non-INVITE client handles timeout (Timer F expiry)
@@ -200,7 +235,10 @@ fn test_network_failure_non_invite_timeout() {
     tx.handle_timeout(Timer::F);
 
     // Should transition to Terminated
-    assert!(tx.is_terminated(), "Transaction should terminate on Timer F");
+    assert!(
+        tx.is_terminated(),
+        "Transaction should terminate on Timer F"
+    );
 }
 
 /// Test: Non-INVITE server handles retransmitted request
@@ -221,8 +259,13 @@ fn test_network_failure_non_invite_retransmitted_request() {
 
     // Should retransmit response
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::server::non_invite::Action::Send(_))),
-            "Should retransmit response for retransmitted request");
+    assert!(
+        actions.iter().any(|a| matches!(
+            a,
+            mdsiprtp::transaction::server::non_invite::Action::Send(_)
+        )),
+        "Should retransmit response for retransmitted request"
+    );
 }
 
 //
@@ -312,7 +355,10 @@ fn test_recovery_missing_ack() {
     tx.handle_timeout(Timer::H);
 
     // Should transition to Terminated
-    assert!(tx.is_terminated(), "Should terminate on Timer H (missing ACK)");
+    assert!(
+        tx.is_terminated(),
+        "Should terminate on Timer H (missing ACK)"
+    );
 }
 
 /// Test: Transaction layer handles rapid state transitions
@@ -345,12 +391,18 @@ fn test_recovery_response_after_retransmit() {
     // First Timer E expiry -> retransmit
     tx.handle_timeout(Timer::E);
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::client::non_invite::Action::Send(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        mdsiprtp::transaction::client::non_invite::Action::Send(_)
+    )));
 
     // Second Timer E expiry -> retransmit again
     tx.handle_timeout(Timer::E);
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::client::non_invite::Action::Send(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        mdsiprtp::transaction::client::non_invite::Action::Send(_)
+    )));
 
     // Finally receive response
     let ok = create_response(&options, 200, "OK");
@@ -376,7 +428,10 @@ fn test_recovery_multiple_retransmits() {
         tx.handle_request(options.clone());
         let actions = tx.poll_actions();
         // Each should cause response retransmission
-        assert!(actions.iter().any(|a| matches!(a, mdsiprtp::transaction::server::non_invite::Action::Send(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            mdsiprtp::transaction::server::non_invite::Action::Send(_)
+        )));
     }
 
     // Should still be in Completed state

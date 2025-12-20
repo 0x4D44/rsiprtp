@@ -264,8 +264,8 @@ mod rtp_faults {
     fn test_extreme_csrc_count() {
         let packet = [
             0x8F, // CC=15 (max)
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // Only header, no CSRC data
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30,
+            0x39, // Only header, no CSRC data
         ];
 
         let result = RtpPacket::parse(&packet);
@@ -378,9 +378,7 @@ mod resource_exhaustion {
     /// Test creating many RTP sessions (memory usage)
     #[test]
     fn test_many_rtp_sessions() {
-        let sessions: Vec<RtpSession> = (0..1000)
-            .map(|i| RtpSession::new(i, 0, 8000))
-            .collect();
+        let sessions: Vec<RtpSession> = (0..1000).map(|i| RtpSession::new(i, 0, 8000)).collect();
 
         assert_eq!(sessions.len(), 1000);
     }

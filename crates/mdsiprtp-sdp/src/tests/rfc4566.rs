@@ -613,7 +613,10 @@ i=This is a test session with information\r\n\
 t=0 0\r\n";
 
         let parsed = SessionDescription::parse(sdp).unwrap();
-        assert_eq!(parsed.session_info, Some("This is a test session with information".to_string()));
+        assert_eq!(
+            parsed.session_info,
+            Some("This is a test session with information".to_string())
+        );
     }
 
     /// Unknown field types should be ignored

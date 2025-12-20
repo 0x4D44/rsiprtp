@@ -301,4 +301,81 @@ mod tests {
             SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_crypto_suite_32_bit_variant() {
+        let suite = CryptoSuite::AesCm128HmacSha1_32;
+
+        // Test all the methods with 32-bit variant
+        assert_eq!(suite.auth_tag_len(), 4);
+        assert_eq!(suite.master_key_len(), 16);
+        assert_eq!(suite.master_salt_len(), 14);
+        assert_eq!(suite.session_key_len(), 16);
+        assert_eq!(suite.session_salt_len(), 14);
+        assert_eq!(suite.session_auth_key_len(), 20);
+        assert_eq!(suite.as_str(), "AES_CM_128_HMAC_SHA1_32");
+    }
+
+    #[test]
+    fn test_crypto_suite_display() {
+        assert_eq!(
+            format!("{}", CryptoSuite::AesCm128HmacSha1_80),
+            "AES_CM_128_HMAC_SHA1_80"
+        );
+        assert_eq!(
+            format!("{}", CryptoSuite::AesCm128HmacSha1_32),
+            "AES_CM_128_HMAC_SHA1_32"
+        );
+    }
+
+    #[test]
+    fn test_derive_session_keys_32bit_suite() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let keys = SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_32, &master_key, &master_salt)
+            .unwrap();
+
+        // Check key lengths
+        assert_eq!(keys.srtp_enc_key.len(), 16);
+        assert_eq!(keys.srtp_auth_key.len(), 20);
+        assert_eq!(keys.srtp_salt.len(), 14);
+        assert_eq!(keys.srtcp_enc_key.len(), 16);
+        assert_eq!(keys.srtcp_auth_key.len(), 20);
+        assert_eq!(keys.srtcp_salt.len(), 14);
+    }
+
+    #[test]
+    fn test_session_keys_clone() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let keys = SessionKeys::derive(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt)
+            .unwrap();
+
+        let cloned = keys.clone();
+        assert_eq!(keys.srtp_enc_key, cloned.srtp_enc_key);
+        assert_eq!(keys.srtcp_salt, cloned.srtcp_salt);
+    }
+
+    #[test]
+    fn test_crypto_suite_debug_and_clone() {
+        let suite = CryptoSuite::AesCm128HmacSha1_80;
+        let cloned = suite;
+        assert_eq!(suite, cloned);
+
+        let debug_str = format!("{:?}", suite);
+        assert!(debug_str.contains("AesCm128HmacSha1_80"));
+    }
+
+    #[test]
+    fn test_label_values() {
+        // Verify label values match RFC 3711
+        assert_eq!(Label::SrtpEncryption as u8, 0x00);
+        assert_eq!(Label::SrtpAuthentication as u8, 0x01);
+        assert_eq!(Label::SrtpSalt as u8, 0x02);
+        assert_eq!(Label::SrtcpEncryption as u8, 0x03);
+        assert_eq!(Label::SrtcpAuthentication as u8, 0x04);
+        assert_eq!(Label::SrtcpSalt as u8, 0x05);
+    }
 }

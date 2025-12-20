@@ -4,15 +4,15 @@
 //! authentication, and complex call scenarios.
 
 use mdsiprtp::sip::{Method, SipRequest, SipResponse};
-use mdsiprtp::transaction::{
-    InviteClientTransaction, InviteServerTransaction,
-    NonInviteClientTransaction, NonInviteServerTransaction,
-};
 use mdsiprtp::transaction::client::invite::{
     Action as InviteClientAction, State as InviteClientState,
 };
-use mdsiprtp::transaction::server::invite::State as InviteServerState;
 use mdsiprtp::transaction::client::non_invite::State as NonInviteClientState;
+use mdsiprtp::transaction::server::invite::State as InviteServerState;
+use mdsiprtp::transaction::{
+    InviteClientTransaction, InviteServerTransaction, NonInviteClientTransaction,
+    NonInviteServerTransaction,
+};
 
 // Helper functions
 fn create_invite() -> SipRequest {
@@ -145,7 +145,9 @@ fn test_cancel_after_ringing() {
 
     // ACK the error response
     let actions = invite_tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Send(_))));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, InviteClientAction::Send(_))));
 }
 
 /// Test: CANCEL race - 200 OK arrives before CANCEL
@@ -192,7 +194,10 @@ fn test_server_receives_cancel() {
     // CANCEL should get 200 OK immediately
     let cancel_ok = create_response(&cancel, 200, "OK");
     cancel_tx.send_response(cancel_ok);
-    assert!(matches!(cancel_tx.state(), mdsiprtp::transaction::server::non_invite::State::Completed));
+    assert!(matches!(
+        cancel_tx.state(),
+        mdsiprtp::transaction::server::non_invite::State::Completed
+    ));
 
     // INVITE should get 487 Request Terminated
     let terminated = create_response(&invite, 487, "Request Terminated");
@@ -263,7 +268,9 @@ fn test_reinvite_rejected_491() {
 
     // ACK the error
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Send(_))));
+    assert!(actions
+        .iter()
+        .any(|a| matches!(a, InviteClientAction::Send(_))));
 }
 
 //
@@ -305,7 +312,10 @@ fn test_server_receives_bye() {
     // Send 200 OK
     let ok = create_response(&bye, 200, "OK");
     tx.send_response(ok);
-    assert!(matches!(tx.state(), mdsiprtp::transaction::server::non_invite::State::Completed));
+    assert!(matches!(
+        tx.state(),
+        mdsiprtp::transaction::server::non_invite::State::Completed
+    ));
 }
 
 //
@@ -478,6 +488,10 @@ fn test_ack_for_error() {
 
     // Transaction should automatically generate ACK
     let actions = tx.poll_actions();
-    assert!(actions.iter().any(|a| matches!(a, InviteClientAction::Send(_))),
-            "Should automatically send ACK for error response");
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, InviteClientAction::Send(_))),
+        "Should automatically send ACK for error response"
+    );
 }

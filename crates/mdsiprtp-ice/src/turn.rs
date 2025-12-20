@@ -1649,7 +1649,12 @@ mod tests {
         let mut attrs = BytesMut::new();
 
         // XOR-PEER-ADDRESS
-        encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, &transaction_id);
+        encode_xor_address(
+            &mut attrs,
+            ATTR_XOR_PEER_ADDRESS,
+            peer_addr,
+            &transaction_id,
+        );
 
         let mut msg = BytesMut::with_capacity(20 + attrs.len());
         msg.put_u16(CREATE_PERMISSION_REQUEST);
@@ -1670,7 +1675,12 @@ mod tests {
         let mut attrs = BytesMut::new();
 
         // XOR-PEER-ADDRESS
-        encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, &transaction_id);
+        encode_xor_address(
+            &mut attrs,
+            ATTR_XOR_PEER_ADDRESS,
+            peer_addr,
+            &transaction_id,
+        );
 
         // DATA
         attrs.put_u16(ATTR_DATA);
@@ -1969,5 +1979,659 @@ mod tests {
             let decoded = parse_xor_address(&buf[4..], &txn_id).unwrap();
             assert_eq!(decoded, addr, "Failed for {}", addr_str);
         }
+    }
+
+    // ============================================
+    // Async TurnClient tests with mock server
+    // ============================================
+
+    /// Mock TURN server for testing
+    struct MockTurnServer {
+        socket: UdpSocket,
+        addr: SocketAddr,
+    }
+
+    impl MockTurnServer {
+        async fn new() -> Self {
+            let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let addr = socket.local_addr().unwrap();
+            Self { socket, addr }
+        }
+
+        /// Build an allocate success response
+        fn build_allocate_success(
+            txn_id: &[u8; 12],
+            relayed_addr: SocketAddr,
+            mapped_addr: SocketAddr,
+            lifetime: u32,
+        ) -> Vec<u8> {
+            let mut attrs = BytesMut::new();
+
+            // XOR-RELAYED-ADDRESS
+            encode_xor_address(&mut attrs, ATTR_XOR_RELAYED_ADDRESS, relayed_addr, txn_id);
+
+            // XOR-MAPPED-ADDRESS
+            encode_xor_address(&mut attrs, ATTR_XOR_MAPPED_ADDRESS, mapped_addr, txn_id);
+
+            // LIFETIME
+            attrs.put_u16(ATTR_LIFETIME);
+            attrs.put_u16(4);
+            attrs.put_u32(lifetime);
+
+            let mut msg = BytesMut::new();
+            msg.put_u16(ALLOCATE_RESPONSE);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+            msg.put_slice(&attrs);
+
+            msg.to_vec()
+        }
+
+        /// Build an allocate error 401 response (auth required)
+        fn build_auth_required(txn_id: &[u8; 12], realm: &str, nonce: &str) -> Vec<u8> {
+            let mut attrs = BytesMut::new();
+
+            // ERROR-CODE (401)
+            attrs.put_u16(ATTR_ERROR_CODE);
+            attrs.put_u16(4);
+            attrs.put_u16(0); // Reserved
+            attrs.put_u8(4); // Class = 4
+            attrs.put_u8(1); // Number = 1 (401)
+
+            // REALM
+            let realm_bytes = realm.as_bytes();
+            attrs.put_u16(ATTR_REALM);
+            attrs.put_u16(realm_bytes.len() as u16);
+            attrs.put_slice(realm_bytes);
+            pad_to_4_bytes(&mut attrs, realm_bytes.len());
+
+            // NONCE
+            let nonce_bytes = nonce.as_bytes();
+            attrs.put_u16(ATTR_NONCE);
+            attrs.put_u16(nonce_bytes.len() as u16);
+            attrs.put_slice(nonce_bytes);
+            pad_to_4_bytes(&mut attrs, nonce_bytes.len());
+
+            let mut msg = BytesMut::new();
+            msg.put_u16(ALLOCATE_ERROR);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+            msg.put_slice(&attrs);
+
+            msg.to_vec()
+        }
+
+        /// Build a refresh success response
+        fn build_refresh_success(txn_id: &[u8; 12], lifetime: u32) -> Vec<u8> {
+            let mut attrs = BytesMut::new();
+
+            // LIFETIME
+            attrs.put_u16(ATTR_LIFETIME);
+            attrs.put_u16(4);
+            attrs.put_u32(lifetime);
+
+            let mut msg = BytesMut::new();
+            msg.put_u16(REFRESH_RESPONSE);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+            msg.put_slice(&attrs);
+
+            msg.to_vec()
+        }
+
+        /// Build a create permission success response
+        fn build_permission_success(txn_id: &[u8; 12]) -> Vec<u8> {
+            let mut msg = BytesMut::new();
+            msg.put_u16(CREATE_PERMISSION_RESPONSE);
+            msg.put_u16(0);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+
+            msg.to_vec()
+        }
+
+        /// Build a data indication
+        fn build_data_indication(txn_id: &[u8; 12], peer_addr: SocketAddr, data: &[u8]) -> Vec<u8> {
+            let mut attrs = BytesMut::new();
+
+            // XOR-PEER-ADDRESS
+            encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, txn_id);
+
+            // DATA
+            attrs.put_u16(ATTR_DATA);
+            attrs.put_u16(data.len() as u16);
+            attrs.put_slice(data);
+            pad_to_4_bytes(&mut attrs, data.len());
+
+            let mut msg = BytesMut::new();
+            msg.put_u16(DATA_INDICATION);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+            msg.put_slice(&attrs);
+
+            msg.to_vec()
+        }
+
+        /// Build a generic error response
+        fn build_error_response(txn_id: &[u8; 12], code: u16, reason: &str) -> Vec<u8> {
+            let mut attrs = BytesMut::new();
+
+            // ERROR-CODE
+            let class = (code / 100) as u8;
+            let number = (code % 100) as u8;
+            let reason_bytes = reason.as_bytes();
+            attrs.put_u16(ATTR_ERROR_CODE);
+            attrs.put_u16(4 + reason_bytes.len() as u16);
+            attrs.put_u16(0); // Reserved
+            attrs.put_u8(class);
+            attrs.put_u8(number);
+            attrs.put_slice(reason_bytes);
+            pad_to_4_bytes(&mut attrs, 4 + reason_bytes.len());
+
+            let mut msg = BytesMut::new();
+            msg.put_u16(ALLOCATE_ERROR);
+            msg.put_u16(attrs.len() as u16);
+            msg.put_u32(MAGIC_COOKIE);
+            msg.put_slice(txn_id);
+            msg.put_slice(&attrs);
+
+            msg.to_vec()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_new() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let client = TurnClient::new(server).await;
+        assert!(client.is_ok());
+
+        let client = client.unwrap();
+        assert!(client.local_addr().is_ok());
+        assert!(client.allocation().is_none());
+        assert!(client.relayed_addr().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_allocate_success() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Spawn mock server to respond
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+            // Extract transaction ID from request
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            // First request: return 401 auth required
+            let response =
+                MockTurnServer::build_auth_required(&txn_id, "test.realm.com", "nonce123456789");
+            mock_socket.send_to(&response, peer).await.unwrap();
+
+            // Second request (with auth): return success
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            let relayed: SocketAddr = "203.0.113.1:49152".parse().unwrap();
+            let mapped: SocketAddr = "192.0.2.1:54321".parse().unwrap();
+            let response = MockTurnServer::build_allocate_success(&txn_id, relayed, mapped, 600);
+            mock_socket.send_to(&response, peer).await.unwrap();
+        });
+
+        let result = client.allocate().await;
+        assert!(result.is_ok());
+
+        let alloc = result.unwrap();
+        assert_eq!(alloc.relayed_addr.port(), 49152);
+        assert_eq!(alloc.mapped_addr.port(), 54321);
+        assert_eq!(alloc.lifetime, 600);
+
+        // Verify allocation is stored
+        assert!(client.allocation().is_some());
+        assert!(client.relayed_addr().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_allocate_direct_success() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Spawn mock server to respond with direct success (no auth challenge)
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            let relayed: SocketAddr = "1.2.3.4:12345".parse().unwrap();
+            let mapped: SocketAddr = "5.6.7.8:54321".parse().unwrap();
+            let response = MockTurnServer::build_allocate_success(&txn_id, relayed, mapped, 300);
+            mock_socket.send_to(&response, peer).await.unwrap();
+        });
+
+        let result = client.allocate().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().lifetime, 300);
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_refresh() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Set up allocation manually
+        client.allocation = Some(TurnAllocation {
+            relayed_addr: "1.2.3.4:5000".parse().unwrap(),
+            mapped_addr: "5.6.7.8:6000".parse().unwrap(),
+            lifetime: 600,
+            realm: "test.realm".to_string(),
+            nonce: "testnonce".to_string(),
+        });
+
+        // Spawn mock server
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            let response = MockTurnServer::build_refresh_success(&txn_id, 300);
+            mock_socket.send_to(&response, peer).await.unwrap();
+        });
+
+        let result = client.refresh(300).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 300);
+        assert_eq!(client.allocation().unwrap().lifetime, 300);
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_refresh_not_allocated() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // No allocation set, should fail
+        let result = client.refresh(300).await;
+        assert!(matches!(result, Err(TurnError::NotAllocated)));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_create_permission() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Set up allocation manually
+        client.allocation = Some(TurnAllocation {
+            relayed_addr: "1.2.3.4:5000".parse().unwrap(),
+            mapped_addr: "5.6.7.8:6000".parse().unwrap(),
+            lifetime: 600,
+            realm: "test.realm".to_string(),
+            nonce: "testnonce".to_string(),
+        });
+
+        let peer_addr: SocketAddr = "10.0.0.100:5060".parse().unwrap();
+
+        // Spawn mock server
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            let response = MockTurnServer::build_permission_success(&txn_id);
+            mock_socket.send_to(&response, peer).await.unwrap();
+        });
+
+        let result = client.create_permission(peer_addr).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_create_permission_not_allocated() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        let peer_addr: SocketAddr = "10.0.0.100:5060".parse().unwrap();
+        let result = client.create_permission(peer_addr).await;
+        assert!(matches!(result, Err(TurnError::NotAllocated)));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_send_data() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let client = TurnClient::new(server).await.unwrap();
+
+        // No allocation - should fail
+        let peer: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+        let result = client.send_data(peer, b"test data").await;
+        assert!(matches!(result, Err(TurnError::NotAllocated)));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_send_data_with_allocation() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Set up allocation
+        client.allocation = Some(TurnAllocation {
+            relayed_addr: "1.2.3.4:5000".parse().unwrap(),
+            mapped_addr: "5.6.7.8:6000".parse().unwrap(),
+            lifetime: 600,
+            realm: "test.realm".to_string(),
+            nonce: "testnonce".to_string(),
+        });
+
+        let peer: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+        let result = client.send_data(peer, b"test data").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_recv_data() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let client = TurnClient::new(server).await.unwrap();
+
+        let peer_addr: SocketAddr = "10.0.0.50:9999".parse().unwrap();
+        let test_data = b"hello from peer";
+
+        // Spawn mock server to send data indication
+        let mock_socket = mock.socket;
+        let client_addr = client.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Wait a bit for client to be ready
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            let txn_id = [0x11u8; 12];
+            let indication = MockTurnServer::build_data_indication(&txn_id, peer_addr, test_data);
+            mock_socket.send_to(&indication, client_addr).await.unwrap();
+        });
+
+        let result = client.recv_data_timeout(Duration::from_secs(1)).await;
+        assert!(result.is_ok());
+
+        let (addr, data) = result.unwrap();
+        assert_eq!(addr, peer_addr);
+        assert_eq!(data, test_data);
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_recv_data_timeout() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let client = TurnClient::new(server).await.unwrap();
+
+        // No data sent, should timeout
+        let result = client.recv_data_timeout(Duration::from_millis(100)).await;
+        assert!(matches!(result, Err(TurnError::Timeout)));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_allocate_timeout() {
+        // Create server but don't respond
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Reduce timeout for faster test
+        client.timeout = Duration::from_millis(50);
+        client.retries = 1;
+
+        let result = client.allocate().await;
+        assert!(matches!(result, Err(TurnError::Timeout)));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_allocate_error_response() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Spawn mock server to return 403 Forbidden
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+            let mut txn_id = [0u8; 12];
+            txn_id.copy_from_slice(&buf[8..20]);
+
+            let response = MockTurnServer::build_error_response(&txn_id, 403, "Forbidden");
+            mock_socket.send_to(&response, peer).await.unwrap();
+        });
+
+        let result = client.allocate().await;
+        assert!(matches!(
+            result,
+            Err(TurnError::ErrorResponse { code: 403, .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_turn_client_allocate_double_auth() {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "testuser", "testpass");
+        let mut client = TurnClient::new(server).await.unwrap();
+
+        // Spawn mock server that returns 401 twice
+        let mock_socket = mock.socket;
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                let mut buf = [0u8; 4096];
+                let (_, peer) = mock_socket.recv_from(&mut buf).await.unwrap();
+
+                let mut txn_id = [0u8; 12];
+                txn_id.copy_from_slice(&buf[8..20]);
+
+                let response = MockTurnServer::build_auth_required(&txn_id, "realm", "nonce");
+                mock_socket.send_to(&response, peer).await.unwrap();
+            }
+        });
+
+        let result = client.allocate().await;
+        assert!(matches!(
+            result,
+            Err(TurnError::ErrorResponse { code: 401, .. })
+        ));
+    }
+
+    // Direct parse method tests - using async to create real sockets
+
+    /// Helper to create a TurnClient for parse testing (connects to a mock server)
+    async fn create_test_client(txn_id: [u8; 12]) -> TurnClient {
+        let mock = MockTurnServer::new().await;
+        let server = TurnServer::new(mock.addr, "user", "pass");
+        let mut client = TurnClient::new(server).await.unwrap();
+        client.transaction_id = txn_id;
+        client
+    }
+
+    #[tokio::test]
+    async fn test_parse_allocate_response_too_short() {
+        let client = create_test_client([0x11; 12]).await;
+
+        let short_data = [0u8; 10];
+        let result = client.parse_allocate_response(&short_data);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_allocate_response_wrong_txn_id() {
+        let txn_id = [0x11u8; 12];
+        let relayed: SocketAddr = "1.2.3.4:5000".parse().unwrap();
+        let mapped: SocketAddr = "5.6.7.8:6000".parse().unwrap();
+
+        let response = MockTurnServer::build_allocate_success(&txn_id, relayed, mapped, 600);
+
+        // Client has different transaction ID
+        let client = create_test_client([0x22; 12]).await;
+
+        let result = client.parse_allocate_response(&response);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_allocate_response_unexpected_type() {
+        let txn_id = [0x11u8; 12];
+
+        // Build a response with wrong message type
+        let mut msg = BytesMut::new();
+        msg.put_u16(0x9999); // Invalid type
+        msg.put_u16(0);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_allocate_response(&msg);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_allocate_response_no_relay_addr() {
+        let txn_id = [0x11u8; 12];
+
+        // Build response without XOR-RELAYED-ADDRESS
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_LIFETIME);
+        attrs.put_u16(4);
+        attrs.put_u32(600);
+
+        let mut msg = BytesMut::new();
+        msg.put_u16(ALLOCATE_RESPONSE);
+        msg.put_u16(attrs.len() as u16);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+        msg.put_slice(&attrs);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_allocate_response(&msg);
+        assert!(matches!(result, Err(TurnError::NoRelayAddress)));
+    }
+
+    #[tokio::test]
+    async fn test_parse_refresh_response_wrong_type() {
+        let txn_id = [0x11u8; 12];
+
+        let mut msg = BytesMut::new();
+        msg.put_u16(0x9999); // Wrong type
+        msg.put_u16(0);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_refresh_response(&msg);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_permission_response_wrong_type() {
+        let txn_id = [0x11u8; 12];
+
+        let mut msg = BytesMut::new();
+        msg.put_u16(0x9999); // Wrong type
+        msg.put_u16(0);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_permission_response(&msg);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_data_indication_success() {
+        let txn_id = [0x11u8; 12];
+        let peer_addr: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+        let data = b"test payload";
+
+        let indication = MockTurnServer::build_data_indication(&txn_id, peer_addr, data);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_data_indication(&indication);
+        assert!(result.is_ok());
+        let (addr, payload) = result.unwrap();
+        assert_eq!(addr, peer_addr);
+        assert_eq!(payload, data);
+    }
+
+    #[tokio::test]
+    async fn test_parse_data_indication_wrong_type() {
+        let txn_id = [0x11u8; 12];
+
+        let mut msg = BytesMut::new();
+        msg.put_u16(ALLOCATE_RESPONSE); // Wrong type for data indication
+        msg.put_u16(0);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_data_indication(&msg);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_data_indication_missing_data() {
+        let txn_id = [0x11u8; 12];
+        let peer_addr: SocketAddr = "10.0.0.1:5000".parse().unwrap();
+
+        // Build indication with only peer address, no data
+        let mut attrs = BytesMut::new();
+        encode_xor_address(&mut attrs, ATTR_XOR_PEER_ADDRESS, peer_addr, &txn_id);
+
+        let mut msg = BytesMut::new();
+        msg.put_u16(DATA_INDICATION);
+        msg.put_u16(attrs.len() as u16);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+        msg.put_slice(&attrs);
+
+        let client = create_test_client(txn_id).await;
+
+        let result = client.parse_data_indication(&msg);
+        assert!(matches!(result, Err(TurnError::InvalidResponse(_))));
+    }
+
+    #[tokio::test]
+    async fn test_parse_error_response_500() {
+        let txn_id = [0x11u8; 12];
+        let response = MockTurnServer::build_error_response(&txn_id, 500, "Server Error");
+
+        let client = create_test_client(txn_id).await;
+
+        // Skip header and get just the attrs
+        let result = client.parse_error_response(&response[20..]);
+        assert!(matches!(
+            result,
+            Err(TurnError::ErrorResponse { code: 500, .. })
+        ));
     }
 }

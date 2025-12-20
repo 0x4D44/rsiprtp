@@ -776,4 +776,681 @@ mod tests {
         client.set_retries(5);
         assert_eq!(client.retries, 5);
     }
+
+    // Error response parsing - comprehensive tests
+    #[test]
+    fn test_parse_binding_response_error_type() {
+        let txn_id = [0x55u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_ERROR);
+        response.put_u16(8); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // ERROR-CODE attribute
+        response.put_u16(ATTR_ERROR_CODE);
+        response.put_u16(4);
+        response.put_u16(0); // Reserved
+        response.put_u8(4); // Class
+        response.put_u8(20); // Number -> 420
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::ErrorResponse { code: 420, .. })));
+    }
+
+    #[test]
+    fn test_parse_error_response_with_reason_phrase() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(20); // 4 header + 16 reason
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(4); // Class
+        attrs.put_u8(2); // Number -> 402
+        attrs.put_slice(b"Payment Required"); // Reason
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 402);
+                assert_eq!(reason, "Payment Required");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_multiple_attributes() {
+        let mut attrs = BytesMut::new();
+
+        // SOFTWARE attribute first
+        attrs.put_u16(ATTR_SOFTWARE);
+        attrs.put_u16(4);
+        attrs.put_slice(b"test");
+
+        // ERROR-CODE attribute
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(8);
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(3); // Class
+        attrs.put_u8(0); // Number -> 300
+        attrs.put_slice(b"move"); // Reason
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 300);
+                assert_eq!(reason, "move");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_truncated_attribute() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(10); // Claim 10 bytes but provide less
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(5); // Class
+        // Missing rest of data
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, .. } => {
+                assert_eq!(code, 0); // Should fallback to unknown error
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_wrong_attribute_type() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_MAPPED_ADDRESS); // Wrong type
+        attrs.put_u16(8);
+        attrs.put_slice(&[0u8; 8]);
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 0);
+                assert_eq!(reason, "Unknown error");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_error_response_with_padding() {
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(5); // 4 header + 1 byte reason (needs padding)
+        attrs.put_u16(0); // Reserved
+        attrs.put_u8(4); // Class
+        attrs.put_u8(4); // Number -> 404
+        attrs.put_u8(b'X'); // 1 byte reason
+        attrs.put_slice(&[0, 0, 0]); // Padding to 4-byte boundary
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 404);
+                assert_eq!(reason, "X");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    // Unknown attribute handling tests
+    #[test]
+    fn test_parse_binding_response_with_unknown_attributes() {
+        let txn_id = [0x66u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(32); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Unknown attribute 1
+        response.put_u16(0xFFFF);
+        response.put_u16(4);
+        response.put_slice(&[1, 2, 3, 4]);
+
+        // XOR-MAPPED-ADDRESS
+        response.put_u16(ATTR_XOR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        let xor_port = 9999u16 ^ (MAGIC_COOKIE >> 16) as u16;
+        let xor_ip = [8 ^ 0x21, 8 ^ 0x12, 8 ^ 0xA4, 8 ^ 0x42];
+        response.put_u8(0x00);
+        response.put_u8(0x01);
+        response.put_u16(xor_port);
+        response.put_slice(&xor_ip);
+
+        // Unknown attribute 2
+        response.put_u16(0xABCD);
+        response.put_u16(8);
+        response.put_slice(&[0u8; 8]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 9999);
+    }
+
+    #[test]
+    fn test_parse_binding_response_unknown_attr_with_odd_padding() {
+        let txn_id = [0x77u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Unknown attribute with 5 bytes (needs 3 bytes padding)
+        response.put_u16(0x1234);
+        response.put_u16(5);
+        response.put_slice(&[1, 2, 3, 4, 5]);
+        response.put_slice(&[0, 0, 0]); // Padding
+
+        // MAPPED-ADDRESS
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(8080);
+        response.put_slice(&[127, 0, 0, 1]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 8080);
+    }
+
+    #[test]
+    fn test_parse_binding_response_prefers_xor_over_mapped() {
+        let txn_id = [0x88u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // MAPPED-ADDRESS (should be ignored)
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(1111);
+        response.put_slice(&[1, 1, 1, 1]);
+
+        // XOR-MAPPED-ADDRESS (should be preferred)
+        response.put_u16(ATTR_XOR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        let xor_port = 2222u16 ^ (MAGIC_COOKIE >> 16) as u16;
+        let xor_ip = [2 ^ 0x21, 2 ^ 0x12, 2 ^ 0xA4, 2 ^ 0x42];
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(xor_port);
+        response.put_slice(&xor_ip);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 2222);
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)));
+    }
+
+    // Malformed response handling tests
+    #[test]
+    fn test_parse_binding_response_truncated_header() {
+        let data = [0u8; 15]; // Less than 20 bytes header
+        let txn_id = [0u8; 12];
+        let result = parse_binding_response(&data, &txn_id);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_truncated_attributes() {
+        let txn_id = [0x99u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(20); // Claim 20 bytes of attributes
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+        // But only provide 10 bytes
+        response.put_slice(&[0u8; 10]);
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_attribute_truncated_header() {
+        let txn_id = [0xAAu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(3); // Message length (incomplete attribute header)
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+        // Attribute header needs 4 bytes, only provide 3
+        response.put_slice(&[0u8; 3]);
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::NoMappedAddress)));
+    }
+
+    #[test]
+    fn test_parse_binding_response_attribute_truncated_value() {
+        let txn_id = [0xBBu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(10); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Attribute claims 8 bytes but only provide 6
+        response.put_u16(ATTR_XOR_MAPPED_ADDRESS);
+        response.put_u16(8); // Claim 8 bytes
+        response.put_slice(&[0u8; 6]); // Only provide 6
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::NoMappedAddress)));
+    }
+
+    #[test]
+    fn test_parse_binding_response_corrupt_attribute_length() {
+        let txn_id = [0xCCu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(8); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Attribute with impossible length
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(1000); // Claims huge length
+        response.put_slice(&[0u8; 4]);
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::NoMappedAddress)));
+    }
+
+    #[test]
+    fn test_parse_binding_response_zero_length_message() {
+        let txn_id = [0xDDu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(0); // Zero length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        let result = parse_binding_response(&response, &txn_id);
+        assert!(matches!(result, Err(StunError::NoMappedAddress)));
+    }
+
+    #[test]
+    fn test_parse_binding_response_with_software_attribute() {
+        let txn_id = [0xEEu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // SOFTWARE attribute
+        response.put_u16(ATTR_SOFTWARE);
+        response.put_u16(8);
+        response.put_slice(b"TestSTUN");
+
+        // MAPPED-ADDRESS
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(7777);
+        response.put_slice(&[10, 10, 10, 10]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 7777);
+    }
+
+    // XOR IPv6 edge case tests
+    #[test]
+    fn test_parse_xor_mapped_address_ipv6() {
+        let mut data = vec![0x00, AF_IPV6];
+        let port = 9090u16;
+        let xor_port = port ^ (MAGIC_COOKIE >> 16) as u16;
+        data.extend_from_slice(&xor_port.to_be_bytes());
+
+        // IPv6 address bytes - first 4 bytes XORed with magic cookie
+        let ipv6 = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+        let mut ipv6_bytes = ipv6.octets();
+        let cookie_bytes = MAGIC_COOKIE.to_be_bytes();
+        for (i, b) in ipv6_bytes[..4].iter_mut().enumerate() {
+            *b ^= cookie_bytes[i];
+        }
+        data.extend_from_slice(&ipv6_bytes);
+
+        let addr = parse_mapped_address(&data, true).unwrap();
+        assert_eq!(addr.port(), port);
+        assert!(addr.is_ipv6());
+    }
+
+    #[test]
+    fn test_parse_xor_mapped_address_ipv6_exact_match() {
+        // Test with known values
+        let port = 12345u16;
+        let xor_port = port ^ (MAGIC_COOKIE >> 16) as u16;
+
+        let mut data = vec![0x00, AF_IPV6];
+        data.extend_from_slice(&xor_port.to_be_bytes());
+
+        // Create IPv6 address
+        let ipv6 = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let mut ipv6_bytes = ipv6.octets();
+
+        // XOR first 4 bytes with magic cookie
+        let cookie_bytes = MAGIC_COOKIE.to_be_bytes();
+        for i in 0..4 {
+            ipv6_bytes[i] ^= cookie_bytes[i];
+        }
+
+        data.extend_from_slice(&ipv6_bytes);
+
+        let addr = parse_mapped_address(&data, true).unwrap();
+        assert_eq!(addr.port(), port);
+        assert!(addr.is_ipv6());
+    }
+
+    // Edge cases for port XORing
+    #[test]
+    fn test_parse_xor_mapped_address_zero_port() {
+        let xor_port = 0u16 ^ (MAGIC_COOKIE >> 16) as u16;
+        let xor_ip = [0 ^ 0x21, 0 ^ 0x12, 0 ^ 0xA4, 0 ^ 0x42];
+
+        let data = [
+            0x00,
+            0x01,
+            (xor_port >> 8) as u8,
+            (xor_port & 0xFF) as u8,
+            xor_ip[0],
+            xor_ip[1],
+            xor_ip[2],
+            xor_ip[3],
+        ];
+
+        let addr = parse_mapped_address(&data, true).unwrap();
+        assert_eq!(addr.port(), 0);
+    }
+
+    #[test]
+    fn test_parse_xor_mapped_address_max_port() {
+        let port = 65535u16;
+        let xor_port = port ^ (MAGIC_COOKIE >> 16) as u16;
+        let xor_ip = [255 ^ 0x21, 255 ^ 0x12, 255 ^ 0xA4, 255 ^ 0x42];
+
+        let data = [
+            0x00,
+            0x01,
+            (xor_port >> 8) as u8,
+            (xor_port & 0xFF) as u8,
+            xor_ip[0],
+            xor_ip[1],
+            xor_ip[2],
+            xor_ip[3],
+        ];
+
+        let addr = parse_mapped_address(&data, true).unwrap();
+        assert_eq!(addr.port(), port);
+    }
+
+    // Attribute padding edge cases
+    #[test]
+    fn test_parse_binding_response_attribute_no_padding_needed() {
+        let txn_id = [0xFFu8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length: SOFTWARE(2+2+8) + MAPPED(2+2+8) = 24
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Attribute with length exactly divisible by 4 (no padding)
+        response.put_u16(ATTR_SOFTWARE);
+        response.put_u16(8); // Exactly 8 bytes
+        response.put_slice(b"12345678");
+
+        // MAPPED-ADDRESS
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(4444);
+        response.put_slice(&[4, 4, 4, 4]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 4444);
+    }
+
+    #[test]
+    fn test_parse_binding_response_attribute_one_byte_padding() {
+        let txn_id = [0x12u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Attribute with 7 bytes (needs 1 byte padding)
+        response.put_u16(ATTR_SOFTWARE);
+        response.put_u16(7);
+        response.put_slice(b"1234567");
+        response.put_u8(0); // Padding
+
+        // MAPPED-ADDRESS
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(5555);
+        response.put_slice(&[5, 5, 5, 5]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 5555);
+    }
+
+    #[test]
+    fn test_parse_binding_response_attribute_two_byte_padding() {
+        let txn_id = [0x34u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(24); // Message length
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Attribute with 6 bytes (needs 2 bytes padding)
+        response.put_u16(ATTR_SOFTWARE);
+        response.put_u16(6);
+        response.put_slice(b"123456");
+        response.put_slice(&[0, 0]); // Padding
+
+        // MAPPED-ADDRESS
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(6666);
+        response.put_slice(&[6, 6, 6, 6]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 6666);
+    }
+
+    // Reserved byte tests
+    #[test]
+    fn test_parse_mapped_address_nonzero_reserved() {
+        // Test that non-zero reserved byte is accepted
+        let data = [
+            0xFF, // Reserved (non-zero)
+            0x01, // Family: IPv4
+            0x13, 0x88, // Port: 5000
+            192, 168, 1, 100,
+        ];
+
+        let addr = parse_mapped_address(&data, false).unwrap();
+        assert_eq!(addr.port(), 5000);
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
+    }
+
+    // Message type edge cases
+    #[test]
+    fn test_parse_binding_response_invalid_message_type_format() {
+        let mut response = BytesMut::new();
+        response.put_u16(0xFFFF); // Invalid message type
+        response.put_u16(0);
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&[0u8; 12]);
+
+        let result = parse_binding_response(&response, &[0u8; 12]);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    // Build request edge cases
+    #[test]
+    fn test_build_binding_request_different_transaction_ids() {
+        let txn_id1 = [0xAAu8; 12];
+        let txn_id2 = [0xBBu8; 12];
+
+        let request1 = build_binding_request(&txn_id1);
+        let request2 = build_binding_request(&txn_id2);
+
+        // Headers should be same
+        assert_eq!(&request1[..8], &request2[..8]);
+
+        // Transaction IDs should differ
+        assert_ne!(&request1[8..20], &request2[8..20]);
+    }
+
+    #[test]
+    fn test_build_binding_request_all_zeros() {
+        let txn_id = [0x00u8; 12];
+        let request = build_binding_request(&txn_id);
+
+        assert_eq!(request.len(), 20);
+        assert_eq!(&request[8..20], &[0u8; 12]);
+    }
+
+    #[test]
+    fn test_build_binding_request_all_ones() {
+        let txn_id = [0xFFu8; 12];
+        let request = build_binding_request(&txn_id);
+
+        assert_eq!(request.len(), 20);
+        assert_eq!(&request[8..20], &[0xFFu8; 12]);
+    }
+
+    // Complex multi-attribute scenarios
+    #[test]
+    fn test_parse_binding_response_many_unknown_attributes() {
+        let txn_id = [0x56u8; 12];
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(52); // Message length: 5*(4+4) + 4+8 = 40 + 12 = 52
+        response.put_u32(MAGIC_COOKIE);
+        response.put_slice(&txn_id);
+
+        // Multiple unknown attributes (each takes 4 bytes header + 4 bytes value = 8 bytes)
+        for i in 0..5 {
+            response.put_u16(0x8000 + i); // Unknown attribute types
+            response.put_u16(4);
+            response.put_slice(&[i as u8; 4]);
+        }
+
+        // Finally, a valid MAPPED-ADDRESS (4 bytes header + 8 bytes value = 12 bytes)
+        response.put_u16(ATTR_MAPPED_ADDRESS);
+        response.put_u16(8);
+        response.put_u8(0x00);
+        response.put_u8(AF_IPV4);
+        response.put_u16(3333);
+        response.put_slice(&[3, 3, 3, 3]);
+
+        let addr = parse_binding_response(&response, &txn_id).unwrap();
+        assert_eq!(addr.port(), 3333);
+    }
+
+    #[test]
+    fn test_parse_error_response_non_error_attributes() {
+        let mut attrs = BytesMut::new();
+
+        // Multiple non-error attributes before error
+        attrs.put_u16(ATTR_SOFTWARE);
+        attrs.put_u16(4);
+        attrs.put_slice(b"test");
+
+        attrs.put_u16(ATTR_MAPPED_ADDRESS);
+        attrs.put_u16(8);
+        attrs.put_slice(&[0u8; 8]);
+
+        // Finally the error attribute
+        attrs.put_u16(ATTR_ERROR_CODE);
+        attrs.put_u16(7);
+        attrs.put_u16(0);
+        attrs.put_u8(5);
+        attrs.put_u8(3); // 503
+        attrs.put_slice(b"err");
+        attrs.put_u8(0); // Padding
+
+        let err = parse_error_response(&attrs);
+        match err {
+            StunError::ErrorResponse { code, reason } => {
+                assert_eq!(code, 503);
+                assert_eq!(reason, "err");
+            }
+            _ => panic!("Expected ErrorResponse"),
+        }
+    }
+
+    #[test]
+    fn test_parse_mapped_address_exact_minimum_ipv4() {
+        // Exactly minimum size for IPv4 (8 bytes)
+        let data = [0x00, AF_IPV4, 0x00, 0x50, 127, 0, 0, 1];
+        let addr = parse_mapped_address(&data, false).unwrap();
+        assert_eq!(addr.port(), 80);
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[test]
+    fn test_parse_mapped_address_exact_minimum_ipv6() {
+        // Exactly minimum size for IPv6 (20 bytes)
+        let mut data = vec![0x00, AF_IPV6, 0x00, 0x50];
+        data.extend_from_slice(&Ipv6Addr::LOCALHOST.octets());
+
+        let addr = parse_mapped_address(&data, false).unwrap();
+        assert_eq!(addr.port(), 80);
+        assert_eq!(addr.ip(), IpAddr::V6(Ipv6Addr::LOCALHOST));
+    }
+
+    // Transaction ID validation in various scenarios
+    #[test]
+    fn test_parse_binding_response_txn_id_one_bit_different() {
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(0);
+        response.put_u32(MAGIC_COOKIE);
+        let mut txn_in_response = [0xFFu8; 12];
+        txn_in_response[0] = 0xFE; // One bit different
+        response.put_slice(&txn_in_response);
+
+        let expected_txn = [0xFFu8; 12];
+        let result = parse_binding_response(&response, &expected_txn);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
+
+    #[test]
+    fn test_parse_binding_response_txn_id_last_byte_different() {
+        let mut response = BytesMut::new();
+        response.put_u16(BINDING_RESPONSE);
+        response.put_u16(0);
+        response.put_u32(MAGIC_COOKIE);
+        let mut txn_in_response = [0xAAu8; 12];
+        txn_in_response[11] = 0xBB; // Last byte different
+        response.put_slice(&txn_in_response);
+
+        let expected_txn = [0xAAu8; 12];
+        let result = parse_binding_response(&response, &expected_txn);
+        assert!(matches!(result, Err(StunError::InvalidResponse(_))));
+    }
 }

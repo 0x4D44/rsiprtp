@@ -85,10 +85,7 @@ impl GabbyServer {
         let mut buf = vec![0u8; 65535];
 
         tracing::info!("Gabby is ready to receive calls!");
-        tracing::info!(
-            "Call sip:gabby@{} from your SIP phone",
-            self.local_sip_addr
-        );
+        tracing::info!("Call sip:gabby@{} from your SIP phone", self.local_sip_addr);
 
         loop {
             tokio::select! {
@@ -181,9 +178,7 @@ impl GabbyServer {
             .from_request(req)
             .build()
             .map_err(|e| ServerError::ResponseBuildFailed(e.to_string()))?;
-        self.sip_socket
-            .send_to(&trying.to_bytes(), source)
-            .await?;
+        self.sip_socket.send_to(&trying.to_bytes(), source).await?;
 
         // Generate our To tag
         let to_tag = format!("gabby-{}", generate_tag());
@@ -195,9 +190,7 @@ impl GabbyServer {
             .to_tag(&to_tag)
             .build()
             .map_err(|e| ServerError::ResponseBuildFailed(e.to_string()))?;
-        self.sip_socket
-            .send_to(&ringing.to_bytes(), source)
-            .await?;
+        self.sip_socket.send_to(&ringing.to_bytes(), source).await?;
 
         // Allocate RTP port
         let rtp_port = match self.allocate_rtp_port() {
@@ -211,9 +204,7 @@ impl GabbyServer {
                     .to_tag(&to_tag)
                     .build()
                     .map_err(|e| ServerError::ResponseBuildFailed(e.to_string()))?;
-                self.sip_socket
-                    .send_to(&unavail.to_bytes(), source)
-                    .await?;
+                self.sip_socket.send_to(&unavail.to_bytes(), source).await?;
                 return Ok(());
             }
         };
@@ -300,7 +291,11 @@ impl GabbyServer {
     }
 
     /// Handle a BYE request.
-    async fn handle_bye(&mut self, req: &SipRequest, source: SocketAddr) -> Result<(), ServerError> {
+    async fn handle_bye(
+        &mut self,
+        req: &SipRequest,
+        source: SocketAddr,
+    ) -> Result<(), ServerError> {
         let call_id = req.call_id().unwrap_or_default();
 
         tracing::info!("BYE received for call {}", call_id);

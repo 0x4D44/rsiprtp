@@ -26,6 +26,8 @@ Talk to an AI over the phone! Gabby is a voice AI application that accepts SIP p
 
 ### 1. Install Dependencies
 
+**Option A: Use the setup script (recommended)**
+
 ```bash
 cd crates/gabby
 ./scripts/setup.sh
@@ -33,9 +35,38 @@ cd crates/gabby
 
 This downloads and installs:
 - Vosk speech recognition model (~50MB)
-- Vosk library
+- Vosk library (libvosk)
 - Piper TTS binary and voice model (~100MB)
 - Checks for Ollama and the llama3.2:3b model
+
+**Option B: Manual installation**
+
+Install libvosk (required for speech recognition):
+
+```bash
+# Download Vosk library (v0.3.45 - latest with prebuilt binaries)
+wget "https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-x86_64-0.3.45.zip" -O /tmp/vosk-lib.zip
+
+# For aarch64/arm64, use instead:
+# wget "https://github.com/alphacep/vosk-api/releases/download/v0.3.45/vosk-linux-aarch64-0.3.45.zip" -O /tmp/vosk-lib.zip
+
+# Extract and install
+unzip /tmp/vosk-lib.zip -d /tmp/vosk-lib
+sudo cp /tmp/vosk-lib/vosk-linux-x86_64-0.3.45/libvosk.so /usr/local/lib/
+sudo ldconfig
+
+# Verify installation
+ldconfig -p | grep vosk
+```
+
+Download the Vosk model:
+
+```bash
+cd crates/gabby
+mkdir -p models
+wget "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip" -O /tmp/vosk-model.zip
+unzip /tmp/vosk-model.zip -d models/
+```
 
 ### 2. Start Ollama
 

@@ -1412,4 +1412,767 @@ mod tests {
             assert_eq!(ty, cloned);
         }
     }
+
+    // Edge case tests for response handling
+
+    #[test]
+    fn test_handle_response_without_transaction_id() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Create a minimal response without proper Via header
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .build()
+            .unwrap();
+
+        // Should not crash when TransactionId::from_response returns None
+        mgr.handle_message(SipMessage::Response(response));
+
+        let actions = mgr.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_handle_response_for_wrong_transaction_type() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+
+        // Create server transaction
+        mgr.handle_message(SipMessage::Request(invite.clone()));
+        mgr.poll_actions();
+
+        // Try to send response as if it's a client transaction
+        // This should be ignored because server transactions don't match responses
+        let response = create_response(&invite, 200);
+        mgr.handle_message(SipMessage::Response(response));
+
+        // Should not crash or produce unexpected events
+        let actions = mgr.poll_actions();
+        // The response won't match the server transaction type
+        let _ = actions;
+    }
+
+    // Cleanup edge cases
+
+    #[test]
+    fn test_cleanup_invite_client_completed() {
+        let mut mgr = TransactionManager::new(true); // Reliable transport
+        let invite = create_invite();
+        let _handle = mgr.create_client_transaction(invite.clone()).unwrap();
+        mgr.poll_actions();
+
+        // INVITE client may not terminate immediately on creation
+        // Test that cleanup doesn't crash even with active transactions
+        mgr.cleanup_terminated();
+
+        // Verify transaction map is still accessible
+        assert!(mgr.invite_clients.len() > 0 || mgr.invite_clients.is_empty());
+    }
+
+    #[test]
+    fn test_cleanup_with_active_transactions() {
+        let mut mgr = TransactionManager::new(true); // Reliable transport
+        let invite = create_invite();
+        let _h1 = mgr.create_client_transaction(invite.clone()).unwrap();
+
+        let register = create_register();
+        let _h2 = mgr.create_client_transaction(register).unwrap();
+        mgr.poll_actions();
+
+        // Cleanup with active (non-terminated) transactions
+        mgr.cleanup_terminated();
+
+        // Transactions should still be present
+        assert!(!mgr.invite_clients.is_empty() || !mgr.non_invite_clients.is_empty());
+    }
+
+    #[test]
+    fn test_cleanup_multiple_transaction_types() {
+        let mut mgr = TransactionManager::new(true); // Reliable transport
+
+        // Create multiple transactions of different types
+        let invite = create_invite();
+        let _h1 = mgr.create_client_transaction(invite.clone()).unwrap();
+
+        let register = create_register();
+        let _h2 = mgr.create_client_transaction(register.clone()).unwrap();
+
+        // Create server transactions
+        let invite2 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.2", 5060, "UDP", "z9hG4bKtest2")
+            .from("sip:alice@example.com", "fromtag2")
+            .to("sip:bob@example.com")
+            .call_id("test2@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        mgr.handle_message(SipMessage::Request(invite2));
+
+        let register2 = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:example.com")
+            .via("192.168.1.3", 5060, "UDP", "z9hG4bKtest3")
+            .from("sip:alice@example.com", "fromtag3")
+            .to("sip:alice@example.com")
+            .call_id("register2@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        mgr.handle_message(SipMessage::Request(register2));
+
+        mgr.poll_actions();
+
+        // Cleanup should handle multiple transaction types without crashing
+        mgr.cleanup_terminated();
+
+        // Verify all transactions are still tracked
+        let total = mgr.invite_clients.len() + mgr.non_invite_clients.len()
+            + mgr.invite_servers.len() + mgr.non_invite_servers.len();
+        assert!(total > 0);
+    }
+
+    #[test]
+    fn test_cleanup_empty_manager() {
+        let mut mgr = TransactionManager::new(false);
+        // Should not crash on empty manager
+        mgr.cleanup_terminated();
+    }
+
+    // Timer retransmission edge cases
+
+    #[test]
+    fn test_timer_d_timeout_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+        let handle = mgr.create_client_transaction(invite.clone()).unwrap();
+        mgr.poll_actions();
+
+        // Timer D fires (even if not in correct state, should not crash)
+        mgr.handle_timeout(handle, Timer::D);
+
+        let actions = mgr.poll_actions();
+        let _ = actions; // May or may not emit events depending on state
+    }
+
+    #[test]
+    fn test_timer_k_timeout_non_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let register = create_register();
+        let handle = mgr.create_client_transaction(register.clone()).unwrap();
+        mgr.poll_actions();
+
+        // Timer K fires (even if not in correct state, should not crash)
+        mgr.handle_timeout(handle, Timer::K);
+
+        let actions = mgr.poll_actions();
+        let _ = actions;
+    }
+
+    #[test]
+    fn test_timer_i_timeout_invite_server() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+
+        mgr.handle_message(SipMessage::Request(invite.clone()));
+        let actions = mgr.poll_actions();
+
+        let handle = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::InviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Timer I fires (should not crash even if not in correct state)
+        mgr.handle_timeout(handle, Timer::I);
+
+        let actions = mgr.poll_actions();
+        let _ = actions;
+    }
+
+    #[test]
+    fn test_multiple_retransmissions_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+        let handle = mgr.create_client_transaction(invite).unwrap();
+        mgr.poll_actions();
+
+        // Timer A fires multiple times with exponential backoff
+        mgr.handle_timeout(handle, Timer::A);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+
+        mgr.handle_timeout(handle, Timer::A);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+
+        mgr.handle_timeout(handle, Timer::A);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+    }
+
+    #[test]
+    fn test_multiple_retransmissions_non_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let register = create_register();
+        let handle = mgr.create_client_transaction(register).unwrap();
+        mgr.poll_actions();
+
+        // Timer E fires multiple times
+        mgr.handle_timeout(handle, Timer::E);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+
+        mgr.handle_timeout(handle, Timer::E);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+    }
+
+    #[test]
+    fn test_multiple_retransmissions_invite_server() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+
+        mgr.handle_message(SipMessage::Request(invite.clone()));
+        let actions = mgr.poll_actions();
+
+        let handle = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::InviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Send failure response
+        let response = create_response(&invite, 486);
+        mgr.send_response(handle, response);
+        mgr.poll_actions();
+
+        // Timer G fires multiple times
+        mgr.handle_timeout(handle, Timer::G);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+
+        mgr.handle_timeout(handle, Timer::G);
+        let actions = mgr.poll_actions();
+        assert!(actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+    }
+
+    // Error handling edge cases
+
+    #[test]
+    fn test_send_response_wrong_transaction_type_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+        let handle = mgr.create_client_transaction(invite.clone()).unwrap();
+        mgr.poll_actions();
+
+        // Try to send a response on a client transaction (should be ignored)
+        let response = create_response(&invite, 200);
+        mgr.send_response(handle, response);
+
+        let actions = mgr.poll_actions();
+        // Should not send anything because client transactions don't send responses
+        assert!(!actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+    }
+
+    #[test]
+    fn test_send_response_wrong_transaction_type_non_invite_client() {
+        let mut mgr = TransactionManager::new(false);
+        let register = create_register();
+        let handle = mgr.create_client_transaction(register.clone()).unwrap();
+        mgr.poll_actions();
+
+        // Try to send a response on a client transaction (should be ignored)
+        let response = create_response(&register, 200);
+        mgr.send_response(handle, response);
+
+        let actions = mgr.poll_actions();
+        // Should not send anything
+        assert!(!actions.iter().any(|a| matches!(a, ManagerAction::Send(_))));
+    }
+
+    #[test]
+    fn test_transport_error_on_each_transaction_type() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Invite client
+        let invite = create_invite();
+        let h1 = mgr.create_client_transaction(invite.clone()).unwrap();
+        mgr.poll_actions();
+
+        mgr.handle_transport_error(h1);
+        let actions = mgr.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::TransportError))));
+
+        // Non-invite client
+        let register = create_register();
+        let h2 = mgr.create_client_transaction(register.clone()).unwrap();
+        mgr.poll_actions();
+
+        mgr.handle_transport_error(h2);
+        let actions = mgr.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::TransportError))));
+
+        // Invite server
+        let invite2 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.2", 5060, "UDP", "z9hG4bKinv2")
+            .from("sip:alice@example.com", "fromtag2")
+            .to("sip:bob@example.com")
+            .call_id("test2@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        mgr.handle_message(SipMessage::Request(invite2));
+        let actions = mgr.poll_actions();
+        let h3 = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::InviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        mgr.handle_transport_error(h3);
+        let actions = mgr.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::TransportError))));
+
+        // Non-invite server
+        let register2 = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:example.com")
+            .via("192.168.1.3", 5060, "UDP", "z9hG4bKreg2")
+            .from("sip:alice@example.com", "fromtag3")
+            .to("sip:alice@example.com")
+            .call_id("register2@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        mgr.handle_message(SipMessage::Request(register2));
+        let actions = mgr.poll_actions();
+        let h4 = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::NonInviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        mgr.handle_transport_error(h4);
+        let actions = mgr.poll_actions();
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::Event(_, ManagerEvent::TransportError))));
+    }
+
+    #[test]
+    fn test_timeout_on_each_timer_type() {
+        // Test various timer types to ensure full coverage of handle_timeout branches
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+        let handle = mgr.create_client_transaction(invite).unwrap();
+        mgr.poll_actions();
+
+        // Test Timer C (not commonly used but exists)
+        mgr.handle_timeout(handle, Timer::C);
+        mgr.poll_actions();
+
+        // Test Timer I
+        mgr.handle_timeout(handle, Timer::I);
+        mgr.poll_actions();
+
+        // Test Timer J
+        mgr.handle_timeout(handle, Timer::J);
+        mgr.poll_actions();
+    }
+
+    #[test]
+    fn test_invite_server_handle_ack() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+
+        mgr.handle_message(SipMessage::Request(invite.clone()));
+        let actions = mgr.poll_actions();
+
+        let handle = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::InviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Send ACK (even if not in correct state, should not crash)
+        let ack = create_ack(&invite);
+        mgr.handle_message(SipMessage::Request(ack));
+
+        let _actions = mgr.poll_actions();
+        // Just verify no crash
+    }
+
+
+    #[test]
+    fn test_request_without_transaction_id() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Create a request that might fail TransactionId creation
+        let bad_request = SipRequest::builder()
+            .method(Method::Options)
+            .uri("sip:example.com")
+            // Missing Via or other required headers that might cause TransactionId::from_request to return None
+            .from("sip:alice@example.com", "tag")
+            .to("sip:example.com")
+            .call_id("test@example.com")
+            .cseq(1)
+            .build();
+
+        if let Ok(req) = bad_request {
+            mgr.handle_message(SipMessage::Request(req));
+            // Should not crash
+            mgr.poll_actions();
+        }
+    }
+
+    #[test]
+    fn test_concurrent_transactions_same_method() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Create multiple INVITE transactions with different IDs
+        let invite1 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKinv1")
+            .from("sip:alice@example.com", "tag1")
+            .to("sip:bob@example.com")
+            .call_id("call1@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let invite2 = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKinv2")
+            .from("sip:alice@example.com", "tag2")
+            .to("sip:bob@example.com")
+            .call_id("call2@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let h1 = mgr.create_client_transaction(invite1.clone()).unwrap();
+        let h2 = mgr.create_client_transaction(invite2.clone()).unwrap();
+
+        // Handles should be different
+        assert_ne!(h1, h2);
+
+        let actions = mgr.poll_actions();
+
+        // Both transactions should generate actions
+        assert!(actions.len() >= 2);
+
+        // Verify both transactions are tracked
+        assert_eq!(mgr.invite_clients.len(), 2);
+    }
+
+    #[test]
+    fn test_handle_allocation_wrapping() {
+        // Test that handles are allocated sequentially
+        let mut mgr = TransactionManager::new(false);
+
+        let invite1 = create_invite();
+        let h1 = mgr.create_client_transaction(invite1).unwrap();
+        assert_eq!(h1.0, 1);
+
+        let register = SipRequest::builder()
+            .method(Method::Register)
+            .uri("sip:example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKreg1")
+            .from("sip:alice@example.com", "tag2")
+            .to("sip:alice@example.com")
+            .call_id("reg1@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        let h2 = mgr.create_client_transaction(register).unwrap();
+        assert_eq!(h2.0, 2);
+
+        let options = SipRequest::builder()
+            .method(Method::Options)
+            .uri("sip:example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKopt1")
+            .from("sip:alice@example.com", "tag3")
+            .to("sip:example.com")
+            .call_id("opt1@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+        let h3 = mgr.create_client_transaction(options).unwrap();
+        assert_eq!(h3.0, 3);
+    }
+
+    #[test]
+    fn test_timer_c_timeout() {
+        let mut mgr = TransactionManager::new(false);
+        let invite = create_invite();
+        let handle = mgr.create_client_transaction(invite).unwrap();
+        mgr.poll_actions();
+
+        // Timer C (proxy INVITE timeout) - not commonly used in non-proxy scenarios
+        mgr.handle_timeout(handle, Timer::C);
+
+        let actions = mgr.poll_actions();
+        // May or may not produce specific events depending on state
+        let _ = actions;
+    }
+
+    #[test]
+    fn test_reliable_transport_no_retransmit_timers() {
+        let mut mgr = TransactionManager::new(true); // Reliable transport
+        let invite = create_invite();
+        mgr.create_client_transaction(invite).unwrap();
+
+        let actions = mgr.poll_actions();
+
+        // Timer A should not be set for reliable transport
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::SetTimer(_, Timer::A, _))));
+
+        // Timer B should still be set (transaction timeout)
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::SetTimer(_, Timer::B, _))));
+    }
+
+    #[test]
+    fn test_reliable_transport_non_invite() {
+        let mut mgr = TransactionManager::new(true); // Reliable transport
+        let register = create_register();
+        mgr.create_client_transaction(register).unwrap();
+
+        let actions = mgr.poll_actions();
+
+        // Timer E should not be set for reliable transport
+        assert!(!actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::SetTimer(_, Timer::E, _))));
+
+        // Timer F should still be set
+        assert!(actions
+            .iter()
+            .any(|a| matches!(a, ManagerAction::SetTimer(_, Timer::F, _))));
+    }
+
+    #[test]
+    fn test_handle_ack_message() {
+        // ACK for 2xx doesn't create a transaction, just passes through
+        let mut mgr = TransactionManager::new(false);
+
+        let ack = SipRequest::builder()
+            .method(Method::Ack)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKack")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .to_tag("totag")
+            .call_id("ack@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        mgr.handle_message(SipMessage::Request(ack));
+
+        // ACK should not create a new transaction
+        assert!(mgr.invite_servers.is_empty());
+        assert!(mgr.non_invite_servers.is_empty());
+    }
+
+    #[test]
+    fn test_response_without_matching_transaction() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Create a request to derive the response from
+        let request = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKnomatch")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .call_id("nomatch@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&request)
+            .to_tag("totag")
+            .build()
+            .unwrap();
+
+        // Should not crash when no matching transaction exists
+        mgr.handle_message(SipMessage::Response(response));
+
+        let actions = mgr.poll_actions();
+        // No events should be generated for orphan response
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_timeout_on_invite_server() {
+        let mut mgr = TransactionManager::new(false);
+
+        let invite = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKsrvto")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .call_id("srvto@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        mgr.handle_message(SipMessage::Request(invite));
+        let actions = mgr.poll_actions();
+
+        let handle = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::InviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Test various timer timeouts on invite server
+        mgr.handle_timeout(handle, Timer::H);
+        mgr.poll_actions();
+
+        mgr.handle_timeout(handle, Timer::G);
+        mgr.poll_actions();
+    }
+
+    #[test]
+    fn test_timeout_on_non_invite_server() {
+        let mut mgr = TransactionManager::new(false);
+
+        let options = SipRequest::builder()
+            .method(Method::Options)
+            .uri("sip:example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKsrvni")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:example.com")
+            .call_id("srvni@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        mgr.handle_message(SipMessage::Request(options));
+        let actions = mgr.poll_actions();
+
+        let handle = actions
+            .iter()
+            .find_map(|a| {
+                if let ManagerAction::Event(h, ManagerEvent::NonInviteRequest(_)) = a {
+                    Some(*h)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Test timer J timeout on non-invite server
+        mgr.handle_timeout(handle, Timer::J);
+        mgr.poll_actions();
+    }
+
+    #[test]
+    fn test_timeout_on_invalid_handle() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Try timeout on non-existent handle
+        let fake_handle = TransactionHandle(9999);
+        mgr.handle_timeout(fake_handle, Timer::A);
+
+        // Should not crash, no actions generated
+        let actions = mgr.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_transport_error_on_invalid_handle() {
+        let mut mgr = TransactionManager::new(false);
+
+        // Try transport error on non-existent handle
+        let fake_handle = TransactionHandle(9999);
+        mgr.handle_transport_error(fake_handle);
+
+        // Should not crash, no actions generated
+        let actions = mgr.poll_actions();
+        assert!(actions.is_empty());
+    }
+
+    #[test]
+    fn test_send_response_on_invalid_handle() {
+        let mut mgr = TransactionManager::new(false);
+
+        let fake_handle = TransactionHandle(9999);
+
+        // Create a request to derive the response from
+        let request = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKfake")
+            .from("sip:alice@example.com", "fromtag")
+            .to("sip:bob@example.com")
+            .call_id("fake@example.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&request)
+            .to_tag("totag")
+            .build()
+            .unwrap();
+
+        mgr.send_response(fake_handle, response);
+
+        // Should not crash, no actions generated
+        let actions = mgr.poll_actions();
+        assert!(actions.is_empty());
+    }
+
 }

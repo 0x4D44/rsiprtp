@@ -522,7 +522,12 @@ mod tests {
     #[test]
     fn test_dialog_info_from_invite_uas() {
         let invite = create_invite();
-        let info = DialogInfo::from_invite_uas(&invite, "mytag", "sip:me@192.168.1.2:5060", DialogState::Early);
+        let info = DialogInfo::from_invite_uas(
+            &invite,
+            "mytag",
+            "sip:me@192.168.1.2:5060",
+            DialogState::Early,
+        );
 
         assert!(info.is_some());
         let info = info.unwrap();
@@ -558,7 +563,13 @@ mod tests {
     #[test]
     fn test_dialog_info_secure_transport_udp() {
         let invite = create_invite(); // Uses UDP
-        let info = DialogInfo::from_invite_uas(&invite, "mytag", "sip:me@192.168.1.2:5060", DialogState::Early).unwrap();
+        let info = DialogInfo::from_invite_uas(
+            &invite,
+            "mytag",
+            "sip:me@192.168.1.2:5060",
+            DialogState::Early,
+        )
+        .unwrap();
         assert!(!info.secure);
     }
 
@@ -566,7 +577,8 @@ mod tests {
     fn test_dialog_info_clone() {
         let invite = create_invite();
         let response = create_response(&invite);
-        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed).unwrap();
+        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed)
+            .unwrap();
         let cloned = info.clone();
 
         assert_eq!(cloned.id.call_id, info.id.call_id);
@@ -579,7 +591,8 @@ mod tests {
     fn test_dialog_info_debug() {
         let invite = create_invite();
         let response = create_response(&invite);
-        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed).unwrap();
+        let info = DialogInfo::from_invite_response_uac(&invite, &response, DialogState::Confirmed)
+            .unwrap();
         let debug = format!("{:?}", info);
         assert!(debug.contains("DialogInfo"));
     }

@@ -851,11 +851,19 @@ mod tests {
 
         // Very high threshold should not detect as speaking
         detector.set_threshold(0.5);
-        assert!(!detector.is_speaking(1), "Energy {} should be below 0.5", energy);
+        assert!(
+            !detector.is_speaking(1),
+            "Energy {} should be below 0.5",
+            energy
+        );
 
         // Very low threshold should detect as speaking
         detector.set_threshold(0.001);
-        assert!(detector.is_speaking(1), "Energy {} should be above 0.001", energy);
+        assert!(
+            detector.is_speaking(1),
+            "Energy {} should be above 0.001",
+            energy
+        );
     }
 
     #[test]

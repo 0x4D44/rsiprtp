@@ -680,7 +680,9 @@ mod tests {
 
     #[test]
     fn test_generate_dtmf_all_digits() {
-        let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '#', 'A', 'B', 'C', 'D'];
+        let digits = [
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '#', 'A', 'B', 'C', 'D',
+        ];
         for digit in digits {
             let tone = generate_dtmf_tone(digit, 50, 8000);
             assert_eq!(tone.len(), 400); // 50ms at 8kHz

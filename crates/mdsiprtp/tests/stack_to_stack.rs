@@ -109,8 +109,15 @@ async fn test_basic_call_flow() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    debug_println!("Final: alice_established={}, bob_established={}", alice_established, bob_established);
-    assert!(alice_established && bob_established, "Call should be established on both sides");
+    debug_println!(
+        "Final: alice_established={}, bob_established={}",
+        alice_established,
+        bob_established
+    );
+    assert!(
+        alice_established && bob_established,
+        "Call should be established on both sides"
+    );
 
     // Alice hangs up
     debug_println!("Alice hanging up...");

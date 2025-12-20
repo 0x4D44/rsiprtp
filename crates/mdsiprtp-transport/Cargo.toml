@@ -22,3 +22,7 @@ webpki-roots.workspace = true
 
 # DNS
 hickory-resolver = "0.24"
+
+[dev-dependencies]
+rcgen = "0.13"
+tempfile = "3"

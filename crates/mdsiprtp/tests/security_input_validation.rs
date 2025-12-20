@@ -189,17 +189,20 @@ Content-Length: 10\r\n";
         let mut msg = b"INVITE sip:bob@biloxi.com SIP/2.0\r\n\
 Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
 Max-Forwards: 70\r\n\
-To: ".to_vec();
+To: "
+            .to_vec();
 
         // Add invalid UTF-8 sequence
         msg.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
 
-        msg.extend_from_slice(b" <sip:bob@biloxi.com>\r\n\
+        msg.extend_from_slice(
+            b" <sip:bob@biloxi.com>\r\n\
 From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
 Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
 CSeq: 314159 INVITE\r\n\
 Content-Length: 0\r\n\
-\r\n");
+\r\n",
+        );
 
         let result = SipMessage::parse(&msg);
         // Should handle invalid UTF-8 gracefully
@@ -364,8 +367,7 @@ mod rtp_security {
     fn test_rtp_invalid_version() {
         let data = [
             0xC0, // V=3 (invalid)
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, 0xaa,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30, 0x39, 0xaa,
         ];
         let result = RtpPacket::parse(&data);
         assert!(matches!(result, Err(RtpParseError::InvalidVersion(_))));
@@ -376,9 +378,9 @@ mod rtp_security {
     fn test_rtp_excessive_csrc() {
         let data = [
             0x8F, // V=2, CC=15 (max)
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // SSRC
-            // Missing CSRC data (should be 15 * 4 = 60 bytes)
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30,
+            0x39, // SSRC
+                  // Missing CSRC data (should be 15 * 4 = 60 bytes)
         ];
         let result = RtpPacket::parse(&data);
         assert!(result.is_err());
@@ -389,10 +391,9 @@ mod rtp_security {
     fn test_rtp_malformed_extension() {
         let data = [
             0x90, // V=2, X=1 (extension present)
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // SSRC
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30, 0x39, // SSRC
             0xAB, 0xCD, // Extension profile
-            // Missing extension length
+                  // Missing extension length
         ];
         let result = RtpPacket::parse(&data);
         assert!(matches!(result, Err(RtpParseError::ExtensionTruncated)));
@@ -403,8 +404,7 @@ mod rtp_security {
     fn test_rtp_invalid_padding() {
         let data = [
             0xA0, // V=2, P=1 (padding)
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // SSRC
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30, 0x39, // SSRC
             0xaa, 0xFF, // Last byte claims 255 bytes padding (more than packet size)
         ];
         let result = RtpPacket::parse(&data);
@@ -425,8 +425,8 @@ mod rtp_security {
     fn test_rtp_max_size() {
         let mut data = vec![
             0x80, // V=2, P=0, X=0, CC=0
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // SSRC (12 bytes header)
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30,
+            0x39, // SSRC (12 bytes header)
         ];
 
         // Add large payload (MTU - header)
@@ -444,8 +444,7 @@ mod rtp_security {
     fn test_rtp_extension_length_overflow() {
         let data = [
             0x90, // V=2, X=1
-            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // SSRC
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30, 0x39, // SSRC
             0xAB, 0xCD, // Extension profile
             0xFF, 0xFF, // Extension length = 65535 * 4 bytes (way too large)
         ];
@@ -461,8 +460,8 @@ mod boundary_conditions {
     #[test]
     fn test_exact_boundary_rtp() {
         let data = [
-            0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, 0x39, // Exactly 12 bytes (minimal header)
+            0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30,
+            0x39, // Exactly 12 bytes (minimal header)
         ];
         let result = RtpPacket::parse(&data);
         assert!(result.is_ok());
@@ -475,8 +474,8 @@ mod boundary_conditions {
     #[test]
     fn test_off_by_one_rtp() {
         let data = [
-            0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0,
-            0x00, 0x00, 0x30, // 11 bytes (1 byte short)
+            0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00,
+            0x30, // 11 bytes (1 byte short)
         ];
         let result = RtpPacket::parse(&data);
         assert!(matches!(result, Err(RtpParseError::TooShort(_))));

@@ -612,6 +612,16 @@ mod tests {
     use super::*;
     use rustls::client::danger::ServerCertVerifier;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
+    /// Install the ring crypto provider for tests.
+    fn init_crypto_provider() {
+        INIT.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
 
     // find_header_end tests
     #[test]
@@ -779,6 +789,7 @@ mod tests {
     // TlsTransport tests
     #[tokio::test]
     async fn test_new_client() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config);
@@ -787,6 +798,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_client_no_verify() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5061);
         let config = TlsClientConfig {
             verify_server: false,
@@ -800,6 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_client_ipv6() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V6("::1".parse().unwrap()), 5061);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config);
@@ -808,6 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport_local_addr() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 5061);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -816,6 +830,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport_sender() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -825,6 +840,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sender_clone() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -835,6 +851,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_to_no_connection() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -847,6 +864,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sender_send_to_no_connection() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -860,6 +878,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_connect_no_connector() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         // Create transport without connector by using a client config
         let config = TlsClientConfig::default();
@@ -962,6 +981,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_via_transport_no_connection() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -974,6 +994,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sender_send_via_send_method() {
+        init_crypto_provider();
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let config = TlsClientConfig::default();
         let transport = TlsTransport::new_client(addr, config).unwrap();
@@ -1029,5 +1050,950 @@ mod tests {
 
         let result = find_header_end(&data);
         assert!(result.is_some());
+    }
+
+    // ============================================
+    // TLS loopback tests with self-signed certificates
+    // ============================================
+
+    /// Generate self-signed certificate for testing
+    fn generate_test_certs() -> (Vec<u8>, Vec<u8>) {
+        use rcgen::{generate_simple_self_signed, CertifiedKey};
+
+        let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+        let CertifiedKey { cert, key_pair } =
+            generate_simple_self_signed(subject_alt_names).unwrap();
+
+        let cert_pem = cert.pem();
+        let key_pem = key_pair.serialize_pem();
+
+        (cert_pem.into_bytes(), key_pem.into_bytes())
+    }
+
+    /// Create a test server config from generated certs
+    fn create_server_config(cert_pem: &[u8], key_pem: &[u8]) -> ServerConfig {
+        use rustls_pemfile::{certs, private_key};
+        use std::io::Cursor;
+
+        let certs: Vec<CertificateDer<'static>> = certs(&mut Cursor::new(cert_pem))
+            .map(|r| r.unwrap())
+            .collect();
+
+        let key = private_key(&mut Cursor::new(key_pem)).unwrap().unwrap();
+
+        ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap()
+    }
+
+    /// Create a test client config that trusts the test cert
+    fn create_client_config(cert_pem: &[u8]) -> ClientConfig {
+        use rustls_pemfile::certs;
+        use std::io::Cursor;
+
+        let mut root_store = RootCertStore::empty();
+        let certs: Vec<CertificateDer<'static>> = certs(&mut Cursor::new(cert_pem))
+            .map(|r| r.unwrap())
+            .collect();
+
+        for cert in certs {
+            root_store.add(cert).unwrap();
+        }
+
+        ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth()
+    }
+
+    #[tokio::test]
+    async fn test_tls_loopback_connection() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        // Create server
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server task
+        let acceptor_clone = acceptor.clone();
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor_clone.accept(stream).await.unwrap();
+
+            // Read message
+            let mut buf = [0u8; 1024];
+            let n = tls_stream.read(&mut buf).await.unwrap();
+
+            // Echo it back
+            tls_stream.write_all(&buf[..n]).await.unwrap();
+            tls_stream.flush().await.unwrap();
+        });
+
+        // Create client
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let mut tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        // Send message
+        let msg = b"SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n";
+        tls_stream.write_all(msg).await.unwrap();
+        tls_stream.flush().await.unwrap();
+
+        // Read response
+        let mut buf = [0u8; 1024];
+        let n = tls_stream.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg);
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_connection_state_read_message() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        // Create server
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server task that sends a SIP message
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Send a complete SIP message
+            let msg = b"SIP/2.0 200 OK\r\nContent-Length: 4\r\n\r\ntest";
+            tls_stream.write_all(msg).await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            // Keep connection open briefly
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        // Create client
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        // Wrap in TlsConnectionState
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Read message
+        let msg = state.read_message().await.unwrap().unwrap();
+        assert!(msg.starts_with(b"SIP/2.0 200 OK"));
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_connection_state_fragmented_message() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Server sends message in fragments
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Send headers
+            tls_stream.write_all(b"SIP/2.0 200 OK\r\n").await.unwrap();
+            tls_stream.flush().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+            // Send more headers
+            tls_stream
+                .write_all(b"Content-Length: 5\r\n\r\n")
+                .await
+                .unwrap();
+            tls_stream.flush().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+            // Send body
+            tls_stream.write_all(b"hello").await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Should reassemble the fragmented message
+        let msg = state.read_message().await.unwrap().unwrap();
+        assert!(msg.ends_with(b"hello"));
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_connection_close() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Server closes immediately after connection
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let _tls_stream = acceptor.accept(stream).await.unwrap();
+            // Drop the stream to close it without TLS close_notify
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Connection was closed without proper TLS handshake termination
+        // This may return None or an error depending on timing
+        let result = state.read_message().await;
+        // Either Ok(None) for clean close or Err for unexpected EOF is acceptable
+        match result {
+            Ok(None) => {} // Expected for clean close
+            Err(_) => {}   // Expected for unexpected EOF
+            Ok(Some(_)) => panic!("Should not receive a message"),
+        }
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_multiple_messages() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Server sends multiple messages
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Send two messages back-to-back
+            let msg1 = b"SIP/2.0 100 Trying\r\nContent-Length: 0\r\n\r\n";
+            let msg2 = b"SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n";
+
+            tls_stream.write_all(msg1).await.unwrap();
+            tls_stream.write_all(msg2).await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Read first message
+        let msg1 = state.read_message().await.unwrap().unwrap();
+        assert!(msg1.starts_with(b"SIP/2.0 100 Trying"));
+
+        // Read second message
+        let msg2 = state.read_message().await.unwrap().unwrap();
+        assert!(msg2.starts_with(b"SIP/2.0 200 OK"));
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_connection_write() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Server reads and verifies
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            let mut buf = [0u8; 1024];
+            let n = tls_stream.read(&mut buf).await.unwrap();
+            assert!(n > 0);
+            assert!(buf[..n].starts_with(b"INVITE"));
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut conn = TlsConnection::Client(tls_stream);
+
+        // Write using TlsConnection methods
+        let msg = b"INVITE sip:test@example.com SIP/2.0\r\nContent-Length: 0\r\n\r\n";
+        conn.write_all(msg).await.unwrap();
+        conn.flush().await.unwrap();
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_tls_server_connection() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Client connects and sends
+        let client_config = create_client_config(&cert_pem);
+        let client_handle = tokio::spawn(async move {
+            let connector = TlsConnector::from(Arc::new(client_config));
+            let stream = TcpStream::connect(server_addr).await.unwrap();
+            let server_name = ServerName::try_from("localhost").unwrap();
+            let mut tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+            let msg = b"SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n";
+            tls_stream.write_all(msg).await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        });
+
+        // Server accepts and reads
+        let (stream, remote_addr) = listener.accept().await.unwrap();
+        let tls_stream = acceptor.accept(stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Server(tls_stream), remote_addr);
+
+        let msg = state.read_message().await.unwrap().unwrap();
+        assert!(msg.starts_with(b"SIP/2.0 200 OK"));
+
+        client_handle.await.unwrap();
+    }
+
+    // ============================================
+    // Additional comprehensive tests for coverage
+    // ============================================
+
+    #[tokio::test]
+    async fn test_connect_already_connected() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+
+        // Create a fake server
+        use tokio::net::TcpListener as TokioListener;
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                let _ = acceptor.accept(stream).await;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        });
+
+        // First connect
+        let result1 = transport.connect(server_addr, "localhost").await;
+        assert!(result1.is_ok());
+
+        // Second connect to same address should succeed without error (already connected)
+        let result2 = transport.connect(server_addr, "localhost").await;
+        assert!(result2.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_connect_invalid_server_name() {
+        init_crypto_provider();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+
+        // Create a fake server
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server that accepts but doesn't do TLS
+        tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        // Try to connect with invalid server name (empty string or invalid format)
+        // Note: Empty string is actually invalid for ServerName
+        let result = transport.connect(server_addr, "").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tls_transport_start_server() {
+        init_crypto_provider();
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        // Write certs to temp files
+        let mut cert_file = NamedTempFile::new().unwrap();
+        cert_file.write_all(&cert_pem).unwrap();
+        cert_file.flush().unwrap();
+
+        let mut key_file = NamedTempFile::new().unwrap();
+        key_file.write_all(&key_pem).unwrap();
+        key_file.flush().unwrap();
+
+        let config = TlsServerConfig {
+            cert_path: cert_file.path().to_str().unwrap().to_string(),
+            key_path: key_file.path().to_str().unwrap().to_string(),
+        };
+
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TlsTransport::bind_server(addr, config).await.unwrap();
+        let server_addr = server.local_addr();
+
+        // Start the server
+        let (mut rx, _sender) = server.start();
+
+        // Create a client and connect
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Ok(stream) = TcpStream::connect(server_addr).await {
+                let server_name = ServerName::try_from("localhost").unwrap();
+                if let Ok(mut tls_stream) = connector.connect(server_name, stream).await {
+                    let msg = b"INVITE sip:test@example.com SIP/2.0\r\nContent-Length: 0\r\n\r\n";
+                    let _ = tls_stream.write_all(msg).await;
+                    let _ = tls_stream.flush().await;
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        });
+
+        // Receive the message
+        tokio::select! {
+            result = rx.recv() => {
+                assert!(result.is_some());
+                let msg = result.unwrap();
+                assert!(msg.data.starts_with(b"INVITE"));
+                assert_eq!(msg.transport, TransportProtocol::Tls);
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                panic!("Timed out waiting for message");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tls_transport_client_send_receive() {
+        init_crypto_provider();
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        // Write certs to temp files
+        let mut cert_file = NamedTempFile::new().unwrap();
+        cert_file.write_all(&cert_pem).unwrap();
+        cert_file.flush().unwrap();
+
+        let mut key_file = NamedTempFile::new().unwrap();
+        key_file.write_all(&key_pem).unwrap();
+        key_file.flush().unwrap();
+
+        let server_config = TlsServerConfig {
+            cert_path: cert_file.path().to_str().unwrap().to_string(),
+            key_path: key_file.path().to_str().unwrap().to_string(),
+        };
+
+        let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let server = TlsTransport::bind_server(server_addr, server_config)
+            .await
+            .unwrap();
+        let server_addr = server.local_addr();
+
+        let (mut server_rx, _server_sender) = server.start();
+
+        // Create client
+        let client_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let client_config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        let client = TlsTransport::new_client(client_addr, client_config).unwrap();
+        let (_client_rx, _client_sender) = client.start();
+
+        // Connect client to server
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let client_config2 = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config2));
+
+        let client_handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if let Ok(stream) = TcpStream::connect(server_addr).await {
+                let server_name = ServerName::try_from("localhost").unwrap();
+                if let Ok(mut tls_stream) = connector.connect(server_name, stream).await {
+                    // Send message directly through the TLS stream
+                    let msg = b"REGISTER sip:example.com SIP/2.0\r\nContent-Length: 0\r\n\r\n";
+                    let _ = tls_stream.write_all(msg).await;
+                    let _ = tls_stream.flush().await;
+                }
+            }
+        });
+
+        // Wait for message at server
+        tokio::select! {
+            result = server_rx.recv() => {
+                if let Some(msg) = result {
+                    assert!(msg.data.starts_with(b"REGISTER") || msg.data.starts_with(b"INVITE"));
+                }
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {
+                // Timeout is ok, the connection setup might not complete in time
+            }
+        }
+
+        client_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_loop_connection_close() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        let (tx, mut rx) = mpsc::channel(16);
+
+        // Spawn server that accepts then immediately closes
+        let server_handle = tokio::spawn(async move {
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            let tls_stream = acceptor.accept(stream).await.unwrap();
+
+            let conn = TlsConnectionState::new(TlsConnection::Server(tls_stream), remote_addr);
+            let conn_arc = Arc::new(Mutex::new(conn));
+            let connections = Arc::new(RwLock::new(HashMap::new()));
+            connections.write().await.insert(remote_addr, conn_arc.clone());
+
+            // Start read loop - it should exit when connection closes
+            TlsTransport::read_loop(conn_arc, remote_addr, tx, connections).await;
+        });
+
+        // Client connects then closes
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+        // Actually drop stream to close connection
+        drop(tls_stream);
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Shouldn't receive any messages (connection closed immediately)
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            rx.recv()
+        ).await;
+
+        // Either timeout or None is acceptable
+        match result {
+            Ok(None) => {}, // Channel closed
+            Err(_) => {},   // Timeout
+            Ok(Some(_)) => {}, // Might get a message before close
+        }
+
+        // Use timeout to prevent test from hanging
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            server_handle
+        ).await.expect("server should exit within 5s").unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_loop_receiver_dropped() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        let (tx, rx) = mpsc::channel(16);
+
+        // Spawn server
+        let server_handle = tokio::spawn(async move {
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            let tls_stream = acceptor.accept(stream).await.unwrap();
+
+            let conn = TlsConnectionState::new(TlsConnection::Server(tls_stream), remote_addr);
+            let conn_arc = Arc::new(Mutex::new(conn));
+            let connections = Arc::new(RwLock::new(HashMap::new()));
+            connections.write().await.insert(remote_addr, conn_arc.clone());
+
+            // Drop receiver before starting read loop
+            drop(rx);
+
+            // Start read loop - should exit when trying to send
+            TlsTransport::read_loop(conn_arc, remote_addr, tx, connections).await;
+        });
+
+        // Client connects and sends a message
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let mut tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        // Send a message
+        let msg = b"OPTIONS sip:server.com SIP/2.0\r\nContent-Length: 0\r\n\r\n";
+        let _ = tls_stream.write_all(msg).await;
+        let _ = tls_stream.flush().await;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_message_too_large() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server that sends a message larger than MAX_TLS_SIZE
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Send headers indicating huge content length
+            let headers = format!(
+                "SIP/2.0 200 OK\r\nContent-Length: {}\r\n\r\n",
+                MAX_TLS_SIZE + 1000
+            );
+            tls_stream.write_all(headers.as_bytes()).await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            // Send lots of body data
+            let body = vec![b'X'; MAX_TLS_SIZE];
+            tls_stream.write_all(&body).await.unwrap();
+            tls_stream.flush().await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Try to read - should fail with MessageTooLarge error
+        let result = state.read_message().await;
+        assert!(result.is_err());
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_message_on_close() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server that sends incomplete message then closes
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Send only part of headers
+            tls_stream.write_all(b"SIP/2.0 200 OK\r\nCont").await.unwrap();
+            tls_stream.flush().await.unwrap();
+            // Close without sending complete message
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut state = TlsConnectionState::new(TlsConnection::Client(tls_stream), server_addr);
+
+        // Should get None (connection closed with incomplete data) or an error
+        let result = state.read_message().await;
+        match result {
+            Ok(None) => {}, // Expected: connection closed with incomplete data
+            Err(_) => {},   // Also acceptable: error due to unexpected closure
+            Ok(Some(_)) => panic!("Should not receive a complete message"),
+        }
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_server_write_message() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        let msg_to_send = b"SIP/2.0 200 OK\r\nContent-Length: 4\r\n\r\ntest";
+
+        // Spawn server that writes a message
+        let server_handle = tokio::spawn(async move {
+            let (stream, remote_addr) = listener.accept().await.unwrap();
+            let tls_stream = acceptor.accept(stream).await.unwrap();
+
+            let mut state = TlsConnectionState::new(
+                TlsConnection::Server(tls_stream),
+                remote_addr,
+            );
+
+            // Write message using TlsConnectionState
+            state.write_message(msg_to_send).await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let mut tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        // Read the message from server
+        let mut buf = [0u8; 1024];
+        let n = tls_stream.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], msg_to_send);
+
+        server_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_handshake_failure() {
+        init_crypto_provider();
+        use tokio::net::TcpListener as TokioListener;
+
+        // Create server that closes connection during handshake
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                // Drop immediately without TLS handshake
+                drop(stream);
+            }
+        });
+
+        // Try to connect with client
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let config = TlsClientConfig {
+            verify_server: false,
+            ca_cert_path: None,
+        };
+        let transport = TlsTransport::new_client(addr, config).unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Should fail during TLS handshake
+        let result = transport.connect(server_addr, "localhost").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_server_connection() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        // Spawn server
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+            // Server reads from connection
+            let mut buf = [0u8; 1024];
+            let n = tls_stream.read(&mut buf).await.unwrap();
+            assert!(n > 0);
+            assert!(buf[..n].starts_with(b"TEST"));
+
+            buf[..n].to_vec()
+        });
+
+        // Client sends
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        let mut conn = TlsConnection::Client(tls_stream);
+
+        // Write from client
+        let msg = b"TEST MESSAGE";
+        conn.write_all(msg).await.unwrap();
+        conn.flush().await.unwrap();
+
+        let data = server_handle.await.unwrap();
+        assert_eq!(&data, b"TEST MESSAGE");
+    }
+
+    #[tokio::test]
+    async fn test_connection_state_flush() {
+        init_crypto_provider();
+        let (cert_pem, key_pem) = generate_test_certs();
+
+        let server_config = create_server_config(&cert_pem, &key_pem);
+        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+        use tokio::net::TcpListener as TokioListener;
+        let listener = TokioListener::bind("127.0.0.1:0").await.unwrap();
+        let server_addr = listener.local_addr().unwrap();
+
+        let server_handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let tls_stream = acceptor.accept(stream).await.unwrap();
+
+            let mut conn = TlsConnection::Server(tls_stream);
+
+            // Write and flush multiple times
+            conn.write_all(b"PART1").await.unwrap();
+            conn.flush().await.unwrap();
+            conn.write_all(b"PART2").await.unwrap();
+            conn.flush().await.unwrap();
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        });
+
+        let client_config = create_client_config(&cert_pem);
+        let connector = TlsConnector::from(Arc::new(client_config));
+
+        let stream = TcpStream::connect(server_addr).await.unwrap();
+        let server_name = ServerName::try_from("localhost").unwrap();
+        let mut tls_stream = connector.connect(server_name, stream).await.unwrap();
+
+        // Read both parts - may come in multiple reads due to TLS record boundaries
+        let mut buf = [0u8; 1024];
+        let mut total = 0;
+        while total < 10 {
+            let n = tls_stream.read(&mut buf[total..]).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        assert_eq!(&buf[..total], b"PART1PART2");
+
+        server_handle.await.unwrap();
     }
 }

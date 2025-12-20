@@ -574,4 +574,121 @@ mod tests {
         assert!(!constant_time_compare(&a, &c));
         assert!(!constant_time_compare(&a, &[1, 2, 3])); // Different length
     }
+
+    #[test]
+    fn test_estimate_roc_more_cases() {
+        // s_l < 0x8000, seq > s_l, difference > 0x8000 (wraparound backward)
+        assert_eq!(estimate_roc(5, 0x1000, 0xF000), 4);
+
+        // s_l < 0x8000, normal increment
+        assert_eq!(estimate_roc(3, 0x1000, 0x1001), 3);
+
+        // s_l >= 0x8000, seq < s_l, difference > 0x8000 (wraparound forward)
+        assert_eq!(estimate_roc(2, 0xFFF0, 0x0010), 3);
+
+        // s_l >= 0x8000, normal case
+        assert_eq!(estimate_roc(2, 0x9000, 0x9001), 2);
+    }
+
+    #[test]
+    fn test_get_rtp_header_len_with_csrc() {
+        // RTP with 2 CSRC entries (CC=2)
+        let mut rtp = vec![0x82, 0x00, 0x00, 0x01]; // Version 2, CC=2
+        rtp.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // Timestamp
+        rtp.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // SSRC
+        rtp.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]); // CSRC 1
+        rtp.extend_from_slice(&[0x00, 0x00, 0x00, 0x03]); // CSRC 2
+        rtp.extend_from_slice(&[0x00]); // Payload
+
+        let header_len = get_rtp_header_len(&rtp).unwrap();
+        assert_eq!(header_len, 12 + 8); // 12 base + 2*4 CSRC
+    }
+
+    #[test]
+    fn test_get_rtp_header_len_too_short_for_extension() {
+        // RTP with extension flag set but not enough data
+        let rtp = vec![0x90, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+        // Only 12 bytes, needs 4 more for extension header
+
+        let result = get_rtp_header_len(&rtp);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_srtp_protect_short_packet() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let mut ctx =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Too short packet
+        let short_rtp = [0u8; 8];
+        assert!(ctx.protect(&short_rtp).is_err());
+    }
+
+    #[test]
+    fn test_srtp_unprotect_short_packet() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let mut ctx =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Too short packet
+        let short_srtp = [0u8; 16];
+        assert!(ctx.unprotect(&short_srtp).is_err());
+    }
+
+    #[test]
+    fn test_srtcp_protect_short_packet() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let mut ctx =
+            SrtcpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Too short packet
+        let short_rtcp = [0u8; 4];
+        assert!(ctx.protect(&short_rtcp).is_err());
+    }
+
+    #[test]
+    fn test_srtcp_unprotect_short_packet() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let mut ctx =
+            SrtcpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Too short packet
+        let short_srtcp = [0u8; 10];
+        assert!(ctx.unprotect(&short_srtcp).is_err());
+    }
+
+    #[test]
+    fn test_srtp_auth_failure() {
+        let master_key = [0u8; 16];
+        let master_salt = [0u8; 14];
+
+        let mut ctx =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Create valid RTP packet
+        let rtp = make_test_rtp();
+
+        // Protect it
+        let srtp = ctx.protect(&rtp).unwrap();
+
+        // Create new context for unprotect
+        let mut ctx2 =
+            SrtpContext::new(CryptoSuite::AesCm128HmacSha1_80, &master_key, &master_salt).unwrap();
+
+        // Tamper with the packet
+        let mut tampered = srtp.to_vec();
+        tampered[12] ^= 0xFF;
+
+        // Should fail auth
+        assert!(ctx2.unprotect(&tampered).is_err());
+    }
 }

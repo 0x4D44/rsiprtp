@@ -44,7 +44,7 @@ fi
 # ============================================
 # Vosk Library
 # ============================================
-VOSK_LIB_VERSION="0.3.50"
+VOSK_LIB_VERSION="0.3.45"
 
 if ! ldconfig -p | grep -q libvosk; then
     echo ""

@@ -182,6 +182,9 @@ mod tests {
         let speech: Vec<i16> = (0..160)
             .map(|i| ((i as f32 * 0.1).sin() * 5000.0) as i16)
             .collect();
-        assert_eq!(vad.process(&speech, Some("hello")), VadDecision::SpeechStart);
+        assert_eq!(
+            vad.process(&speech, Some("hello")),
+            VadDecision::SpeechStart
+        );
     }
 }

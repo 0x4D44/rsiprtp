@@ -4,16 +4,16 @@
 //! and transport layers using the transaction state machines.
 
 use mdsiprtp::sip::{Method, SipRequest, SipResponse};
-use mdsiprtp::transaction::{
-    InviteClientTransaction, InviteServerTransaction,
-    NonInviteClientTransaction, NonInviteServerTransaction,
-};
 use mdsiprtp::transaction::client::invite::{
     Action as InviteClientAction, State as InviteClientState,
 };
-use mdsiprtp::transaction::server::invite::State as InviteServerState;
 use mdsiprtp::transaction::client::non_invite::State as NonInviteClientState;
+use mdsiprtp::transaction::server::invite::State as InviteServerState;
 use mdsiprtp::transaction::server::non_invite::State as NonInviteServerState;
+use mdsiprtp::transaction::{
+    InviteClientTransaction, InviteServerTransaction, NonInviteClientTransaction,
+    NonInviteServerTransaction,
+};
 
 // Helper functions
 fn create_invite() -> SipRequest {
@@ -92,8 +92,13 @@ fn test_invite_rejection_486_busy() {
 
     // Poll for ACK generation
     let actions = tx.poll_actions();
-    let has_send_ack = actions.iter().any(|a| matches!(a, InviteClientAction::Send(_)));
-    assert!(has_send_ack, "Transaction should generate ACK for error response");
+    let has_send_ack = actions
+        .iter()
+        .any(|a| matches!(a, InviteClientAction::Send(_)));
+    assert!(
+        has_send_ack,
+        "Transaction should generate ACK for error response"
+    );
 }
 
 /// Test: Call rejection with 404 Not Found

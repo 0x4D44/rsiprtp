@@ -155,7 +155,12 @@ mod sip_concurrency {
                         let request = SipRequest::builder()
                             .method(Method::Invite)
                             .uri(&format!("sip:user{}@example.com", i * 50 + j))
-                            .via("192.168.1.1", 5060, "UDP", &format!("z9hG4bK{}", i * 50 + j))
+                            .via(
+                                "192.168.1.1",
+                                5060,
+                                "UDP",
+                                &format!("z9hG4bK{}", i * 50 + j),
+                            )
                             .from("sip:alice@example.com", "fromtag")
                             .to(&format!("sip:user{}@example.com", i * 50 + j))
                             .call_id(&format!("call-{}@example.com", i * 50 + j))
@@ -211,7 +216,11 @@ mod sdp_concurrency {
     /// Test concurrent SDP offer/answer creation
     #[test]
     fn test_concurrent_offer_answer() {
-        use mdsiprtp_sdp::{builder::{MediaBuilder, SdpBuilder}, negotiation::create_answer, Codec};
+        use mdsiprtp_sdp::{
+            builder::{MediaBuilder, SdpBuilder},
+            negotiation::create_answer,
+            Codec,
+        };
         use std::net::{IpAddr, Ipv4Addr};
 
         let handles: Vec<_> = (0..10)
