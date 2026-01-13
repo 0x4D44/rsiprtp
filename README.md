@@ -42,11 +42,14 @@ This repository hosts a comprehensive SIP/RTP communications stack written in Ru
 cargo build --workspace
 ```
 
-On Windows, build the library without `gabby` (which depends on `libvosk`):
+On Windows, you can either build the library without `gabby`, or install the Vosk Windows binaries and set `VOSK_LIB_DIR` to build `gabby` (see `crates/gabby/README.md`):
 
 ```bash
 cargo build -p mdsiprtp
 # or: cargo build --workspace --exclude gabby
+
+# With Vosk installed on Windows:
+# cargo build -p gabby
 ```
 
 ### Running Gabby (Voice AI Agent)

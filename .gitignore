@@ -1,1 +1,3 @@
 target/
+crates/gabby/models/
+crates/gabby/vendor/vosk/

@@ -20,13 +20,14 @@ Talk to an AI over the phone! Gabby is a voice AI application that accepts SIP p
 - Rust 1.70+
 - ~2GB disk space for models
 - 4GB+ RAM recommended
-- Linux (x86_64 or aarch64)
+- Linux (x86_64 or aarch64) recommended
+- Windows 10+ supported with Vosk prebuilt binaries
 
 ## Quick Start
 
 ### 1. Install Dependencies
 
-**Option A: Use the setup script (recommended)**
+**Option A: Use the setup script (Linux, recommended)**
 
 ```bash
 cd crates/gabby
@@ -39,7 +40,18 @@ This downloads and installs:
 - Piper TTS binary and voice model (~100MB)
 - Checks for Ollama and the llama3.2:3b model
 
-**Option B: Manual installation**
+**Option B: Windows Vosk setup**
+
+```powershell
+cd crates\gabby
+.\scripts\setup_windows.ps1
+```
+
+This downloads the Vosk model and the Windows Vosk library, and sets `VOSK_LIB_DIR`.
+Ensure the directory containing `vosk.dll` is on `PATH` when running Gabby.
+If PowerShell blocks the script, run: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
+
+**Option C: Manual installation (Linux)**
 
 Install libvosk (required for speech recognition):
 
@@ -85,6 +97,9 @@ ollama pull llama3.2:3b
 ```bash
 cargo run --release -p gabby
 ```
+
+On Windows, make sure `VOSK_LIB_DIR` points to the folder containing `libvosk.lib`
+and the directory containing `vosk.dll` is on `PATH`.
 
 You should see:
 ```
@@ -199,6 +214,10 @@ Gabby uses a hybrid VAD approach:
 ### "Failed to load Vosk model"
 - Run `./scripts/setup.sh` to download the model
 - Check the model path in config matches actual location
+
+### "LNK1181: cannot open input file 'libvosk.lib'"
+- Run `.\scripts\setup_windows.ps1` and ensure `VOSK_LIB_DIR` is set
+- Confirm `libvosk.lib` exists under the directory in `VOSK_LIB_DIR`
 
 ### "TTS unavailable"
 - Piper may not be installed
