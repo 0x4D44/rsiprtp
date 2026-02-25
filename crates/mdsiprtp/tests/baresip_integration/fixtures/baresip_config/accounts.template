@@ -1,0 +1,4 @@
+# Baresip accounts template
+# Variables to replace: {{USER}}, {{SIP_PORT}}
+
+<sip:{{USER}}@127.0.0.1:{{SIP_PORT}}>;regint=0

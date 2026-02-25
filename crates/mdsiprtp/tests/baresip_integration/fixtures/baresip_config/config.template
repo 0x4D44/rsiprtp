@@ -1,0 +1,29 @@
+# Baresip test configuration template
+# Variables to replace: {{SIP_PORT}}, {{RTP_PORT}}, {{CTRL_PORT}}
+
+poll_method        epoll
+sip_listen         127.0.0.1:{{SIP_PORT}}
+audio_player       null
+audio_source       tone
+audio_alert        null
+ausrc_srate        8000
+auplay_srate       8000
+ausrc_channels     1
+auplay_channels    1
+
+# RTP configuration
+rtp_ports          {{RTP_PORT}}-{{RTP_PORT_END}}
+
+# Modules to load
+module_path        /usr/lib/baresip/modules
+
+# Core modules
+module             stdio.so
+module             cons.so
+
+# Audio codecs
+module             g711.so
+
+# Control socket for automation
+module             ctrl_tcp.so
+ctrl_tcp_listen    127.0.0.1:{{CTRL_PORT}}

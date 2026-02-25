@@ -1,0 +1,8 @@
+# Models directory (downloaded by setup.sh)
+models/
+
+# Local configuration
+gabby.toml
+
+# Rust build artifacts (if building in-crate)
+target/
