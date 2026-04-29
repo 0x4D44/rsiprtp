@@ -97,7 +97,9 @@ impl OpusConfig {
 pub struct OpusCodec {
     encoder: Encoder,
     decoder: Decoder,
-    config: OpusConfig,
+    sample_rate: u32,
+    channels: u8,
+    frame_ms: f32,
     encode_buffer: Vec<u8>,
 }
 
@@ -122,7 +124,9 @@ impl OpusCodec {
         Ok(Self {
             encoder,
             decoder,
-            config,
+            sample_rate: config.sample_rate,
+            channels: config.channels,
+            frame_ms: config.frame_ms,
             encode_buffer: vec![0u8; OPUS_MAX_PACKET_SIZE],
         })
     }
@@ -134,17 +138,17 @@ impl OpusCodec {
 
     /// Get the sample rate.
     pub fn sample_rate(&self) -> u32 {
-        self.config.sample_rate
+        self.sample_rate
     }
 
     /// Get number of channels.
     pub fn channels(&self) -> u8 {
-        self.config.channels
+        self.channels
     }
 
     /// Get samples per frame.
     pub fn samples_per_frame(&self) -> usize {
-        self.config.samples_per_frame()
+        (self.sample_rate as f32 * self.frame_ms / 1000.0) as usize
     }
 
     /// Encode 16-bit PCM samples to Opus.
@@ -202,6 +206,8 @@ impl OpusCodec {
     }
 
     /// Set the inband FEC mode at runtime.
+    ///
+    /// Wraps ropus's `set_inband_fec`.
     pub fn set_fec(&mut self, mode: InbandFec) -> Result<(), String> {
         self.encoder
             .set_inband_fec(mode)
@@ -216,6 +222,8 @@ impl OpusCodec {
     }
 
     /// Set the expected packet-loss percentage (0..=100) used by FEC.
+    ///
+    /// Wraps ropus's `set_packet_loss_perc`.
     pub fn set_packet_loss(&mut self, pct: u8) -> Result<(), String> {
         self.encoder
             .set_packet_loss_perc(pct)
@@ -225,11 +233,6 @@ impl OpusCodec {
     /// Get the configured bitrate.
     pub fn bitrate(&self) -> Bitrate {
         self.encoder.bitrate()
-    }
-
-    /// Get the effective bitrate in bps as reported by the encoder.
-    pub fn effective_bitrate_bps(&self) -> i32 {
-        self.encoder.effective_bitrate_bps()
     }
 
     /// Get the configured inband FEC mode.
@@ -253,6 +256,11 @@ impl Default for OpusCodec {
         Self::new().expect("Failed to create default Opus codec")
     }
 }
+
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<OpusCodec>();
+};
 
 #[cfg(test)]
 mod tests {
@@ -331,17 +339,60 @@ mod tests {
     #[test]
     fn test_set_bitrate_explicit() {
         let mut codec = OpusCodec::new().unwrap();
+        let frame_len = codec.samples_per_frame();
 
         codec.set_bitrate(Bitrate::Bits(24_000)).unwrap();
         let pcm = sample_frame(&codec);
         let encoded = codec.encode(&pcm).unwrap();
         assert!(!encoded.is_empty());
+        let decoded = codec.decode(&encoded).unwrap();
+        assert_eq!(decoded.len(), frame_len);
 
         codec.set_bitrate(Bitrate::Bits(64_000)).unwrap();
         let encoded = codec.encode(&pcm).unwrap();
         assert!(!encoded.is_empty());
+        let decoded = codec.decode(&encoded).unwrap();
+        assert_eq!(decoded.len(), frame_len);
 
         assert_eq!(codec.bitrate(), Bitrate::Bits(64_000));
+    }
+
+    #[test]
+    fn test_set_bitrate_zero_rejected() {
+        let mut codec = OpusCodec::new().unwrap();
+        let err = codec
+            .set_bitrate(Bitrate::Bits(0))
+            .expect_err("zero bitrate must be rejected");
+        assert!(
+            err.contains("set_bitrate"),
+            "error message should reference set_bitrate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_set_packet_loss_out_of_range() {
+        let mut codec = OpusCodec::new().unwrap();
+        let err = codec
+            .set_packet_loss(101)
+            .expect_err("packet-loss percent above 100 must be rejected");
+        assert!(
+            err.contains("set_packet_loss"),
+            "error message should reference set_packet_loss, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_set_bitrate_huge_clamped() {
+        // Note: ropus 0.12 silently clamps bitrates above `750_000 * channels`
+        // rather than returning an error (see ropus::Bitrate docs). On a mono
+        // encoder the upper bound is 750_000 bps. We assert the actual
+        // contract — set_bitrate returns Ok and the read-back is the clamped
+        // value — so the wrapper does not paper over upstream behaviour.
+        let mut codec = OpusCodec::new().unwrap();
+        codec
+            .set_bitrate(Bitrate::Bits(10_000_000))
+            .expect("ropus clamps high bitrate rather than erroring");
+        assert_eq!(codec.bitrate(), Bitrate::Bits(750_000));
     }
 
     #[test]
