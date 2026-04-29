@@ -8,6 +8,7 @@ pub mod wav;
 // Re-export main types
 pub use codec::g711::{silence_byte, silence_frame, G711Codec, G711Variant};
 pub use codec::g722::{G722Codec, G722_PAYLOAD_TYPE, G722_RTP_RATE, G722_SAMPLE_RATE};
+pub use codec::AdaptiveBitrate;
 pub use jitter::{BufferedPacket, JitterBuffer, JitterBufferConfig, JitterStats, PlayoutDecision};
 pub use mixer::{
     auto_gain_control, is_silence, ActiveSpeakerDetector, AudioMixer, ConferenceMixer,

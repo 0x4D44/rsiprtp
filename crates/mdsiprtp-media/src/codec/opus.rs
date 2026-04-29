@@ -257,6 +257,12 @@ impl Default for OpusCodec {
     }
 }
 
+impl super::AdaptiveBitrate for OpusCodec {
+    fn set_target_bitrate_bps(&mut self, bps: u32) -> Result<(), String> {
+        self.set_bitrate(Bitrate::Bits(bps))
+    }
+}
+
 const _: fn() = || {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<OpusCodec>();
