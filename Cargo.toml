@@ -53,7 +53,7 @@ rsip = "0.4"
 # Audio codecs
 audio-codec-algorithms = "0.7"
 ezk-g722 = "0.1"
-audiopus = "0.3.0-rc.0"
+ropus = "0.11"
 
 # Audio processing
 dasp = { version = "0.11", features = ["signal", "slice", "ring_buffer"] }

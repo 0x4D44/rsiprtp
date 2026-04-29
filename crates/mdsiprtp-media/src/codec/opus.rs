@@ -6,12 +6,9 @@
 //! - Frame sizes: 2.5, 5, 10, 20, 40, 60 ms
 //! - RTP payload type: dynamic (typically 111)
 //!
-//! This implementation uses libopus via the audiopus crate.
+//! Backed by the pure-Rust `ropus` crate (bit-exact against the xiph reference).
 
-use audiopus::{
-    coder::{Decoder, Encoder},
-    Application, Channels, SampleRate,
-};
+use ropus::{Application, Bitrate, Channels, DecodeMode, Decoder, Encoder};
 
 /// Default Opus sample rate (48 kHz).
 pub const OPUS_SAMPLE_RATE: u32 = 48000;
@@ -85,16 +82,6 @@ impl OpusConfig {
         (self.sample_rate as f32 * self.frame_ms / 1000.0) as usize
     }
 
-    fn to_sample_rate(&self) -> SampleRate {
-        match self.sample_rate {
-            8000 => SampleRate::Hz8000,
-            12000 => SampleRate::Hz12000,
-            16000 => SampleRate::Hz16000,
-            24000 => SampleRate::Hz24000,
-            _ => SampleRate::Hz48000,
-        }
-    }
-
     fn to_channels(&self) -> Channels {
         if self.channels >= 2 {
             Channels::Stereo
@@ -120,14 +107,15 @@ impl OpusCodec {
 
     /// Create a new Opus codec with custom configuration.
     pub fn with_config(config: OpusConfig) -> Result<Self, String> {
-        let sample_rate = config.to_sample_rate();
         let channels = config.to_channels();
 
-        let encoder = Encoder::new(sample_rate, channels, Application::Voip)
-            .map_err(|e| format!("Failed to create Opus encoder: {}", e))?;
+        let encoder = Encoder::builder(config.sample_rate, channels, Application::Voip)
+            .bitrate(Bitrate::Bits(config.bitrate))
+            .build()
+            .map_err(|e| format!("Failed to create Opus encoder: {e:?}"))?;
 
-        let decoder = Decoder::new(sample_rate, channels)
-            .map_err(|e| format!("Failed to create Opus decoder: {}", e))?;
+        let decoder = Decoder::new(config.sample_rate, channels)
+            .map_err(|e| format!("Failed to create Opus decoder: {e:?}"))?;
 
         Ok(Self {
             encoder,
@@ -165,7 +153,7 @@ impl OpusCodec {
         let len = self
             .encoder
             .encode(pcm, &mut self.encode_buffer)
-            .map_err(|e| format!("Opus encode error: {}", e))?;
+            .map_err(|e| format!("Opus encode error: {e:?}"))?;
 
         Ok(self.encode_buffer[..len].to_vec())
     }
@@ -180,8 +168,8 @@ impl OpusCodec {
 
         let samples = self
             .decoder
-            .decode(Some(data), &mut decoded, false)
-            .map_err(|e| format!("Opus decode error: {}", e))?;
+            .decode(data, &mut decoded, DecodeMode::Normal)
+            .map_err(|e| format!("Opus decode error: {e:?}"))?;
 
         decoded.truncate(samples * self.channels() as usize);
         Ok(decoded)
@@ -194,45 +182,14 @@ impl OpusCodec {
         let frame_size = self.samples_per_frame() * self.channels() as usize;
         let mut decoded = vec![0i16; frame_size];
 
+        // ropus: an empty packet triggers PLC.
         let samples = self
             .decoder
-            .decode(None, &mut decoded, false)
-            .map_err(|e| format!("Opus PLC error: {}", e))?;
+            .decode(&[], &mut decoded, DecodeMode::Normal)
+            .map_err(|e| format!("Opus PLC error: {e:?}"))?;
 
         decoded.truncate(samples * self.channels() as usize);
         Ok(decoded)
-    }
-
-    /// Set the encoder bitrate.
-    pub fn set_bitrate(&mut self, bitrate: u32) -> Result<(), String> {
-        self.encoder
-            .set_bitrate(audiopus::Bitrate::BitsPerSecond(bitrate as i32))
-            .map_err(|e| format!("Failed to set bitrate: {}", e))
-    }
-
-    /// Enable or disable FEC (Forward Error Correction).
-    pub fn set_fec(&mut self, enabled: bool) -> Result<(), String> {
-        self.encoder
-            .set_inband_fec(enabled)
-            .map_err(|e| format!("Failed to set FEC: {}", e))
-    }
-
-    /// Set expected packet loss percentage (0-100).
-    ///
-    /// This helps Opus optimize for lossy networks.
-    pub fn set_packet_loss(&mut self, percent: u8) -> Result<(), String> {
-        self.encoder
-            .set_packet_loss_perc(percent as i32)
-            .map_err(|e| format!("Failed to set packet loss: {}", e))
-    }
-
-    /// Enable or disable DTX (Discontinuous Transmission).
-    ///
-    /// When enabled, Opus will not transmit during silence.
-    pub fn set_dtx(&mut self, enabled: bool) -> Result<(), String> {
-        self.encoder
-            .set_dtx(enabled)
-            .map_err(|e| format!("Failed to set DTX: {}", e))
     }
 }
 
@@ -302,32 +259,6 @@ mod tests {
         assert!(plc.is_ok());
         let plc_samples = plc.unwrap();
         assert_eq!(plc_samples.len(), codec.samples_per_frame());
-    }
-
-    #[test]
-    fn test_set_bitrate() {
-        let mut codec = OpusCodec::new().unwrap();
-        assert!(codec.set_bitrate(24000).is_ok());
-        assert!(codec.set_bitrate(64000).is_ok());
-    }
-
-    #[test]
-    fn test_set_fec() {
-        let mut codec = OpusCodec::new().unwrap();
-        assert!(codec.set_fec(true).is_ok());
-        assert!(codec.set_fec(false).is_ok());
-    }
-
-    #[test]
-    fn test_set_packet_loss() {
-        let mut codec = OpusCodec::new().unwrap();
-        assert!(codec.set_packet_loss(10).is_ok());
-    }
-
-    #[test]
-    fn test_set_dtx() {
-        let mut codec = OpusCodec::new().unwrap();
-        assert!(codec.set_dtx(true).is_ok());
     }
 
     #[test]

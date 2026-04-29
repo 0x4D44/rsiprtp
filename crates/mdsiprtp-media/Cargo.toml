@@ -11,7 +11,7 @@ mdsiprtp-core.workspace = true
 mdsiprtp-rtp.workspace = true
 audio-codec-algorithms.workspace = true
 ezk-g722.workspace = true
-audiopus = { workspace = true, optional = true }
+ropus = { workspace = true, optional = true }
 dasp.workspace = true
 crossbeam.workspace = true
 thiserror.workspace = true
@@ -19,4 +19,4 @@ tracing.workspace = true
 
 [features]
 default = []
-opus = ["audiopus"]
+opus = ["ropus"]
