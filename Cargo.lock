@@ -1439,7 +1439,7 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "mdsiprtp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "mdsiprtp-core",
@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rand 0.8.5",
  "serde",
@@ -1470,7 +1470,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-dialog"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mdsiprtp-core",
  "mdsiprtp-sip",
@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-ice"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "hmac",
@@ -1498,7 +1498,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-media"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "audio-codec-algorithms",
  "crossbeam",
@@ -1513,7 +1513,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-rtp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "mdsiprtp-core",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-sdp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mdsiprtp-core",
  "thiserror 1.0.69",
@@ -1533,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-session"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "mdsiprtp-core",
  "mdsiprtp-dialog",
@@ -1551,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-sip"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "hex",
@@ -1566,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-srtp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes",
  "base64",
@@ -1585,7 +1585,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-transaction"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "mdsiprtp-core",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "mdsiprtp-transport"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "hickory-resolver",
@@ -2188,9 +2188,9 @@ dependencies = [
 
 [[package]]
 name = "ropus"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5491ba7b0ea6db0eb48676b7705d613b7a28e23f48fd5d67f224bf0d433c6392"
+checksum = "25e662e942ae929e27ae5525e497632484a4adee5989786dfceaedb4116b941f"
 dependencies = [
  "cc",
  "wide",

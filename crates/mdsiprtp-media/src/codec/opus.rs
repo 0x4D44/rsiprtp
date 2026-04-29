@@ -8,7 +8,9 @@
 //!
 //! Backed by the pure-Rust `ropus` crate (bit-exact against the xiph reference).
 
-use ropus::{Application, Bitrate, Channels, DecodeMode, Decoder, Encoder};
+use ropus::{Application, Channels, DecodeMode, Decoder, Encoder};
+
+pub use ropus::{Bitrate, InbandFec};
 
 /// Default Opus sample rate (48 kHz).
 pub const OPUS_SAMPLE_RATE: u32 = 48000;
@@ -29,8 +31,8 @@ pub struct OpusConfig {
     pub sample_rate: u32,
     /// Number of channels (1 for mono, 2 for stereo).
     pub channels: u8,
-    /// Bitrate in bits per second.
-    pub bitrate: u32,
+    /// Encoder bitrate. Use `Bitrate::Bits(bps)`, `Bitrate::Auto`, or `Bitrate::Max`.
+    pub bitrate: Bitrate,
     /// Frame size in milliseconds (2.5, 5, 10, 20, 40, or 60).
     pub frame_ms: f32,
 }
@@ -40,7 +42,7 @@ impl Default for OpusConfig {
         Self {
             sample_rate: OPUS_SAMPLE_RATE,
             channels: 1,
-            bitrate: 32000, // 32 kbps for speech
+            bitrate: Bitrate::Bits(32_000), // 32 kbps for speech
             frame_ms: 20.0,
         }
     }
@@ -52,7 +54,7 @@ impl OpusConfig {
         Self {
             sample_rate: 16000,
             channels: 1,
-            bitrate: 24000,
+            bitrate: Bitrate::Bits(24_000),
             frame_ms: 20.0,
         }
     }
@@ -62,7 +64,7 @@ impl OpusConfig {
         Self {
             sample_rate: 48000,
             channels: 1,
-            bitrate: 32000,
+            bitrate: Bitrate::Bits(32_000),
             frame_ms: 20.0,
         }
     }
@@ -72,7 +74,7 @@ impl OpusConfig {
         Self {
             sample_rate: 48000,
             channels: 2,
-            bitrate: 96000,
+            bitrate: Bitrate::Bits(96_000),
             frame_ms: 20.0,
         }
     }
@@ -110,12 +112,12 @@ impl OpusCodec {
         let channels = config.to_channels();
 
         let encoder = Encoder::builder(config.sample_rate, channels, Application::Voip)
-            .bitrate(Bitrate::Bits(config.bitrate))
+            .bitrate(config.bitrate)
             .build()
-            .map_err(|e| format!("Failed to create Opus encoder: {e:?}"))?;
+            .map_err(|e| format!("Failed to create Opus encoder: {e}"))?;
 
         let decoder = Decoder::new(config.sample_rate, channels)
-            .map_err(|e| format!("Failed to create Opus decoder: {e:?}"))?;
+            .map_err(|e| format!("Failed to create Opus decoder: {e}"))?;
 
         Ok(Self {
             encoder,
@@ -153,7 +155,7 @@ impl OpusCodec {
         let len = self
             .encoder
             .encode(pcm, &mut self.encode_buffer)
-            .map_err(|e| format!("Opus encode error: {e:?}"))?;
+            .map_err(|e| format!("Opus encode error: {e}"))?;
 
         Ok(self.encode_buffer[..len].to_vec())
     }
@@ -169,7 +171,7 @@ impl OpusCodec {
         let samples = self
             .decoder
             .decode(data, &mut decoded, DecodeMode::Normal)
-            .map_err(|e| format!("Opus decode error: {e:?}"))?;
+            .map_err(|e| format!("Opus decode error: {e}"))?;
 
         decoded.truncate(samples * self.channels() as usize);
         Ok(decoded)
@@ -186,10 +188,63 @@ impl OpusCodec {
         let samples = self
             .decoder
             .decode(&[], &mut decoded, DecodeMode::Normal)
-            .map_err(|e| format!("Opus PLC error: {e:?}"))?;
+            .map_err(|e| format!("Opus PLC error: {e}"))?;
 
         decoded.truncate(samples * self.channels() as usize);
         Ok(decoded)
+    }
+
+    /// Set the encoder bitrate at runtime.
+    pub fn set_bitrate(&mut self, b: Bitrate) -> Result<(), String> {
+        self.encoder
+            .set_bitrate(b)
+            .map_err(|e| format!("Opus set_bitrate error: {e}"))
+    }
+
+    /// Set the inband FEC mode at runtime.
+    pub fn set_fec(&mut self, mode: InbandFec) -> Result<(), String> {
+        self.encoder
+            .set_inband_fec(mode)
+            .map_err(|e| format!("Opus set_inband_fec error: {e}"))
+    }
+
+    /// Toggle DTX (discontinuous transmission) at runtime.
+    pub fn set_dtx(&mut self, on: bool) -> Result<(), String> {
+        self.encoder
+            .set_dtx(on)
+            .map_err(|e| format!("Opus set_dtx error: {e}"))
+    }
+
+    /// Set the expected packet-loss percentage (0..=100) used by FEC.
+    pub fn set_packet_loss(&mut self, pct: u8) -> Result<(), String> {
+        self.encoder
+            .set_packet_loss_perc(pct)
+            .map_err(|e| format!("Opus set_packet_loss_perc error: {e}"))
+    }
+
+    /// Get the configured bitrate.
+    pub fn bitrate(&self) -> Bitrate {
+        self.encoder.bitrate()
+    }
+
+    /// Get the effective bitrate in bps as reported by the encoder.
+    pub fn effective_bitrate_bps(&self) -> i32 {
+        self.encoder.effective_bitrate_bps()
+    }
+
+    /// Get the configured inband FEC mode.
+    pub fn inband_fec(&self) -> InbandFec {
+        self.encoder.inband_fec()
+    }
+
+    /// Get whether DTX is enabled.
+    pub fn dtx(&self) -> bool {
+        self.encoder.dtx()
+    }
+
+    /// Get the expected packet-loss percentage.
+    pub fn packet_loss_perc(&self) -> u8 {
+        self.encoder.packet_loss_perc()
     }
 }
 
@@ -265,5 +320,82 @@ mod tests {
     fn test_name() {
         let codec = OpusCodec::new().unwrap();
         assert_eq!(codec.name(), "opus");
+    }
+
+    fn sample_frame(codec: &OpusCodec) -> Vec<i16> {
+        (0..codec.samples_per_frame())
+            .map(|i| ((i as f32 * 0.1).sin() * 16000.0) as i16)
+            .collect()
+    }
+
+    #[test]
+    fn test_set_bitrate_explicit() {
+        let mut codec = OpusCodec::new().unwrap();
+
+        codec.set_bitrate(Bitrate::Bits(24_000)).unwrap();
+        let pcm = sample_frame(&codec);
+        let encoded = codec.encode(&pcm).unwrap();
+        assert!(!encoded.is_empty());
+
+        codec.set_bitrate(Bitrate::Bits(64_000)).unwrap();
+        let encoded = codec.encode(&pcm).unwrap();
+        assert!(!encoded.is_empty());
+
+        assert_eq!(codec.bitrate(), Bitrate::Bits(64_000));
+    }
+
+    #[test]
+    fn test_set_bitrate_auto() {
+        let mut codec = OpusCodec::new().unwrap();
+        codec.set_bitrate(Bitrate::Auto).unwrap();
+        assert_eq!(codec.bitrate(), Bitrate::Auto);
+
+        let pcm = sample_frame(&codec);
+        let encoded = codec.encode(&pcm).unwrap();
+        assert!(!encoded.is_empty());
+    }
+
+    #[test]
+    fn test_set_fec_modes() {
+        let mut codec = OpusCodec::new().unwrap();
+
+        for mode in [InbandFec::Disabled, InbandFec::Enabled, InbandFec::Forced] {
+            codec.set_fec(mode).unwrap();
+            assert_eq!(codec.inband_fec(), mode);
+        }
+    }
+
+    #[test]
+    fn test_set_dtx_toggle() {
+        let mut codec = OpusCodec::new().unwrap();
+
+        codec.set_dtx(true).unwrap();
+        assert!(codec.dtx());
+
+        codec.set_dtx(false).unwrap();
+        assert!(!codec.dtx());
+    }
+
+    #[test]
+    fn test_set_packet_loss_perc() {
+        let mut codec = OpusCodec::new().unwrap();
+
+        codec.set_packet_loss(10).unwrap();
+        assert_eq!(codec.packet_loss_perc(), 10);
+
+        codec.set_packet_loss(50).unwrap();
+        assert_eq!(codec.packet_loss_perc(), 50);
+    }
+
+    #[test]
+    fn test_config_uses_bitrate_enum() {
+        let config = OpusConfig {
+            sample_rate: OPUS_SAMPLE_RATE,
+            channels: 1,
+            bitrate: Bitrate::Bits(48_000),
+            frame_ms: 20.0,
+        };
+        let codec = OpusCodec::with_config(config).unwrap();
+        assert_eq!(codec.bitrate(), Bitrate::Bits(48_000));
     }
 }

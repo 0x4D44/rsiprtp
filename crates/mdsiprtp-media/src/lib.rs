@@ -15,4 +15,6 @@ pub use mixer::{
 pub use wav::{generate_dtmf_tone, generate_silence, generate_tone, WavReader, WavWriter};
 
 #[cfg(feature = "opus")]
-pub use codec::opus::{OpusCodec, OpusConfig, OPUS_SAMPLES_PER_FRAME, OPUS_SAMPLE_RATE};
+pub use codec::opus::{
+    Bitrate, InbandFec, OpusCodec, OpusConfig, OPUS_SAMPLES_PER_FRAME, OPUS_SAMPLE_RATE,
+};
