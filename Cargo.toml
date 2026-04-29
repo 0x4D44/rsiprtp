@@ -1,36 +1,36 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/mdsiprtp-core",
-    "crates/mdsiprtp-sip",
-    "crates/mdsiprtp-transaction",
-    "crates/mdsiprtp-dialog",
-    "crates/mdsiprtp-transport",
-    "crates/mdsiprtp-sdp",
-    "crates/mdsiprtp-rtp",
-    "crates/mdsiprtp-srtp",
-    "crates/mdsiprtp-ice",
-    "crates/mdsiprtp-media",
-    "crates/mdsiprtp-session",
-    "crates/mdsiprtp",
+    "crates/rsiprtp-core",
+    "crates/rsiprtp-sip",
+    "crates/rsiprtp-transaction",
+    "crates/rsiprtp-dialog",
+    "crates/rsiprtp-transport",
+    "crates/rsiprtp-sdp",
+    "crates/rsiprtp-rtp",
+    "crates/rsiprtp-srtp",
+    "crates/rsiprtp-ice",
+    "crates/rsiprtp-media",
+    "crates/rsiprtp-session",
+    "crates/rsiprtp",
     "crates/gabby",
 ]
 # gabby is excluded from default builds because it requires the Vosk native
 # library. Build it explicitly with `cargo build -p gabby` once VOSK_LIB_DIR
 # is set (see crates/gabby/scripts/setup_windows.ps1).
 default-members = [
-    "crates/mdsiprtp-core",
-    "crates/mdsiprtp-sip",
-    "crates/mdsiprtp-transaction",
-    "crates/mdsiprtp-dialog",
-    "crates/mdsiprtp-transport",
-    "crates/mdsiprtp-sdp",
-    "crates/mdsiprtp-rtp",
-    "crates/mdsiprtp-srtp",
-    "crates/mdsiprtp-ice",
-    "crates/mdsiprtp-media",
-    "crates/mdsiprtp-session",
-    "crates/mdsiprtp",
+    "crates/rsiprtp-core",
+    "crates/rsiprtp-sip",
+    "crates/rsiprtp-transaction",
+    "crates/rsiprtp-dialog",
+    "crates/rsiprtp-transport",
+    "crates/rsiprtp-sdp",
+    "crates/rsiprtp-rtp",
+    "crates/rsiprtp-srtp",
+    "crates/rsiprtp-ice",
+    "crates/rsiprtp-media",
+    "crates/rsiprtp-session",
+    "crates/rsiprtp",
 ]
 
 [workspace.package]
@@ -93,14 +93,14 @@ sha2 = "0.10"
 base64 = "0.22"
 
 # Internal crates
-mdsiprtp-core = { path = "crates/mdsiprtp-core" }
-mdsiprtp-sip = { path = "crates/mdsiprtp-sip" }
-mdsiprtp-transaction = { path = "crates/mdsiprtp-transaction" }
-mdsiprtp-dialog = { path = "crates/mdsiprtp-dialog" }
-mdsiprtp-transport = { path = "crates/mdsiprtp-transport" }
-mdsiprtp-sdp = { path = "crates/mdsiprtp-sdp" }
-mdsiprtp-rtp = { path = "crates/mdsiprtp-rtp" }
-mdsiprtp-srtp = { path = "crates/mdsiprtp-srtp" }
-mdsiprtp-ice = { path = "crates/mdsiprtp-ice" }
-mdsiprtp-media = { path = "crates/mdsiprtp-media" }
-mdsiprtp-session = { path = "crates/mdsiprtp-session" }
+rsiprtp-core = { path = "crates/rsiprtp-core" }
+rsiprtp-sip = { path = "crates/rsiprtp-sip" }
+rsiprtp-transaction = { path = "crates/rsiprtp-transaction" }
+rsiprtp-dialog = { path = "crates/rsiprtp-dialog" }
+rsiprtp-transport = { path = "crates/rsiprtp-transport" }
+rsiprtp-sdp = { path = "crates/rsiprtp-sdp" }
+rsiprtp-rtp = { path = "crates/rsiprtp-rtp" }
+rsiprtp-srtp = { path = "crates/rsiprtp-srtp" }
+rsiprtp-ice = { path = "crates/rsiprtp-ice" }
+rsiprtp-media = { path = "crates/rsiprtp-media" }
+rsiprtp-session = { path = "crates/rsiprtp-session" }

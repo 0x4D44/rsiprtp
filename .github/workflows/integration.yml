@@ -50,10 +50,10 @@ jobs:
         run: cargo test --workspace
 
       - name: Run integration tests (framework only)
-        run: cargo test --package mdsiprtp --test baresip_integration -- --test-threads=1
+        run: cargo test --package rsiprtp --test baresip_integration -- --test-threads=1
 
       - name: Run integration tests with baresip
-        run: cargo test --package mdsiprtp --test baresip_integration -- --include-ignored --test-threads=1
+        run: cargo test --package rsiprtp --test baresip_integration -- --include-ignored --test-threads=1
         continue-on-error: true  # Some tests may be flaky in CI
 
   unit-only:

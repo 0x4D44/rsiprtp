@@ -1,0 +1,16 @@
+[package]
+name = "rsiprtp-dialog"
+publish = false
+description = "SIP dialog management (Sans-IO)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rsiprtp-core.workspace = true
+rsiprtp-sip.workspace = true
+rsiprtp-transaction.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true

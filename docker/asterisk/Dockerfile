@@ -1,4 +1,4 @@
-# Asterisk Docker image for mdsiprtp integration testing
+# Asterisk Docker image for rsiprtp integration testing
 # Use official Asterisk image from sangoma/asterisk
 FROM debian:bullseye-slim
 

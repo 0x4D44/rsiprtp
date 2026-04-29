@@ -1,0 +1,12 @@
+[package]
+name = "rsiprtp-sdp"
+publish = false
+description = "SDP parsing and offer/answer model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rsiprtp-core.workspace = true
+thiserror.workspace = true

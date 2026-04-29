@@ -1,4 +1,4 @@
-# Docker Compose for mdsiprtp integration testing
+# Docker Compose for rsiprtp integration testing
 #
 # Usage:
 #   docker compose up -d          # Start Asterisk
@@ -11,7 +11,7 @@ services:
   asterisk:
     build:
       context: ./asterisk
-    container_name: mdsiprtp-asterisk
+    container_name: rsiprtp-asterisk
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"

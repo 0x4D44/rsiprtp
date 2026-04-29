@@ -5,9 +5,7 @@
 use crate::call::{CallError, CallHandler};
 use crate::config::GabbyConfig;
 use crate::pipeline::stt;
-use mdsiprtp::sip::{
-    generate_tag, Method, SipMessage, SipRequest, SipResponse, SipResponseBuilder,
-};
+use rsiprtp::sip::{generate_tag, Method, SipMessage, SipRequest, SipResponse, SipResponseBuilder};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -117,7 +115,7 @@ impl GabbyServer {
         data: &[u8],
         source: SocketAddr,
     ) -> Result<(), ServerError> {
-        // Parse using mdsiprtp-sip
+        // Parse using rsiprtp-sip
         let msg = match SipMessage::parse(data) {
             Ok(m) => m,
             Err(e) => {

@@ -1,0 +1,38 @@
+[package]
+name = "rsiprtp"
+description = "SIP/RTP stack for Rust - VoIP and AI agent applications"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rsiprtp-core.workspace = true
+rsiprtp-sip.workspace = true
+rsiprtp-transaction.workspace = true
+rsiprtp-dialog.workspace = true
+rsiprtp-transport.workspace = true
+rsiprtp-sdp.workspace = true
+rsiprtp-rtp.workspace = true
+rsiprtp-media.workspace = true
+rsiprtp-session.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+
+[[example]]
+name = "basic_call"
+path = "examples/basic_call.rs"
+
+[[example]]
+name = "voicemail"
+path = "examples/voicemail.rs"
+
+[[example]]
+name = "ai_bridge"
+path = "examples/ai_bridge.rs"

@@ -39,7 +39,7 @@ cargo test --workspace --exclude gabby
 
 - Unit tests live alongside the code they test (`#[cfg(test)] mod tests`).
 - Integration tests for the SIP stack against a real UA (baresip) live under
-  `crates/mdsiprtp/tests/baresip_integration.rs`. They're gated behind
+  `crates/rsiprtp/tests/baresip_integration.rs`. They're gated behind
   `--include-ignored` because they need network access and the baresip binary.
 - `docker compose -f docker/docker-compose.yml up -d` brings up an Asterisk
   server for end-to-end testing.

@@ -251,4 +251,4 @@ MIT
 - [Vosk](https://alphacephei.com/vosk/) - Speech recognition
 - [Ollama](https://ollama.ai/) - Local LLM inference
 - [Piper](https://github.com/rhasspy/piper) - Text-to-speech
-- mdsiprtp - SIP/RTP stack (included in this workspace)
+- rsiprtp - SIP/RTP stack (included in this workspace)

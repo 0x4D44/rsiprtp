@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-mdsiprtp = { path = "../mdsiprtp" }
+rsiprtp = { path = "../rsiprtp" }
 
 # Async runtime
 tokio = { version = "1", features = ["full", "signal", "process"] }

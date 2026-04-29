@@ -50,7 +50,10 @@ jobs:
       - name: Build
         run: cargo build --workspace --exclude gabby
       - name: Test
-        run: cargo test --workspace --exclude gabby
+        # --test-threads=1 works around a pre-existing test-isolation bug in
+        # the force_*_error tests under transport/ice (shared AtomicU64 flags
+        # leak between parallel tests). All 2780 tests pass serially.
+        run: cargo test --workspace --exclude gabby -- --test-threads=1
 
   doc:
     name: Doc build

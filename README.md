@@ -1,4 +1,4 @@
-# mdsiprtp & Gabby
+# rsiprtp & Gabby
 
 **A modular, production-ready SIP/RTP stack for Rust, featuring a Voice AI agent.**
 
@@ -11,12 +11,12 @@ This repository hosts a comprehensive SIP/RTP communications stack written in Ru
 
 ### Key Components
 
-1.  **mdsiprtp**: The core library. A layered, modular stack designed for building high-performance VoIP applications like voicemail systems, call bridges, and AI assistants. It features a **Sans-IO** architecture for core state machines, making it deterministic and easy to test.
+1.  **rsiprtp**: The core library. A layered, modular stack designed for building high-performance VoIP applications like voicemail systems, call bridges, and AI assistants. It features a **Sans-IO** architecture for core state machines, making it deterministic and easy to test.
 2.  **Gabby** (`crates/gabby`): A standalone Voice AI agent application. It accepts SIP calls and engages in natural conversation using offline Speech-to-Text (Vosk), local LLM inference (Ollama), and Neural Text-to-Speech (Piper).
 
 ## Features
 
-*   **SIP/RTP Stack (`mdsiprtp`)**:
+*   **SIP/RTP Stack (`rsiprtp`)**:
     *   **Modular Design**: Split into crates for SIP parsing, transactions, dialogs, SDP, RTP, and media handling.
     *   **Sans-IO Architecture**: Core logic is decoupled from network I/O, allowing for flexible integration with any async runtime (Tokio used by default).
     *   **RFC Compliance**: Implements RFC 3261 (SIP), RFC 3550 (RTP), RFC 4566 (SDP), and related standards.
@@ -33,7 +33,7 @@ This repository hosts a comprehensive SIP/RTP communications stack written in Ru
 
 ### Crate Structure
 
-The `mdsiprtp` stack is organized into layered crates with clear responsibilities:
+The `rsiprtp` stack is organized into layered crates with clear responsibilities:
 
 ```mermaid
 graph TB
@@ -43,36 +43,36 @@ graph TB
     end
 
     subgraph "Facade"
-        MDSIPRTP[mdsiprtp<br/><i>Unified API</i>]
+        MDSIPRTP[rsiprtp<br/><i>Unified API</i>]
     end
 
     subgraph "Session Layer"
-        SESSION[mdsiprtp-session<br/><i>Call & Registration Management</i>]
-        DIALOG[mdsiprtp-dialog<br/><i>INVITE Dialog State</i>]
+        SESSION[rsiprtp-session<br/><i>Call & Registration Management</i>]
+        DIALOG[rsiprtp-dialog<br/><i>INVITE Dialog State</i>]
     end
 
     subgraph "Transaction Layer"
-        TRANSACTION[mdsiprtp-transaction<br/><i>RFC 3261 State Machines</i><br/><b>Sans-IO</b>]
+        TRANSACTION[rsiprtp-transaction<br/><i>RFC 3261 State Machines</i><br/><b>Sans-IO</b>]
     end
 
     subgraph "Signaling"
-        SIP[mdsiprtp-sip<br/><i>SIP Parsing & Auth</i>]
-        SDP[mdsiprtp-sdp<br/><i>SDP Negotiation</i>]
+        SIP[rsiprtp-sip<br/><i>SIP Parsing & Auth</i>]
+        SDP[rsiprtp-sdp<br/><i>SDP Negotiation</i>]
     end
 
     subgraph "Media Layer"
-        RTP[mdsiprtp-rtp<br/><i>RTP/RTCP/DTMF</i>]
-        SRTP[mdsiprtp-srtp<br/><i>SRTP & DTLS</i>]
-        MEDIA[mdsiprtp-media<br/><i>Codecs & Jitter Buffer</i>]
+        RTP[rsiprtp-rtp<br/><i>RTP/RTCP/DTMF</i>]
+        SRTP[rsiprtp-srtp<br/><i>SRTP & DTLS</i>]
+        MEDIA[rsiprtp-media<br/><i>Codecs & Jitter Buffer</i>]
     end
 
     subgraph "Network Layer"
-        TRANSPORT[mdsiprtp-transport<br/><i>UDP/TCP/TLS</i>]
-        ICE[mdsiprtp-ice<br/><i>ICE/STUN/TURN</i>]
+        TRANSPORT[rsiprtp-transport<br/><i>UDP/TCP/TLS</i>]
+        ICE[rsiprtp-ice<br/><i>ICE/STUN/TURN</i>]
     end
 
     subgraph "Foundation"
-        CORE[mdsiprtp-core<br/><i>Types & Errors</i>]
+        CORE[rsiprtp-core<br/><i>Types & Errors</i>]
     end
 
     GABBY --> MDSIPRTP
@@ -122,7 +122,7 @@ A typical SIP INVITE call establishment:
 ```mermaid
 sequenceDiagram
     participant Caller as Caller (UAC)
-    participant Stack as mdsiprtp
+    participant Stack as rsiprtp
     participant Callee as Callee (UAS)
 
     Caller->>Stack: INVITE (SDP Offer)
@@ -208,7 +208,7 @@ flowchart TB
         PIPELINE[Audio Pipeline]
     end
 
-    subgraph mdsiprtp["mdsiprtp Stack"]
+    subgraph rsiprtp["rsiprtp Stack"]
         SESS[Session Manager]
         TRANS[Transaction Layer]
         MEDIA_PROC[Media Processor]
@@ -249,7 +249,7 @@ cargo build --workspace
 On Windows, you can either build the library without `gabby`, or install the Vosk Windows binaries and set `VOSK_LIB_DIR` to build `gabby` (see `crates/gabby/README.md`):
 
 ```bash
-cargo build -p mdsiprtp
+cargo build -p rsiprtp
 # or: cargo build --workspace --exclude gabby
 
 # With Vosk installed on Windows:

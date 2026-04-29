@@ -904,9 +904,9 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
- "mdsiprtp",
  "rand 0.8.5",
  "reqwest",
+ "rsiprtp",
  "rubato",
  "serde",
  "serde_json",
@@ -1436,186 +1436,6 @@ name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
-
-[[package]]
-name = "mdsiprtp"
-version = "0.2.0"
-dependencies = [
- "chrono",
- "mdsiprtp-core",
- "mdsiprtp-dialog",
- "mdsiprtp-media",
- "mdsiprtp-rtp",
- "mdsiprtp-sdp",
- "mdsiprtp-session",
- "mdsiprtp-sip",
- "mdsiprtp-transaction",
- "mdsiprtp-transport",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid 1.19.0",
-]
-
-[[package]]
-name = "mdsiprtp-core"
-version = "0.2.0"
-dependencies = [
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "mdsiprtp-dialog"
-version = "0.2.0"
-dependencies = [
- "mdsiprtp-core",
- "mdsiprtp-sip",
- "mdsiprtp-transaction",
- "thiserror 1.0.69",
- "tracing",
- "uuid 1.19.0",
-]
-
-[[package]]
-name = "mdsiprtp-ice"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "hmac",
- "md5",
- "mdsiprtp-core",
- "rand 0.8.5",
- "sha1",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mdsiprtp-media"
-version = "0.2.0"
-dependencies = [
- "audio-codec-algorithms",
- "crossbeam",
- "dasp",
- "ezk-g722",
- "mdsiprtp-core",
- "mdsiprtp-rtp",
- "ropus",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "mdsiprtp-rtp"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "mdsiprtp-core",
- "rand 0.8.5",
- "thiserror 1.0.69",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "mdsiprtp-sdp"
-version = "0.2.0"
-dependencies = [
- "mdsiprtp-core",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "mdsiprtp-session"
-version = "0.2.0"
-dependencies = [
- "mdsiprtp-core",
- "mdsiprtp-dialog",
- "mdsiprtp-media",
- "mdsiprtp-rtp",
- "mdsiprtp-sdp",
- "mdsiprtp-sip",
- "mdsiprtp-transaction",
- "mdsiprtp-transport",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid 1.19.0",
-]
-
-[[package]]
-name = "mdsiprtp-sip"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "hex",
- "md5",
- "mdsiprtp-core",
- "rand 0.8.5",
- "rsip",
- "sha2 0.10.9",
- "thiserror 1.0.69",
- "uuid 1.19.0",
-]
-
-[[package]]
-name = "mdsiprtp-srtp"
-version = "0.2.0"
-dependencies = [
- "aes",
- "base64",
- "bytes",
- "ctr",
- "hmac",
- "mdsiprtp-core",
- "mdsiprtp-rtp",
- "openssl",
- "rand 0.8.5",
- "sha1",
- "sha2 0.10.9",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "mdsiprtp-transaction"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "mdsiprtp-core",
- "mdsiprtp-sip",
- "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "mdsiprtp-transport"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "hickory-resolver",
- "mdsiprtp-core",
- "mdsiprtp-sip",
- "p256",
- "rand 0.8.5",
- "rcgen",
- "rsa",
- "rustls",
- "rustls-pemfile",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-rustls",
- "tracing",
- "tracing-subscriber",
- "webpki-roots 0.26.11",
-]
 
 [[package]]
 name = "memchr"
@@ -2241,6 +2061,186 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "rsiprtp"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "rsiprtp-core",
+ "rsiprtp-dialog",
+ "rsiprtp-media",
+ "rsiprtp-rtp",
+ "rsiprtp-sdp",
+ "rsiprtp-session",
+ "rsiprtp-sip",
+ "rsiprtp-transaction",
+ "rsiprtp-transport",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid 1.19.0",
+]
+
+[[package]]
+name = "rsiprtp-core"
+version = "0.2.0"
+dependencies = [
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rsiprtp-dialog"
+version = "0.2.0"
+dependencies = [
+ "rsiprtp-core",
+ "rsiprtp-sip",
+ "rsiprtp-transaction",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid 1.19.0",
+]
+
+[[package]]
+name = "rsiprtp-ice"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "hmac",
+ "md5",
+ "rand 0.8.5",
+ "rsiprtp-core",
+ "sha1",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rsiprtp-media"
+version = "0.2.0"
+dependencies = [
+ "audio-codec-algorithms",
+ "crossbeam",
+ "dasp",
+ "ezk-g722",
+ "ropus",
+ "rsiprtp-core",
+ "rsiprtp-rtp",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "rsiprtp-rtp"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "rand 0.8.5",
+ "rsiprtp-core",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rsiprtp-sdp"
+version = "0.2.0"
+dependencies = [
+ "rsiprtp-core",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rsiprtp-session"
+version = "0.2.0"
+dependencies = [
+ "rsiprtp-core",
+ "rsiprtp-dialog",
+ "rsiprtp-media",
+ "rsiprtp-rtp",
+ "rsiprtp-sdp",
+ "rsiprtp-sip",
+ "rsiprtp-transaction",
+ "rsiprtp-transport",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid 1.19.0",
+]
+
+[[package]]
+name = "rsiprtp-sip"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "hex",
+ "md5",
+ "rand 0.8.5",
+ "rsip",
+ "rsiprtp-core",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "uuid 1.19.0",
+]
+
+[[package]]
+name = "rsiprtp-srtp"
+version = "0.2.0"
+dependencies = [
+ "aes",
+ "base64",
+ "bytes",
+ "ctr",
+ "hmac",
+ "openssl",
+ "rand 0.8.5",
+ "rsiprtp-core",
+ "rsiprtp-rtp",
+ "sha1",
+ "sha2 0.10.9",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "rsiprtp-transaction"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "rsiprtp-core",
+ "rsiprtp-sip",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
+name = "rsiprtp-transport"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "hickory-resolver",
+ "p256",
+ "rand 0.8.5",
+ "rcgen",
+ "rsa",
+ "rsiprtp-core",
+ "rsiprtp-sip",
+ "rustls",
+ "rustls-pemfile",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

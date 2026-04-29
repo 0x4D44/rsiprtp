@@ -1,4 +1,4 @@
-use mdsiprtp::media::{generate_dtmf_tone, is_silence, WavReader};
+use rsiprtp::media::{generate_dtmf_tone, is_silence, WavReader};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;

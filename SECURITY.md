@@ -22,7 +22,7 @@ appropriate, advisory publication, and a patched release).
 
 Covered:
 
-- The published `rsiprtp` crate and its internal `mdsiprtp-*` workspace
+- The published `rsiprtp` crate and its internal `rsiprtp-*` workspace
   members.
 - The SIP message parser, transport layers (UDP/TCP/TLS), transaction and
   dialog state machines, RTP/RTCP/SRTP, ICE/STUN/TURN, and audio codecs

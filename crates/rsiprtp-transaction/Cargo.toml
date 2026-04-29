@@ -1,0 +1,18 @@
+[package]
+name = "rsiprtp-transaction"
+publish = false
+description = "RFC 3261 SIP transaction layer (Sans-IO)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+rsiprtp-core.workspace = true
+rsiprtp-sip.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)", "cfg(coverage_nightly)"] }
