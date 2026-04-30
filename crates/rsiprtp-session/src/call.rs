@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use rsiprtp_core::random_u32;
 use rsiprtp_dialog::DialogId;
-use rsiprtp_media::{JitterBuffer, JitterBufferConfig, PlayoutDecision};
+use rsiprtp_media::{Bitrate, JitterBuffer, JitterBufferConfig, OpusConfig, PlayoutDecision};
 use rsiprtp_rtp::rtcp::{RtcpCompound, RtcpPacket};
 use rsiprtp_rtp::session::CongestionController;
 use rsiprtp_rtp::{RtpPacket, RtpSession};
@@ -276,19 +276,37 @@ impl MediaSession {
     ///
     /// Returns `Err` if the codec encoding is unsupported by
     /// [`SessionCodec::for_negotiated`].
-    pub fn for_negotiated(
-        ssrc: u32,
-        negotiated: &Codec,
-        local_port: u16,
-    ) -> Result<Self, String> {
+    pub fn for_negotiated(ssrc: u32, negotiated: &Codec, local_port: u16) -> Result<Self, String> {
         let mut codec = SessionCodec::for_negotiated(negotiated)?;
 
         // Adaptive codecs get a CC + bridge sized to the codec's range.
-        // Bounds (32 / 6 / 128 kbps) are deliberately static — see the
+        // Min / max bounds (6 / 128 kbps) are deliberately static — see the
         // bridge HLD's "Risks / open items" entry on per-deployment tuning.
+        // The initial bitrate is sourced from the same `OpusConfig` helper
+        // `SessionCodec::for_negotiated` uses, so the two stay in lockstep
+        // if anyone retunes the codec's starting rate.
         let adaptive = if codec.as_adaptive_mut().is_some() {
+            let initial_bps: u64 = match OpusConfig::fullband_speech().bitrate {
+                Bitrate::Bits(b) => u64::from(b),
+                // `fullband_speech` is currently always `Bits(_)`. Fall back
+                // defensively so a future helper change can't panic the path.
+                _ => 32_000,
+            };
+            // SDP-negotiated Opus parameters (clock rate / channels) are
+            // currently ignored — the codec is always built at 48 kHz / 1 ch
+            // via `OpusConfig::fullband_speech()`. Threading the SDP-derived
+            // values into the codec config is a follow-up pinned by the HLD;
+            // for now we log when they would have differed so the mismatch
+            // is visible in operator output.
+            if negotiated.clock_rate != 48_000 || negotiated.channels != 1 {
+                tracing::warn!(
+                    sdp_clock_rate = negotiated.clock_rate,
+                    sdp_channels = negotiated.channels,
+                    "SDP-negotiated Opus parameters ignored; codec built at 48 kHz / 1 ch (HLD v1 limitation)"
+                );
+            }
             Some(AdaptiveCongestion {
-                cc: CongestionController::new(32_000, 6_000, 128_000),
+                cc: CongestionController::new(initial_bps, 6_000, 128_000),
                 bridge: BitrateBridge::new(),
             })
         } else {
@@ -310,11 +328,7 @@ impl MediaSession {
         }
 
         Ok(Self {
-            rtp_session: RtpSession::new(
-                ssrc,
-                negotiated.payload_type,
-                negotiated.clock_rate,
-            ),
+            rtp_session: RtpSession::new(ssrc, negotiated.payload_type, negotiated.clock_rate),
             jitter_buffer: JitterBuffer::new(jb_config),
             codec,
             adaptive,
@@ -335,11 +349,7 @@ impl MediaSession {
     /// Returns `Err` if the codec rejects the encode (Opus / G.722).
     /// G.711 is infallible at the codec level; the wrapper preserves
     /// `Result` for a uniform surface.
-    pub fn encode_audio(
-        &mut self,
-        samples: &[i16],
-        marker: bool,
-    ) -> Result<RtpPacket, String> {
+    pub fn encode_audio(&mut self, samples: &[i16], marker: bool) -> Result<RtpPacket, String> {
         let encoded = self.codec.encode(samples)?;
         Ok(self
             .rtp_session
@@ -706,8 +716,7 @@ mod tests {
     /// did. Used by tests that want a fixed-rate session and don't care
     /// about codec dispatch.
     fn pcmu_session(ssrc: u32, local_port: u16) -> MediaSession {
-        MediaSession::for_negotiated(ssrc, &Codec::pcmu(), local_port)
-            .expect("PCMU MediaSession")
+        MediaSession::for_negotiated(ssrc, &Codec::pcmu(), local_port).expect("PCMU MediaSession")
     }
 
     #[test]
@@ -1189,8 +1198,8 @@ mod tests {
     // MediaSession tests
     #[test]
     fn test_media_session_alaw() {
-        let session = MediaSession::for_negotiated(12345, &Codec::pcma(), 5000)
-            .expect("PCMA MediaSession");
+        let session =
+            MediaSession::for_negotiated(12345, &Codec::pcma(), 5000).expect("PCMA MediaSession");
         assert_eq!(session.local_port(), 5000);
         assert!(!session.is_active());
     }
