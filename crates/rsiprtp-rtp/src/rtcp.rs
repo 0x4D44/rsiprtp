@@ -53,12 +53,16 @@ impl TryFrom<u8> for RtcpType {
 /// RTCP parse error.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RtcpParseError {
+    /// Buffer too short to contain a valid RTCP packet header (4 bytes minimum).
     #[error("Packet too short: {0} bytes")]
     TooShort(usize),
+    /// RTCP version field is not 2 (the only version defined by RFC 3550).
     #[error("Invalid RTCP version: {0}")]
     InvalidVersion(u8),
+    /// RTCP payload type is not recognized by this implementation.
     #[error("Unknown packet type: {0}")]
     UnknownPacketType(u8),
+    /// Report block count in the header does not match the available payload bytes.
     #[error("Invalid report block count")]
     InvalidReportCount,
 }
@@ -456,6 +460,81 @@ impl SourceDescription {
         }
     }
 
+    /// Parse an SDES packet from bytes.
+    ///
+    /// Walks the chunk list according to RFC 3550 § 6.5. Unknown SDES item
+    /// type codes are skipped (their length-prefixed value is consumed but the
+    /// item is not stored), preserving forward-compatibility.
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::SourceDescription {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        // Total payload length declared by the header (excluding the 4-byte header).
+        let declared = (header.length as usize) * 4;
+        if rest.len() < declared {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+        let mut buf = &rest[..declared];
+
+        let mut chunks = Vec::with_capacity(header.count as usize);
+        for _ in 0..header.count {
+            if buf.remaining() < 4 {
+                return Err(RtcpParseError::TooShort(buf.remaining()));
+            }
+            let chunk_start = buf.len();
+            let ssrc = buf.get_u32();
+            let mut items = Vec::new();
+            loop {
+                if buf.remaining() < 1 {
+                    return Err(RtcpParseError::TooShort(buf.remaining()));
+                }
+                let item_type = buf.get_u8();
+                if item_type == 0 {
+                    break;
+                }
+                if buf.remaining() < 1 {
+                    return Err(RtcpParseError::TooShort(buf.remaining()));
+                }
+                let len = buf.get_u8() as usize;
+                if buf.remaining() < len {
+                    return Err(RtcpParseError::TooShort(buf.remaining()));
+                }
+                let value_bytes = &buf[..len];
+                let value = String::from_utf8_lossy(value_bytes).into_owned();
+                buf.advance(len);
+
+                let parsed_type = match item_type {
+                    1 => Some(SdesType::CName),
+                    2 => Some(SdesType::Name),
+                    3 => Some(SdesType::Email),
+                    4 => Some(SdesType::Phone),
+                    5 => Some(SdesType::Location),
+                    6 => Some(SdesType::Tool),
+                    7 => Some(SdesType::Note),
+                    8 => Some(SdesType::Private),
+                    _ => None,
+                };
+                if let Some(item_type) = parsed_type {
+                    items.push(SdesItem { item_type, value });
+                }
+            }
+            // Pad to 32-bit boundary relative to the chunk start.
+            let consumed = chunk_start - buf.len();
+            let pad = (4 - (consumed % 4)) % 4;
+            if buf.remaining() < pad {
+                return Err(RtcpParseError::TooShort(buf.remaining()));
+            }
+            buf.advance(pad);
+
+            chunks.push(SdesChunk { ssrc, items });
+        }
+
+        Ok(SourceDescription { chunks })
+    }
+
     /// Build to bytes.
     pub fn build(&self) -> Bytes {
         let mut buf = BytesMut::with_capacity(256);
@@ -511,6 +590,45 @@ impl Goodbye {
             ssrcs: vec![ssrc],
             reason: None,
         }
+    }
+
+    /// Parse a BYE packet from bytes (RFC 3550 § 6.6).
+    pub fn parse(data: &[u8]) -> Result<Self, RtcpParseError> {
+        let (header, rest) = RtcpHeader::parse(data)?;
+
+        if header.packet_type != RtcpType::Goodbye {
+            return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
+        }
+
+        let declared = (header.length as usize) * 4;
+        if rest.len() < declared {
+            return Err(RtcpParseError::TooShort(rest.len()));
+        }
+        let mut buf = &rest[..declared];
+
+        let ssrc_count = header.count as usize;
+        if buf.remaining() < ssrc_count * 4 {
+            return Err(RtcpParseError::TooShort(buf.remaining()));
+        }
+        let mut ssrcs = Vec::with_capacity(ssrc_count);
+        for _ in 0..ssrc_count {
+            ssrcs.push(buf.get_u32());
+        }
+
+        // Optional reason: length byte + UTF-8, padded to 32-bit boundary.
+        let reason = if buf.remaining() >= 1 {
+            let len = buf.get_u8() as usize;
+            if buf.remaining() < len {
+                return Err(RtcpParseError::TooShort(buf.remaining()));
+            }
+            let value = String::from_utf8_lossy(&buf[..len]).into_owned();
+            buf.advance(len);
+            Some(value)
+        } else {
+            None
+        };
+
+        Ok(Goodbye { ssrcs, reason })
     }
 
     /// Build to bytes.
@@ -1085,9 +1203,13 @@ pub struct RtcpCompound {
 /// Individual RTCP packet types.
 #[derive(Debug, Clone)]
 pub enum RtcpPacket {
+    /// Sender Report (SR, PT=200) — transmission and reception statistics from an active sender.
     SenderReport(SenderReport),
+    /// Receiver Report (RR, PT=201) — reception statistics from a non-sending participant.
     ReceiverReport(ReceiverReport),
+    /// Source Description (SDES, PT=202) — CNAME and other identifying information for sources.
     SourceDescription(SourceDescription),
+    /// Goodbye (BYE, PT=203) — indicates that one or more sources are leaving the session.
     Goodbye(Goodbye),
     /// Generic NACK feedback.
     Nack(Nack),
@@ -1097,6 +1219,18 @@ pub enum RtcpPacket {
     Fir(Fir),
     /// Receiver Estimated Maximum Bitrate.
     Remb(Remb),
+    /// An RTCP packet with a type code this implementation does not decode.
+    ///
+    /// Per RFC 3550 § 6.1, receivers must tolerate unknown packet types in a
+    /// compound rather than rejecting the whole datagram. The raw bytes (after
+    /// the 4-byte common header) are kept verbatim so callers can log,
+    /// passthrough, or extend later without losing data.
+    Unknown {
+        /// The RTCP packet type code (PT field) as it appeared on the wire.
+        packet_type: u8,
+        /// Full packet bytes including the 4-byte common header.
+        bytes: Bytes,
+    },
 }
 
 impl RtcpCompound {
@@ -1136,6 +1270,7 @@ impl RtcpCompound {
                 RtcpPacket::Pli(pli) => buf.extend_from_slice(&pli.build()),
                 RtcpPacket::Fir(fir) => buf.extend_from_slice(&fir.build()),
                 RtcpPacket::Remb(remb) => buf.extend_from_slice(&remb.build()),
+                RtcpPacket::Unknown { bytes, .. } => buf.extend_from_slice(bytes),
             }
         }
 
@@ -1160,6 +1295,86 @@ impl RtcpCompound {
     /// Add a REMB to the compound packet.
     pub fn add_remb(&mut self, remb: Remb) {
         self.packets.push(RtcpPacket::Remb(remb));
+    }
+
+    /// Parse a compound RTCP packet (RFC 3550 § 6.1).
+    ///
+    /// Walks the buffer packet-by-packet, dispatching to the per-type parser
+    /// for known packet types. Unknown packet-type codes (anything outside
+    /// 200-206) and unrecognised feedback subtypes are preserved as
+    /// `RtcpPacket::Unknown` so callers do not lose data — RFC 3550 § 6.1
+    /// requires receivers to tolerate unknown types in a compound rather than
+    /// rejecting the whole datagram.
+    ///
+    /// Errors only on truncation or a per-packet parser failure on a known
+    /// type.
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        let mut remaining = data;
+        let mut packets = Vec::new();
+
+        while !remaining.is_empty() {
+            // Need at least a common header to determine the packet length.
+            if remaining.len() < 4 {
+                return Err(format!(
+                    "truncated RTCP packet: {} bytes left, need at least 4",
+                    remaining.len()
+                ));
+            }
+
+            // Validate version up front. Length is in 32-bit words minus one
+            // and is the source of truth for advancing past this packet, so
+            // read it directly from the wire — `RtcpHeader::parse` rejects
+            // unknown PTs, which we handle leniently below.
+            let version = (remaining[0] >> 6) & 0x03;
+            if version != 2 {
+                return Err(format!("invalid RTCP version: {version}"));
+            }
+            let pt = remaining[1];
+            let length_words = u16::from_be_bytes([remaining[2], remaining[3]]) as usize;
+            let pkt_len = (length_words + 1) * 4;
+
+            if pkt_len > remaining.len() {
+                return Err(format!(
+                    "truncated RTCP packet: declared {pkt_len} bytes, only {} remain",
+                    remaining.len()
+                ));
+            }
+            let pkt_bytes = &remaining[..pkt_len];
+
+            // Subtype field (FMT for feedback packets, RC for SR/RR, SC for
+            // SDES/BYE). Used only to distinguish REMB inside PSFB.
+            let subtype = remaining[0] & 0x1F;
+
+            let packet = match pt {
+                200 => RtcpPacket::SenderReport(
+                    SenderReport::parse(pkt_bytes).map_err(|e| format!("{e}"))?,
+                ),
+                201 => RtcpPacket::ReceiverReport(
+                    ReceiverReport::parse(pkt_bytes).map_err(|e| format!("{e}"))?,
+                ),
+                202 => RtcpPacket::SourceDescription(
+                    SourceDescription::parse(pkt_bytes).map_err(|e| format!("{e}"))?,
+                ),
+                203 => RtcpPacket::Goodbye(Goodbye::parse(pkt_bytes).map_err(|e| format!("{e}"))?),
+                206 if subtype == PayloadFeedbackType::Afb as u8 && pkt_len >= 16 && {
+                    // Distinguish REMB from other AFB messages by the
+                    // 4-byte unique identifier at offset 12.
+                    &pkt_bytes[12..16] == b"REMB"
+                } =>
+                {
+                    RtcpPacket::Remb(Remb::parse(pkt_bytes).map_err(|e| format!("{e}"))?)
+                }
+                _ => RtcpPacket::Unknown {
+                    packet_type: pt,
+                    bytes: Bytes::copy_from_slice(pkt_bytes),
+                },
+            };
+
+            packets.push(packet);
+            remaining = &remaining[pkt_len..];
+        }
+
+        Ok(RtcpCompound { packets })
     }
 }
 
@@ -2127,5 +2342,221 @@ mod tests {
         assert_eq!(PayloadFeedbackType::Tstn as u8, 6);
         assert_eq!(PayloadFeedbackType::Vbcm as u8, 7);
         assert_eq!(PayloadFeedbackType::Afb as u8, 15);
+    }
+
+    // ==========================================================================
+    // RtcpCompound::parse — compound walker tests
+    // ==========================================================================
+
+    #[test]
+    fn roundtrip_sr_sdes() {
+        let sr = SenderReport {
+            ssrc: 0xDEAD_BEEF,
+            ntp_timestamp: NtpTimestamp {
+                seconds: 0x1234_5678,
+                fraction: 0x9ABC_DEF0,
+            },
+            rtp_timestamp: 160_000,
+            sender_packet_count: 42,
+            sender_octet_count: 6720,
+            report_blocks: vec![],
+        };
+        let compound = RtcpCompound::sender_compound(sr, "user@example.com");
+        let bytes = compound.build();
+
+        let parsed = RtcpCompound::parse(&bytes).expect("parse compound");
+        assert_eq!(parsed.packets.len(), 2);
+
+        match &parsed.packets[0] {
+            RtcpPacket::SenderReport(sr) => {
+                assert_eq!(sr.ssrc, 0xDEAD_BEEF);
+                assert_eq!(sr.rtp_timestamp, 160_000);
+                assert_eq!(sr.sender_packet_count, 42);
+                assert_eq!(sr.sender_octet_count, 6720);
+            }
+            other => panic!("expected SenderReport, got {other:?}"),
+        }
+        match &parsed.packets[1] {
+            RtcpPacket::SourceDescription(sdes) => {
+                assert_eq!(sdes.chunks.len(), 1);
+                assert_eq!(sdes.chunks[0].ssrc, 0xDEAD_BEEF);
+                assert_eq!(sdes.chunks[0].items.len(), 1);
+                assert_eq!(sdes.chunks[0].items[0].item_type, SdesType::CName);
+                assert_eq!(sdes.chunks[0].items[0].value, "user@example.com");
+            }
+            other => panic!("expected SourceDescription, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn roundtrip_rr_remb() {
+        let rr = ReceiverReport {
+            ssrc: 0x1111_2222,
+            report_blocks: vec![ReportBlock {
+                ssrc: 0x3333_4444,
+                fraction_lost: 0,
+                cumulative_lost: 0,
+                extended_seq: 100,
+                jitter: 25,
+                last_sr: 0,
+                delay_since_sr: 0,
+            }],
+        };
+
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&rr.build());
+        let remb = Remb::new(0x1111_2222, 64_000, vec![0x3333_4444]);
+        buf.extend_from_slice(&remb.build());
+
+        let parsed = RtcpCompound::parse(&buf).expect("parse compound");
+        assert_eq!(parsed.packets.len(), 2);
+
+        match &parsed.packets[0] {
+            RtcpPacket::ReceiverReport(rr) => {
+                assert_eq!(rr.ssrc, 0x1111_2222);
+                assert_eq!(rr.report_blocks.len(), 1);
+                assert_eq!(rr.report_blocks[0].ssrc, 0x3333_4444);
+            }
+            other => panic!("expected ReceiverReport, got {other:?}"),
+        }
+        match &parsed.packets[1] {
+            RtcpPacket::Remb(remb) => {
+                // 64_000 fits within the 18-bit mantissa exactly, so no
+                // rounding loss is expected.
+                assert_eq!(remb.bitrate, 64_000);
+                assert_eq!(remb.sender_ssrc, 0x1111_2222);
+            }
+            other => panic!("expected Remb, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_truncated() {
+        let sr = SenderReport {
+            ssrc: 1,
+            ntp_timestamp: NtpTimestamp::now(),
+            rtp_timestamp: 0,
+            sender_packet_count: 0,
+            sender_octet_count: 0,
+            report_blocks: vec![],
+        };
+        let bytes = sr.build();
+        assert!(bytes.len() > 8);
+
+        // Chop the last 4 bytes, so the declared length exceeds what is left.
+        let truncated = &bytes[..bytes.len() - 4];
+        let result = RtcpCompound::parse(truncated);
+        assert!(result.is_err(), "expected error on truncated input");
+        let err = result.err().unwrap();
+        assert!(
+            err.contains("truncated") || err.contains("TooShort"),
+            "expected truncation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_preserves_unknown_types() {
+        // Build a 4-byte RTCP packet with an unrecognised PT (230). Common
+        // header layout: V=2, P=0, count=0, PT=230, length=0 (so total
+        // length = (0 + 1) * 4 = 4 bytes — header only).
+        let raw = [0x80u8, 230, 0x00, 0x00];
+
+        let parsed = RtcpCompound::parse(&raw).expect("parse must accept unknown PT");
+        assert_eq!(parsed.packets.len(), 1);
+        match &parsed.packets[0] {
+            RtcpPacket::Unknown { packet_type, bytes } => {
+                assert_eq!(*packet_type, 230);
+                assert_eq!(&bytes[..], &raw[..]);
+            }
+            other => panic!("expected Unknown variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_walks_past_unknown_in_middle() {
+        // Compound: SR + (raw unknown PT=230) + RR. The walker must use the
+        // unknown packet's own length field to advance past it so the
+        // following known packet still parses.
+        let sr = SenderReport {
+            ssrc: 0xAAAA_AAAA,
+            ntp_timestamp: NtpTimestamp {
+                seconds: 0x0102_0304,
+                fraction: 0x0506_0708,
+            },
+            rtp_timestamp: 8_000,
+            sender_packet_count: 1,
+            sender_octet_count: 160,
+            report_blocks: vec![],
+        };
+        let rr = ReceiverReport {
+            ssrc: 0xBBBB_BBBB,
+            report_blocks: vec![],
+        };
+
+        let mut buf = BytesMut::new();
+        buf.extend_from_slice(&sr.build());
+        // V=2, P=0, RC=0, PT=230, length=0 -> 4-byte header-only unknown packet.
+        buf.extend_from_slice(&[0x80u8, 230, 0x00, 0x00]);
+        buf.extend_from_slice(&rr.build());
+
+        let parsed = RtcpCompound::parse(&buf).expect("parse compound");
+        assert_eq!(parsed.packets.len(), 3);
+
+        match &parsed.packets[0] {
+            RtcpPacket::SenderReport(sr) => {
+                assert_eq!(sr.ssrc, 0xAAAA_AAAA);
+            }
+            other => panic!("expected SenderReport, got {other:?}"),
+        }
+        match &parsed.packets[1] {
+            RtcpPacket::Unknown { packet_type, .. } => {
+                assert_eq!(*packet_type, 230);
+            }
+            other => panic!("expected Unknown variant, got {other:?}"),
+        }
+        match &parsed.packets[2] {
+            RtcpPacket::ReceiverReport(rr) => {
+                assert_eq!(rr.ssrc, 0xBBBB_BBBB);
+            }
+            other => panic!("expected ReceiverReport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn psfb_fmt15_without_remb_magic_is_unknown() {
+        // PSFB (PT=206) with FMT=15 (AFB) but missing the "REMB" magic at
+        // offset 12 must fall through to Unknown rather than be misparsed
+        // as a REMB packet.
+        //
+        // Layout (20 bytes total = 5 32-bit words, length field = 4):
+        //   [0..4]   header: V=2, P=0, FMT=15, PT=206, length=4
+        //   [4..8]   sender SSRC
+        //   [8..12]  media SSRC
+        //   [12..16] 4-byte magic (NOT "REMB")
+        //   [16..20] body padding
+        let mut buf = BytesMut::new();
+        // Header: V=2, P=0, FMT=15; PT=206; length=4
+        buf.put_u8(0x80 | 15);
+        buf.put_u8(206);
+        buf.put_u16(4);
+        // Sender SSRC
+        buf.put_u32(0xCAFE_BABE);
+        // Media SSRC (unused for AFB)
+        buf.put_u32(0x0000_0000);
+        // Non-REMB magic at canonical offset 12
+        buf.put_slice(b"AFBX");
+        // 4 bytes of body to satisfy the declared length
+        buf.put_u32(0xDEAD_BEEF);
+
+        assert_eq!(buf.len(), 20);
+
+        let parsed = RtcpCompound::parse(&buf).expect("parse compound");
+        assert_eq!(parsed.packets.len(), 1);
+        match &parsed.packets[0] {
+            RtcpPacket::Unknown { packet_type, .. } => {
+                assert_eq!(*packet_type, 206);
+            }
+            other => panic!("expected Unknown variant for non-REMB AFB, got {other:?}"),
+        }
     }
 }
