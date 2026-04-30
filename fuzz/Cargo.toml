@@ -1,0 +1,142 @@
+[package]
+name = "rsiprtp-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Standalone (not a member of the parent workspace).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+rsiprtp-rtp = { path = "../crates/rsiprtp-rtp" }
+rsiprtp-sip = { path = "../crates/rsiprtp-sip" }
+rsiprtp-sdp = { path = "../crates/rsiprtp-sdp" }
+rsiprtp-srtp = { path = "../crates/rsiprtp-srtp" }
+rsiprtp-ice = { path = "../crates/rsiprtp-ice" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "rtp_packet"
+path = "fuzz_targets/rtp_packet.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_header"
+path = "fuzz_targets/rtcp_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_sr"
+path = "fuzz_targets/rtcp_sr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_rr"
+path = "fuzz_targets/rtcp_rr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_pli"
+path = "fuzz_targets/rtcp_sdes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_nack"
+path = "fuzz_targets/rtcp_nack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_remb"
+path = "fuzz_targets/rtcp_remb.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rtcp_fir"
+path = "fuzz_targets/rtcp_fir.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dtmf_event"
+path = "fuzz_targets/dtmf_event.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sip_message"
+path = "fuzz_targets/sip_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sdp_session"
+path = "fuzz_targets/sdp_session.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "srtp_use_ext"
+path = "fuzz_targets/srtp_use_ext.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sip_uri"
+path = "fuzz_targets/sip_uri.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sip_via"
+path = "fuzz_targets/sip_via.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sip_digest"
+path = "fuzz_targets/sip_digest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ice_candidate"
+path = "fuzz_targets/ice_candidate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "srtp_sdes"
+path = "fuzz_targets/srtp_sdes.rs"
+test = false
+doc = false
+bench = false
