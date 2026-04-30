@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! High-level call and session management.
 //!
 //! This crate provides the top-level abstractions for managing SIP calls:
@@ -22,6 +23,7 @@ pub mod call;
 pub mod hold;
 pub mod manager;
 pub mod registration;
+pub mod session_codec;
 pub mod transfer;
 
 // Re-export main types
@@ -37,6 +39,7 @@ pub use manager::{CallManager, ManagerConfig, ManagerEvent};
 pub use registration::{
     RegistrationConfig, RegistrationError, RegistrationManager, RegistrationState,
 };
+pub use session_codec::SessionCodec;
 pub use transfer::{
     ReferTo, ReplacesHeader, TransferError, TransferInfo, TransferManager, TransferProgress,
     TransferRole, TransferState, TransferType,

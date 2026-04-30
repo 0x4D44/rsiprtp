@@ -1,6 +1,5 @@
 [package]
 name = "rsiprtp-session"
-publish = false
 description = "High-level call and session management"
 version.workspace = true
 edition.workspace = true
@@ -15,15 +14,11 @@ rsiprtp-dialog.workspace = true
 rsiprtp-transport.workspace = true
 rsiprtp-sdp.workspace = true
 rsiprtp-rtp.workspace = true
-rsiprtp-media.workspace = true
+# Opus is feature-gated in rsiprtp-media; rsiprtp-session always needs it
+# because `SessionCodec` dispatches Opus unconditionally. Cargo merges
+# features across the workspace, so this also covers tests.
+rsiprtp-media = { workspace = true, features = ["opus"] }
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
-# Pull in the Opus codec for the bitrate-bridge integration test. Opus is
-# feature-gated in rsiprtp-media; the rest of the workspace defaults work
-# without it.
-# `opus` here pulls ropus into test binaries only; production `cargo build` of this crate is unaffected.
-rsiprtp-media = { workspace = true, features = ["opus"] }
