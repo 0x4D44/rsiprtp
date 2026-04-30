@@ -259,7 +259,8 @@ impl SenderReport {
             return Err(RtcpParseError::UnknownPacketType(header.packet_type as u8));
         }
 
-        if rest.len() < 20 {
+        // Sender info: SSRC + NTP secs + NTP frac + RTP ts + packet count + octet count = 24 bytes.
+        if rest.len() < 24 {
             return Err(RtcpParseError::TooShort(rest.len()));
         }
 
@@ -1442,6 +1443,21 @@ mod tests {
         assert_eq!(parsed.report_blocks.len(), 1);
         assert_eq!(parsed.report_blocks[0].ssrc, 67890);
         assert_eq!(parsed.report_blocks[0].fraction_lost, 25);
+    }
+
+    /// Regression for fuzz finding `rtcp_sr-001`: a 27-byte input with V=2 RC=0
+    /// PT=200 length=0 used to slip past the sender-info length check (which
+    /// only required 20 bytes) and panic inside `Buf::advance(4)` while reading
+    /// the 24-byte sender info. Parser must now return an error cleanly.
+    #[test]
+    fn test_sr_parse_truncated_fuzz_001() {
+        let crash: [u8; 27] = [
+            0x80, 0xc8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x01, 0x00, 0x00, 0x0a, 0x05, 0x00, 0x80,
+        ];
+        let result = SenderReport::parse(&crash);
+        assert!(result.is_err());
+        assert_rtcp_err_contains(result, "TooShort");
     }
 
     #[test]
