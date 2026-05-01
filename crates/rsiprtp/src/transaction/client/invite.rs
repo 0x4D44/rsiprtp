@@ -289,7 +289,14 @@ impl InviteClientTransaction {
                 }
             }
             State::Terminated => {
-                // Ignore responses in Terminated state
+                // RFC 3261 §13.2.2.4: 2xx responses from forked branches
+                // arrive after the transaction has terminated; the TU
+                // must still see them so it can ACK each forked 2xx and
+                // decide which dialog to keep. Non-2xx responses in
+                // Terminated remain ignored.
+                if (200..300).contains(&code) {
+                    self.actions.push(Action::Event(Event::Success(response)));
+                }
             }
         }
     }
@@ -436,6 +443,60 @@ mod tests {
         assert!(actions
             .iter()
             .any(|a| matches!(a, Action::Event(Event::Success(_)))));
+    }
+
+    /// RFC 3261 §13.2.2.4: when a forking proxy fans out an INVITE,
+    /// each forked UAS may answer with its own 2xx. The first 2xx
+    /// terminates the INVITE client transaction, but every subsequent
+    /// 2xx (carrying a *different* To-tag — distinct early dialog) must
+    /// still reach the TU so it can ACK that fork and decide which
+    /// dialog to keep. The transaction's `Terminated` state must not
+    /// swallow these.
+    #[test]
+    fn test_forked_2xx_after_first_2xx_reaches_tu() {
+        let invite = create_invite();
+        let mut tx = InviteClientTransaction::new(invite.clone(), false).unwrap();
+        tx.poll_actions();
+
+        // First 2xx — terminates the transaction normally.
+        let first = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&invite)
+            .to_tag("fork-A")
+            .build()
+            .unwrap();
+        tx.handle_response(first);
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        let first_tag = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Event(Event::Success(r)) => r.to_tag(),
+                _ => None,
+            })
+            .expect("first 2xx must produce a Success event");
+        assert_eq!(first_tag, "fork-A");
+
+        // Second 2xx — same INVITE, different forked UAS, different
+        // To-tag. The TU must see this so it can ACK fork-B and BYE
+        // the loser.
+        let second = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&invite)
+            .to_tag("fork-B")
+            .build()
+            .unwrap();
+        tx.handle_response(second);
+        assert_eq!(tx.state(), State::Terminated);
+        let actions = tx.poll_actions();
+        let second_tag = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::Event(Event::Success(r)) => r.to_tag(),
+                _ => None,
+            })
+            .expect("forked 2xx (fork-B) must reach the TU per RFC 3261 §13.2.2.4");
+        assert_eq!(second_tag, "fork-B");
     }
 
     #[test]
