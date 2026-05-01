@@ -48,7 +48,7 @@ impl SessionCodec {
         match negotiated.encoding.to_lowercase().as_str() {
             "pcmu" => Ok(SessionCodec::G711(G711Codec::new(G711Variant::MuLaw))),
             "pcma" => Ok(SessionCodec::G711(G711Codec::new(G711Variant::ALaw))),
-            "g722" => Ok(SessionCodec::G722(Box::new(G722Codec::new()))),
+            "g722" => Ok(SessionCodec::G722(Box::default())),
             "opus" => OpusCodec::with_config(OpusConfig::fullband_speech())
                 .map(|c| SessionCodec::Opus(Box::new(c)))
                 .map_err(|e| format!("failed to build Opus codec: {e}")),

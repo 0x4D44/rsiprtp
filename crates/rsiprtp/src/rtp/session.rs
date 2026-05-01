@@ -220,7 +220,11 @@ impl CongestionController {
             self.rtt_var = rtt / 2;
         } else {
             // rttvar = (1 - 1/4) * rttvar + 1/4 * |srtt - rtt|
-            let diff = self.smoothed_rtt.abs_diff(rtt);
+            let diff = if self.smoothed_rtt > rtt {
+                self.smoothed_rtt - rtt
+            } else {
+                rtt - self.smoothed_rtt
+            };
             self.rtt_var = self.rtt_var * 3 / 4 + diff / 4;
 
             // srtt = (1 - 1/8) * srtt + 1/8 * rtt

@@ -556,7 +556,7 @@ impl SourceDescription {
             }
             buf.put_u8(0); // End of items
                            // Pad to 32-bit boundary
-            while !buf.len().is_multiple_of(4) {
+            while buf.len() % 4 != 0 {
                 buf.put_u8(0);
             }
         }
@@ -665,7 +665,7 @@ impl Goodbye {
             buf.put_u8(reason_bytes.len() as u8);
             buf.put_slice(reason_bytes);
             // Pad to 32-bit boundary
-            while !buf.len().is_multiple_of(4) {
+            while buf.len() % 4 != 0 {
                 buf.put_u8(0);
             }
         }
