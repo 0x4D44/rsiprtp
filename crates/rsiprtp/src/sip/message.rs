@@ -1046,22 +1046,20 @@ pub fn generate_branch() -> String {
 }
 
 /// Generate a unique tag for From/To headers.
+///
+/// Uses 64 bits of OS-seeded randomness via `rand::thread_rng()` so that
+/// rapid-fire calls cannot collide. The previous implementation derived the
+/// tag purely from `SystemTime::now()`, which produced duplicates on
+/// platforms where the wall-clock resolution was coarser than the time
+/// between two adjacent calls (observed on macOS).
 pub fn generate_tag() -> String {
-    format!("{:x}", rand_u64())
+    use rand::RngCore;
+    format!("{:x}", rand::thread_rng().next_u64())
 }
 
 /// Generate a unique Call-ID.
 pub fn generate_call_id(domain: &str) -> String {
     format!("{}@{}", uuid::Uuid::new_v4().simple(), domain)
-}
-
-/// Simple random u64 (not cryptographically secure).
-fn rand_u64() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let duration = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    duration.as_nanos() as u64 ^ (duration.as_secs() << 32)
 }
 
 #[cfg(test)]
@@ -2083,7 +2081,6 @@ Content-Length: 0\r\n\
     #[test]
     fn test_generate_tag_unique() {
         let tag1 = generate_tag();
-        std::thread::sleep(std::time::Duration::from_millis(1));
         let tag2 = generate_tag();
         assert_ne!(tag1, tag2);
     }

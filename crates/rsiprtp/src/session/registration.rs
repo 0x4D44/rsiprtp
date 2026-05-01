@@ -141,9 +141,19 @@ impl RegistrationManager {
     /// Check if registration needs refresh.
     pub fn needs_refresh(&self) -> bool {
         if let Some(expires_at) = self.expires_at {
-            // Refresh when 80% of the time has elapsed
-            let refresh_at = expires_at - Duration::from_secs((self.config.expires as u64) / 5);
-            Instant::now() >= refresh_at
+            // Refresh when 80% of the time has elapsed.
+            //
+            // Use `checked_sub` because `Instant` on some platforms (notably
+            // Windows, where `Instant` is monotonic since boot) cannot
+            // represent times before the platform's epoch. If subtracting
+            // the refresh window would underflow, the refresh threshold is
+            // logically already in the past, so we report true.
+            let now = Instant::now();
+            let window = Duration::from_secs((self.config.expires as u64) / 5);
+            match expires_at.checked_sub(window) {
+                Some(refresh_at) => now >= refresh_at,
+                None => true,
+            }
         } else {
             false
         }
@@ -1071,6 +1081,20 @@ Content-Length: 0\r\n\
         manager.expires_at = Some(Instant::now() + Duration::from_secs(7200));
 
         assert!(!manager.needs_refresh());
+    }
+
+    #[test]
+    fn test_needs_refresh_underflows_to_true() {
+        // Force the `checked_sub` underflow arm: with `expires_at == now`,
+        // subtracting the 720s refresh window underflows the `Instant`
+        // epoch on every host, regardless of uptime. The function must
+        // return `true` (refresh now) without panicking.
+        let mut manager = RegistrationManager::new(test_config());
+
+        manager.state = RegistrationState::Registered;
+        manager.expires_at = Some(Instant::now());
+
+        assert!(manager.needs_refresh());
     }
 
     #[test]
