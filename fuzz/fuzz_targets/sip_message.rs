@@ -2,5 +2,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = rsiprtp_sip::SipMessage::parse(data);
+    let _ = rsiprtp::sip::SipMessage::parse(data);
 });

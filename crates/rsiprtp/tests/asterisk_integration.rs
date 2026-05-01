@@ -9,11 +9,11 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use rsiprtp_session::{RegistrationConfig, RegistrationManager, RegistrationState};
-use rsiprtp_sip::{
+use rsiprtp::session::{RegistrationConfig, RegistrationManager, RegistrationState};
+use rsiprtp::sip::{
     generate_branch, generate_call_id, generate_tag, Method, SipMessage, SipRequest,
 };
-use rsiprtp_transport::UdpTransport;
+use rsiprtp::transport::UdpTransport;
 
 /// Asterisk address (from docker compose)
 const ASTERISK_ADDR: &str = "127.0.0.1:5060";
@@ -217,7 +217,7 @@ async fn test_register_with_asterisk() {
 /// Test making an outbound INVITE call to Asterisk echo service
 #[tokio::test]
 async fn test_outbound_call_to_echo() {
-    use rsiprtp_sip::DigestChallenge;
+    use rsiprtp::sip::DigestChallenge;
 
     // Skip if Asterisk is not available
     if !check_asterisk_available().await {
@@ -404,8 +404,8 @@ async fn test_outbound_call_to_echo() {
                 // Retry with authentication
                 cseq += 1;
                 let new_branch = generate_branch();
-                let credentials = rsiprtp_sip::DigestCredentials::new(TEST_USER, TEST_PASSWORD);
-                let digest_response = rsiprtp_sip::DigestResponse::from_challenge(
+                let credentials = rsiprtp::sip::DigestCredentials::new(TEST_USER, TEST_PASSWORD);
+                let digest_response = rsiprtp::sip::DigestResponse::from_challenge(
                     &challenge,
                     &credentials,
                     "INVITE",

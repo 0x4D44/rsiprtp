@@ -10,6 +10,9 @@ publish = false
 name = "gabby"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 # Internal crates
 rsiprtp = { path = "../rsiprtp" }

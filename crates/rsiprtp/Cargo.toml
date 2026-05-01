@@ -12,29 +12,75 @@ documentation = "https://docs.rs/rsiprtp"
 readme = "../../README.md"
 keywords = ["sip", "rtp", "voip", "telephony", "sans-io"]
 categories = ["network-programming", "multimedia"]
+exclude = [
+    "tests/baresip_integration/**",
+    "tests/baresip_integration.rs",
+    "tests/asterisk_integration.rs",
+]
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[lints]
+workspace = true
+
+[features]
+default = []
+
 [dependencies]
-rsiprtp-core.workspace = true
-rsiprtp-sip.workspace = true
-rsiprtp-transaction.workspace = true
-rsiprtp-dialog.workspace = true
-rsiprtp-transport.workspace = true
-rsiprtp-sdp.workspace = true
-rsiprtp-rtp.workspace = true
-rsiprtp-media.workspace = true
-rsiprtp-session.workspace = true
+# SIP parsing
+rsip.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Utilities
+bytes.workspace = true
+uuid.workspace = true
+md5.workspace = true
+sha2.workspace = true
+sha1.workspace = true
+hex.workspace = true
+rand.workspace = true
+
+# Async runtime
 tokio.workspace = true
+
+# TLS
+tokio-rustls.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
+webpki-roots.workspace = true
+
+# DNS
+hickory-resolver.workspace = true
+
+# Audio codecs
+audio-codec-algorithms.workspace = true
+ezk-g722.workspace = true
+ropus.workspace = true
+
+# Cryptography
+aes.workspace = true
+ctr.workspace = true
+hmac.workspace = true
+base64.workspace = true
+
+# Logging
 tracing.workspace = true
+
+# Serialization
+serde.workspace = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
 tempfile = "3"
-uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
+rcgen = "0.13"
+rsa = "0.9"
+p256 = "0.13"
+serde_json.workspace = true
 
 [[example]]
 name = "basic_call"

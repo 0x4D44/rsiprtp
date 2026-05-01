@@ -2,5 +2,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = rsiprtp_rtp::rtcp::Fir::parse(data);
+    let _ = rsiprtp::rtp::rtcp::Fir::parse(data);
 });

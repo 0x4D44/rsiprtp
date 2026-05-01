@@ -4,9 +4,9 @@
 //! including buffer boundaries, integer overflows, null byte injection, CRLF injection,
 //! and other attack vectors.
 
-use rsiprtp_rtp::{RtpPacket, RtpParseError};
-use rsiprtp_sdp::SessionDescription;
-use rsiprtp_sip::SipMessage;
+use rsiprtp::rtp::{RtpPacket, RtpParseError};
+use rsiprtp::sdp::SessionDescription;
+use rsiprtp::sip::SipMessage;
 
 mod sip_security {
     use super::*;

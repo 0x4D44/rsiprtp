@@ -5,12 +5,13 @@ This document is for contributors and curious users who want to understand how
 [README](README.md) and the [API docs on docs.rs](https://docs.rs/rsiprtp) are
 the better starting point.
 
-The stack is organized as a layered Cargo workspace. Lower layers are pure
-data and state machines; higher layers add I/O, scheduling, and convenience.
-The top-level `rsiprtp` crate is a thin facade that re-exports the public
-types every consumer typically needs.
+The stack is organized as a single crate with layered internal modules.
+Lower layers are pure data and state machines; higher layers add I/O,
+scheduling, and convenience. Common types are re-exported flat through
+`rsiprtp::prelude` for convenience, but every module is also reachable
+directly (e.g. `rsiprtp::rtp`, `rsiprtp::srtp`, `rsiprtp::ice`).
 
-## Crate layering
+## Module layering
 
 ```mermaid
 graph TB
@@ -19,44 +20,44 @@ graph TB
         APP[Your Application]
     end
 
-    subgraph "Facade"
-        FACADE[rsiprtp<br/><i>Unified API</i>]
+    subgraph "Crate"
+        CRATE[rsiprtp<br/><i>Single published crate</i>]
     end
 
     subgraph "Session Layer"
-        SESSION[rsiprtp-session<br/><i>Call & Registration Management</i>]
-        DIALOG[rsiprtp-dialog<br/><i>INVITE Dialog State</i>]
+        SESSION[rsiprtp::session<br/><i>Call & Registration Management</i>]
+        DIALOG[rsiprtp::dialog<br/><i>INVITE Dialog State</i>]
     end
 
     subgraph "Transaction Layer"
-        TRANSACTION[rsiprtp-transaction<br/><i>RFC 3261 State Machines</i><br/><b>Sans-IO</b>]
+        TRANSACTION[rsiprtp::transaction<br/><i>RFC 3261 State Machines</i><br/><b>Sans-IO</b>]
     end
 
     subgraph "Signaling"
-        SIP[rsiprtp-sip<br/><i>SIP Parsing & Auth</i>]
-        SDP[rsiprtp-sdp<br/><i>SDP Negotiation</i>]
+        SIP[rsiprtp::sip<br/><i>SIP Parsing & Auth</i>]
+        SDP[rsiprtp::sdp<br/><i>SDP Negotiation</i>]
     end
 
     subgraph "Media Layer"
-        RTP[rsiprtp-rtp<br/><i>RTP/RTCP/DTMF</i>]
-        SRTP[rsiprtp-srtp<br/><i>SRTP & DTLS</i>]
-        MEDIA[rsiprtp-media<br/><i>Codecs & Jitter Buffer</i>]
+        RTP[rsiprtp::rtp<br/><i>RTP/RTCP/DTMF</i>]
+        SRTP[rsiprtp::srtp<br/><i>SRTP & DTLS framing</i>]
+        MEDIA[rsiprtp::media<br/><i>Codecs & Jitter Buffer</i>]
     end
 
     subgraph "Network Layer"
-        TRANSPORT[rsiprtp-transport<br/><i>UDP/TCP/TLS</i>]
-        ICE[rsiprtp-ice<br/><i>ICE/STUN/TURN</i>]
+        TRANSPORT[rsiprtp::transport<br/><i>UDP/TCP/TLS</i>]
+        ICE[rsiprtp::ice<br/><i>ICE/STUN/TURN</i>]
     end
 
     subgraph "Foundation"
-        CORE[rsiprtp-core<br/><i>Types & Errors</i>]
+        CORE[rsiprtp::core<br/><i>Types & Errors</i>]
     end
 
-    GABBY --> FACADE
-    APP --> FACADE
-    FACADE --> SESSION
-    FACADE --> MEDIA
-    FACADE --> RTP
+    GABBY --> CRATE
+    APP --> CRATE
+    CRATE --> SESSION
+    CRATE --> MEDIA
+    CRATE --> RTP
     SESSION --> DIALOG
     SESSION --> TRANSACTION
     SESSION --> SDP
@@ -69,33 +70,33 @@ graph TB
     MEDIA --> CORE
 ```
 
-Responsibilities by crate:
+Responsibilities by module:
 
-- **`rsiprtp-core`** — shared types, error enum, configuration. No
-  dependencies on other workspace crates.
-- **`rsiprtp-sip`** — SIP message parsing and building (wraps the `rsip`
+- **`rsiprtp::core`** — shared types, error enum, configuration. The
+  foundation other modules build on.
+- **`rsiprtp::sip`** — SIP message parsing and building (wraps the `rsip`
   crate), digest authentication helpers, header generators (`Call-ID`, `tag`,
   `branch`).
-- **`rsiprtp-transaction`** — RFC 3261 transaction state machines: INVITE
+- **`rsiprtp::transaction`** — RFC 3261 transaction state machines: INVITE
   client, INVITE server, non-INVITE client, non-INVITE server. **Sans-IO**:
   no sockets, no timers, no async runtime — just `Event` in, `Action` out.
-- **`rsiprtp-dialog`** — INVITE dialog state, `DialogId`, route-set tracking.
-- **`rsiprtp-sdp`** — SDP grammar (RFC 4566), offer/answer negotiation
+- **`rsiprtp::dialog`** — INVITE dialog state, `DialogId`, route-set tracking.
+- **`rsiprtp::sdp`** — SDP grammar (RFC 4566), offer/answer negotiation
   (RFC 3264), an SDP builder for outbound offers/answers.
-- **`rsiprtp-transport`** — UDP, TCP, and TLS transports on top of Tokio,
+- **`rsiprtp::transport`** — UDP, TCP, and TLS transports on top of Tokio,
   plus DNS resolution.
-- **`rsiprtp-rtp`** — RTP packet encoding/decoding, RTCP sender and receiver
+- **`rsiprtp::rtp`** — RTP packet encoding/decoding, RTCP sender and receiver
   reports, RFC 4733 DTMF events, an `RtpSession` that owns sequence and
   timestamp state.
-- **`rsiprtp-srtp`** — SRTP encryption/decryption and DTLS-SRTP key exchange.
-- **`rsiprtp-ice`** — ICE, STUN, and TURN. Standalone crates today; not yet
-  fully integrated into the high-level call flow.
-- **`rsiprtp-media`** — audio codecs (G.711, G.722, Opus), an adaptive
+- **`rsiprtp::srtp`** — SRTP encryption/decryption with SDES key exchange,
+  plus DTLS-SRTP framing types (the DTLS handshake itself is not yet
+  implemented).
+- **`rsiprtp::ice`** — ICE, STUN, and TURN building blocks. Reachable as a
+  module today; not yet integrated into the high-level call flow.
+- **`rsiprtp::media`** — audio codecs (G.711, G.722, Opus), an adaptive
   jitter buffer, and helpers for resampling/mixing.
-- **`rsiprtp-session`** — high-level `CallManager` and `RegistrationManager`
+- **`rsiprtp::session`** — high-level `CallManager` and `RegistrationManager`
   that compose the layers below into something usable.
-- **`rsiprtp`** — facade crate, re-exports the rest. This is the only crate
-  most consumers depend on directly.
 
 ## The Sans-IO pattern
 
@@ -130,9 +131,9 @@ Why this matters:
 - **Testability.** Unit tests don't need sockets, timers, or async. They feed
   events, assert on actions, and run in microseconds.
 - **Runtime independence.** The state machines compile and run anywhere. The
-  `rsiprtp-session` layer happens to use Tokio, but that's a choice made
+  `rsiprtp::session` layer happens to use Tokio, but that's a choice made
   above the Sans-IO core, not baked in.
-- **Composability.** The same transaction crate can drive a UDP UA, a TCP
+- **Composability.** The same transaction module can drive a UDP UA, a TCP
   proxy, or an in-memory simulator.
 
 ## SIP call establishment
@@ -274,5 +275,5 @@ ports until you configure a `ManagerConfig` and start a transport.
 - [README.md](README.md) — public-facing overview and quick start
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow
 - [docs.rs/rsiprtp](https://docs.rs/rsiprtp) — generated API documentation
-- `crates/<name>/src/lib.rs` — each crate has a module-level doc comment
-  describing its scope and types
+- `crates/rsiprtp/src/<module>/mod.rs` — each module has a module-level doc
+  comment describing its scope and types

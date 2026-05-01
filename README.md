@@ -13,9 +13,8 @@
 ## Status
 
 `rsiprtp` is **pre-1.0**. The public API will change between minor releases
-until 1.0 — review the changelog before upgrading. It is suitable for
-prototyping and serious internal use today, but pin an exact version and read
-the release notes before depending on it from production code.
+until 1.0. It is suitable for prototyping and serious internal use today, but
+pin an exact version before depending on it from production code.
 
 ## Features
 
@@ -33,12 +32,14 @@ the release notes before depending on it from production code.
 
 **Transport and security**
 - UDP, TCP, and TLS transports built on Tokio
-- SRTP encryption and DTLS-SRTP key exchange
-- ICE / STUN / TURN crates for NAT traversal (in-progress, not yet wired into
-  `CallManager` — see [What's not included](#whats-not-included-yet))
+- SRTP encryption with SDES key exchange (DTLS-SRTP framing types are
+  present, but the DTLS handshake itself is not yet implemented)
+- ICE / STUN / TURN modules for NAT traversal (in-progress, not yet wired
+  into `CallManager` — see [What's not included](#whats-not-included-yet))
 
 **Architecture**
-- Layered workspace of focused crates, re-exported through one facade
+- Single crate organized into focused modules with a flat `prelude` import
+  surface
 - Sans-IO core: deterministic, runtime-agnostic, and easy to test
 
 ## Quick example
@@ -108,14 +109,15 @@ building on top of `rsiprtp`.
 
 ## Architecture
 
-`rsiprtp` is a workspace of focused crates layered from foundations
-(`rsiprtp-core`) up through transport, media, transactions, dialogs, and
+`rsiprtp` is a single crate organized into modules layered from foundations
+(`rsiprtp::core`) up through transport, media, transactions, dialogs, and
 finally a session layer with `CallManager` and `RegistrationManager`. The
-top-level `rsiprtp` crate re-exports the pieces most consumers want via
-`rsiprtp::prelude::*`.
+pieces most consumers want are re-exported flat via `rsiprtp::prelude::*`,
+but every module is also reachable directly (e.g. `rsiprtp::rtp`,
+`rsiprtp::srtp`, `rsiprtp::ice`).
 
-For diagrams of the crate graph, the Sans-IO event/action loop, and a typical
-INVITE call flow, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For diagrams of the module graph, the Sans-IO event/action loop, and a
+typical INVITE call flow, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Companion: gabby
 

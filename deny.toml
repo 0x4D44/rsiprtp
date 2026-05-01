@@ -23,18 +23,20 @@
 #
 # Advisory ignores:
 #   * RUSTSEC-2023-0071 (rsa Marvin Attack): no upstream fix available; the
-#     `rsa` crate is a DEV-only transitive dep through rcgen used in
-#     rsiprtp-transport tests. Not present in any production binary.
+#     `rsa` crate is a DEV-only transitive dep through rcgen used by the
+#     transport-layer tests for self-signed TLS certs. Not present in any
+#     production binary.
 #   * RUSTSEC-2025-0134 (rustls-pemfile unmaintained): archived crate;
 #     migration to rustls-pki-types' PemObject is pending. No security
 #     impact.
 #
 # Bans:
-#   * `wildcards = "warn"` (instead of "deny") because the project's
-#     single-facade publishing plan uses path-only workspace deps in the
-#     `rsiprtp` facade crate, which cargo-deny flags as wildcards even with
-#     `allow-wildcard-paths = true`. Cargo itself enforces correct version
-#     specifiers at `cargo publish` time.
+#   * `wildcards = "warn"` (instead of "deny") as a conservative fallback.
+#     The published `rsiprtp` crate has no path-only workspace deps — every
+#     dependency is a versioned crates.io ref — so `cargo publish` already
+#     enforces correct version specifiers. Keeping `"warn"` simply means an
+#     accidental `*` somewhere in dev/test deps surfaces as a warning rather
+#     than a hard build break.
 #
 # All other crates in the dep graph carry licenses on the global allow list
 # (MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, Unicode-3.0, 0BSD,
@@ -119,7 +121,7 @@ yanked = "deny"
 ignore = [
     # RUSTSEC-2023-0071 (rsa): Marvin Attack timing sidechannel in the `rsa`
     # crate. Pulled in transitively through `rcgen` as a DEV dependency only
-    # (used by rsiprtp-transport tests to generate self-signed TLS certs).
+    # (used by the transport-layer tests to generate self-signed TLS certs).
     # Not present in any production binary. No upstream fix available yet
     # (tracked at https://github.com/RustCrypto/RSA/issues/626). Re-check on
     # rsa >=0.10 release.
@@ -137,18 +139,14 @@ ignore = [
 # Transitive duplicates are common across the ecosystem (e.g. windows-sys
 # 0.48/0.52/0.60). Warn so we notice them without blocking the build.
 multiple-versions = "warn"
-# Wildcards in version specifiers are an anti-pattern for published crates;
-# we deny them. `allow-wildcard-paths = true` exempts internal `path = "..."`
-# workspace deps that appear as wildcards to cargo-deny.
-#
-# Note: cargo-deny still flags wildcard path deps in publishable crates
-# because crates.io rejects path-only deps at publish time. Our publishing
-# plan is "single-facade" — only the `rsiprtp` crate is published, and
-# `cargo publish` rewrites its workspace path deps to versioned crates.io
-# refs at publish time. To accommodate that workflow without false
-# positives, we keep wildcards at `deny` for the actual `*` pattern but
-# downgrade to `warn` for path-only workspace deps via the workspace
-# warning (cargo-deny does not yet expose a finer-grained switch).
+# Wildcards in version specifiers are an anti-pattern for published crates.
+# The published `rsiprtp` crate has no path-only workspace deps — every
+# dependency carries a real version — so `cargo publish` already rejects any
+# wildcard sneaking into a published manifest. We keep `wildcards = "warn"`
+# (rather than `"deny"`) as a conservative fallback so an accidental `*` in a
+# dev/test dep surfaces as a warning instead of a hard build break.
+# `allow-wildcard-paths = true` is kept as a belt-and-braces safety for any
+# future internal path entry.
 wildcards = "warn"
 allow-wildcard-paths = true
 highlight = "all"

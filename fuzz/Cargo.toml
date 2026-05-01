@@ -13,11 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-rsiprtp-rtp = { path = "../crates/rsiprtp-rtp" }
-rsiprtp-sip = { path = "../crates/rsiprtp-sip" }
-rsiprtp-sdp = { path = "../crates/rsiprtp-sdp" }
-rsiprtp-srtp = { path = "../crates/rsiprtp-srtp" }
-rsiprtp-ice = { path = "../crates/rsiprtp-ice" }
+rsiprtp = { path = "../crates/rsiprtp" }
 
 [profile.release]
 debug = 1

@@ -4,7 +4,7 @@
 //! concurrent operations correctly, including parallel operations, shared state access,
 //! and resource management under concurrent load.
 
-use rsiprtp_rtp::RtpSession;
+use rsiprtp::rtp::RtpSession;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -93,7 +93,7 @@ mod rtp_concurrency {
             .map(|_| {
                 thread::spawn(move || {
                     for _ in 0..100 {
-                        let result = rsiprtp_rtp::RtpPacket::parse(packet_data);
+                        let result = rsiprtp::rtp::RtpPacket::parse(packet_data);
                         assert!(result.is_ok());
                     }
                 })
@@ -108,7 +108,7 @@ mod rtp_concurrency {
 
 mod sip_concurrency {
     use super::*;
-    use rsiprtp_sip::SipMessage;
+    use rsiprtp::sip::SipMessage;
 
     /// Test concurrent SIP message parsing
     #[test]
@@ -146,7 +146,7 @@ mod sip_concurrency {
     /// Test concurrent SIP request building
     #[test]
     fn test_concurrent_request_building() {
-        use rsiprtp_sip::{Method, SipRequest};
+        use rsiprtp::sip::{Method, SipRequest};
 
         let handles: Vec<_> = (0..10)
             .map(|i| {
@@ -180,7 +180,7 @@ mod sip_concurrency {
 
 mod sdp_concurrency {
     use super::*;
-    use rsiprtp_sdp::SessionDescription;
+    use rsiprtp::sdp::SessionDescription;
 
     /// Test concurrent SDP parsing
     #[test]
@@ -216,7 +216,7 @@ mod sdp_concurrency {
     /// Test concurrent SDP offer/answer creation
     #[test]
     fn test_concurrent_offer_answer() {
-        use rsiprtp_sdp::{
+        use rsiprtp::sdp::{
             builder::{MediaBuilder, SdpBuilder},
             negotiation::create_answer,
             Codec,
@@ -252,8 +252,8 @@ mod sdp_concurrency {
 
 mod transaction_concurrency {
     use super::*;
-    use rsiprtp_sip::{Method, SipRequest};
-    use rsiprtp_transaction::{InviteClientTransaction, NonInviteClientTransaction};
+    use rsiprtp::sip::{Method, SipRequest};
+    use rsiprtp::transaction::{InviteClientTransaction, NonInviteClientTransaction};
 
     /// Test concurrent transaction creation
     #[test]
@@ -348,7 +348,7 @@ mod stress_tests {
     /// Test concurrent parsing under stress
     #[test]
     fn test_stress_concurrent_parsing() {
-        use rsiprtp_sip::SipMessage;
+        use rsiprtp::sip::SipMessage;
 
         let message = Arc::new(
             b"INVITE sip:bob@example.com SIP/2.0\r\n\
@@ -446,7 +446,7 @@ mod resource_limits {
     /// Test concurrent parsing with different message types
     #[test]
     fn test_mixed_message_parsing() {
-        use rsiprtp_sip::SipMessage;
+        use rsiprtp::sip::SipMessage;
 
         let invite = Arc::new(b"INVITE sip:bob@example.com SIP/2.0\r\nVia: SIP/2.0/UDP pc.example.com;branch=z9hG4bK776\r\nMax-Forwards: 70\r\nTo: Bob <sip:bob@biloxi.com>\r\nFrom: Alice <sip:alice@atlanta.com>;tag=1928301774\r\nCall-ID: a84b4c76e66710@pc.atlanta.com\r\nCSeq: 314159 INVITE\r\nContent-Length: 0\r\n\r\n".to_vec());
         let response = Arc::new(b"SIP/2.0 200 OK\r\nVia: SIP/2.0/UDP pc.example.com;branch=z9hG4bK776\r\nTo: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\nFrom: Alice <sip:alice@atlanta.com>;tag=1928301774\r\nCall-ID: a84b4c76e66710@pc.atlanta.com\r\nCSeq: 314159 INVITE\r\nContent-Length: 0\r\n\r\n".to_vec());
@@ -508,7 +508,7 @@ mod synchronization_tests {
     /// Test no data races in concurrent operations
     #[test]
     fn test_no_data_races() {
-        use rsiprtp_rtp::RtpPacket;
+        use rsiprtp::rtp::RtpPacket;
 
         let packet_data: &'static [u8] = &[
             0x80, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x30, 0x39, 0xAA, 0xBB,

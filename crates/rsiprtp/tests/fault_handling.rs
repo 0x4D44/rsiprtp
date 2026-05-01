@@ -4,10 +4,10 @@
 //! gracefully, including network failures, malformed messages, resource exhaustion,
 //! and timeout scenarios.
 
-use rsiprtp_rtp::{RtpPacket, RtpParseError, RtpSession};
-use rsiprtp_sdp::SessionDescription;
-use rsiprtp_sip::{Method, SipMessage, SipRequest};
-use rsiprtp_transaction::{
+use rsiprtp::rtp::{RtpPacket, RtpParseError, RtpSession};
+use rsiprtp::sdp::SessionDescription;
+use rsiprtp::sip::{Method, SipMessage, SipRequest};
+use rsiprtp::transaction::{
     InviteClientTransaction, InviteServerTransaction, NonInviteClientTransaction, Timer,
 };
 
@@ -123,7 +123,7 @@ mod transaction_faults {
         tx.poll_actions();
 
         // Send failure response
-        let response = rsiprtp_sip::SipResponse::builder()
+        let response = rsiprtp::sip::SipResponse::builder()
             .status(404, "Not Found")
             .from_request(&invite)
             .to_tag("totag")
@@ -152,7 +152,7 @@ mod transaction_faults {
         tx.poll_actions();
 
         // Send failure response to go to Completed
-        let response = rsiprtp_sip::SipResponse::builder()
+        let response = rsiprtp::sip::SipResponse::builder()
             .status(500, "Server Error")
             .from_request(&invite)
             .to_tag("totag")
@@ -514,7 +514,7 @@ mod timeout_scenarios {
         tx.poll_actions();
 
         // Send error response
-        let response = rsiprtp_sip::SipResponse::builder()
+        let response = rsiprtp::sip::SipResponse::builder()
             .status(503, "Service Unavailable")
             .from_request(&invite)
             .to_tag("totag")

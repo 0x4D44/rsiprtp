@@ -1,4 +1,4 @@
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 //! rsiprtp - SIP/RTP stack for Rust
 //!
 //! A production-ready SIP/RTP communications stack designed for:
@@ -27,63 +27,67 @@
 //!
 //! # Architecture
 //!
-//! The stack is organized into layered crates:
+//! The stack is organized into modules:
 //!
-//! - `rsiprtp-core`: Common types, errors, configuration
-//! - `rsiprtp-sip`: SIP message parsing and building (wraps rsip)
-//! - `rsiprtp-transaction`: RFC 3261 transaction state machines (Sans-IO)
-//! - `rsiprtp-dialog`: Dialog management for INVITE sessions
-//! - `rsiprtp-transport`: UDP/TCP/TLS network transport
-//! - `rsiprtp-sdp`: SDP parsing and offer/answer negotiation
-//! - `rsiprtp-rtp`: RTP packet handling
-//! - `rsiprtp-media`: Audio codecs and jitter buffer
-//! - `rsiprtp-session`: High-level call management
+//! - [`core`]: Common types, errors, configuration
+//! - [`sip`]: SIP message parsing and building (wraps rsip)
+//! - [`transaction`]: RFC 3261 transaction state machines (Sans-IO)
+//! - [`dialog`]: Dialog management for INVITE sessions
+//! - [`transport`]: UDP/TCP/TLS network transport
+//! - [`sdp`]: SDP parsing and offer/answer negotiation
+//! - [`rtp`]: RTP packet handling
+//! - [`srtp`]: SRTP encryption (SDES key exchange; DTLS-SRTP framing types
+//!   are present, but the DTLS handshake itself is not yet implemented)
+//! - [`ice`]: ICE/STUN/TURN for NAT traversal
+//! - [`media`]: Audio codecs and jitter buffer
+//! - [`session`]: High-level call management
 
-// Re-export crate modules
-pub use rsiprtp_core as core;
-pub use rsiprtp_dialog as dialog;
-pub use rsiprtp_media as media;
-pub use rsiprtp_rtp as rtp;
-pub use rsiprtp_sdp as sdp;
-pub use rsiprtp_session as session;
-pub use rsiprtp_sip as sip;
-pub use rsiprtp_transaction as transaction;
-pub use rsiprtp_transport as transport;
+pub mod core;
+pub mod dialog;
+pub mod ice;
+pub mod media;
+pub mod rtp;
+pub mod sdp;
+pub mod session;
+pub mod sip;
+pub mod srtp;
+pub mod transaction;
+pub mod transport;
 
 /// Prelude for convenient imports.
 pub mod prelude {
     // Core types
-    pub use rsiprtp_core::{CodecConfig, Error, Result, StackConfig};
+    pub use crate::core::{CodecConfig, Error, Result, StackConfig};
 
     // Session management
-    pub use rsiprtp_session::{
+    pub use crate::session::{
         Call, CallConfig, CallDirection, CallEndReason, CallEvent, CallId, CallManager, CallState,
         Dialog, ManagerConfig, ManagerEvent, MediaSession, RegistrationConfig, RegistrationError,
         RegistrationManager, RegistrationState,
     };
 
     // SIP messaging
-    pub use rsiprtp_sip::{
+    pub use crate::sip::{
         generate_branch, generate_call_id, generate_tag, DigestChallenge, DigestCredentials,
         DigestResponse, Method, SipMessage, SipRequest, SipResponse,
     };
 
     // SDP negotiation
-    pub use rsiprtp_sdp::builder::SdpBuilder;
-    pub use rsiprtp_sdp::negotiation::{Codec, NegotiatedMedia};
-    pub use rsiprtp_sdp::parser::{Direction, MediaDescription, SessionDescription};
+    pub use crate::sdp::builder::SdpBuilder;
+    pub use crate::sdp::negotiation::{Codec, NegotiatedMedia};
+    pub use crate::sdp::parser::{Direction, MediaDescription, SessionDescription};
 
     // RTP/RTCP
-    pub use rsiprtp_rtp::{ReceiverReport, RtcpCompound, RtpPacket, RtpSession, SenderReport};
+    pub use crate::rtp::{ReceiverReport, RtcpCompound, RtpPacket, RtpSession, SenderReport};
 
     // Media
-    pub use rsiprtp_media::{
+    pub use crate::media::{
         G711Codec, G711Variant, JitterBuffer, JitterBufferConfig, PlayoutDecision,
     };
 
     // Dialog
-    pub use rsiprtp_dialog::DialogId;
+    pub use crate::dialog::DialogId;
 
     // Transport
-    pub use rsiprtp_transport::UdpTransport;
+    pub use crate::transport::UdpTransport;
 }

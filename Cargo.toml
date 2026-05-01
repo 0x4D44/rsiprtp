@@ -1,17 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rsiprtp-core",
-    "crates/rsiprtp-sip",
-    "crates/rsiprtp-transaction",
-    "crates/rsiprtp-dialog",
-    "crates/rsiprtp-transport",
-    "crates/rsiprtp-sdp",
-    "crates/rsiprtp-rtp",
-    "crates/rsiprtp-srtp",
-    "crates/rsiprtp-ice",
-    "crates/rsiprtp-media",
-    "crates/rsiprtp-session",
     "crates/rsiprtp",
     "crates/gabby",
 ]
@@ -19,17 +8,6 @@ members = [
 # library. Build it explicitly with `cargo build -p gabby` once VOSK_LIB_DIR
 # is set (see crates/gabby/scripts/setup_windows.ps1).
 default-members = [
-    "crates/rsiprtp-core",
-    "crates/rsiprtp-sip",
-    "crates/rsiprtp-transaction",
-    "crates/rsiprtp-dialog",
-    "crates/rsiprtp-transport",
-    "crates/rsiprtp-sdp",
-    "crates/rsiprtp-rtp",
-    "crates/rsiprtp-srtp",
-    "crates/rsiprtp-ice",
-    "crates/rsiprtp-media",
-    "crates/rsiprtp-session",
     "crates/rsiprtp",
 ]
 
@@ -42,16 +20,15 @@ authors = ["Martin Davidson <martingdavidson@gmail.com>"]
 repository = "https://github.com/0x4D44/rsiprtp"
 homepage = "https://github.com/0x4D44/rsiprtp"
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)", "cfg(coverage_nightly)"] }
+
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
 
 # SIP parsing
 rsip = "0.4"
-
-# RTP/RTCP (Phase 1 uses simplified custom impl, Phase 2+ uses these)
-# webrtc-rtp = "0.10"
-# webrtc-rtcp = "0.11"
 
 # Audio codecs
 audio-codec-algorithms = "0.7"
@@ -87,6 +64,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-pemfile = "2"
 webpki-roots = "0.26"
 
+# DNS
+hickory-resolver = "0.24"
+
 # Cryptography
 aes = "0.8"
 ctr = "0.9"
@@ -94,17 +74,3 @@ hmac = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 base64 = "0.22"
-
-# Internal crates — versions match workspace.package.version so all 11
-# crates publish atomically. Bump the workspace version when releasing.
-rsiprtp-core = { path = "crates/rsiprtp-core", version = "0.2.0" }
-rsiprtp-sip = { path = "crates/rsiprtp-sip", version = "0.2.0" }
-rsiprtp-transaction = { path = "crates/rsiprtp-transaction", version = "0.2.0" }
-rsiprtp-dialog = { path = "crates/rsiprtp-dialog", version = "0.2.0" }
-rsiprtp-transport = { path = "crates/rsiprtp-transport", version = "0.2.0" }
-rsiprtp-sdp = { path = "crates/rsiprtp-sdp", version = "0.2.0" }
-rsiprtp-rtp = { path = "crates/rsiprtp-rtp", version = "0.2.0" }
-rsiprtp-srtp = { path = "crates/rsiprtp-srtp", version = "0.2.0" }
-rsiprtp-ice = { path = "crates/rsiprtp-ice", version = "0.2.0" }
-rsiprtp-media = { path = "crates/rsiprtp-media", version = "0.2.0" }
-rsiprtp-session = { path = "crates/rsiprtp-session", version = "0.2.0" }
