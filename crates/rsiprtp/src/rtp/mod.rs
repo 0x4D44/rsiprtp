@@ -20,8 +20,8 @@
 //! let bytes = packet.build();
 //! ```
 
-pub mod dtmf;
-pub mod packet;
+pub(crate) mod dtmf;
+pub(crate) mod packet;
 pub mod rtcp;
 pub mod session;
 

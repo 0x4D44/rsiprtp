@@ -515,17 +515,20 @@ impl TransferManager {
 }
 
 /// Build Refer-To header for blind transfer.
-pub fn build_refer_to_blind(target_uri: &str) -> String {
+#[cfg(test)]
+pub(crate) fn build_refer_to_blind(target_uri: &str) -> String {
     format!("Refer-To: <{}>", target_uri)
 }
 
 /// Build Refer-To header for attended transfer.
-pub fn build_refer_to_attended(target_uri: &str, replaces: &ReplacesHeader) -> String {
+#[cfg(test)]
+pub(crate) fn build_refer_to_attended(target_uri: &str, replaces: &ReplacesHeader) -> String {
     format!("Refer-To: <{}?{}>", target_uri, replaces.to_uri_param())
 }
 
 /// Build Referred-By header.
-pub fn build_referred_by(transferor_uri: &str) -> String {
+#[cfg(test)]
+pub(crate) fn build_referred_by(transferor_uri: &str) -> String {
     format!("Referred-By: <{}>", transferor_uri)
 }
 

@@ -356,12 +356,14 @@ fn compute_hold_state(local: MediaDirection, remote: MediaDirection) -> HoldStat
 }
 
 /// Create SDP attribute line for direction.
-pub fn sdp_direction_attribute(direction: MediaDirection) -> String {
+#[cfg(test)]
+pub(crate) fn sdp_direction_attribute(direction: MediaDirection) -> String {
     format!("a={}", direction.to_sdp())
 }
 
 /// Parse direction from SDP media or session level.
-pub fn parse_sdp_direction(sdp: &str) -> MediaDirection {
+#[cfg(test)]
+pub(crate) fn parse_sdp_direction(sdp: &str) -> MediaDirection {
     for line in sdp.lines() {
         let line = line.trim();
         if let Some(attr) = line.strip_prefix("a=") {

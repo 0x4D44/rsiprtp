@@ -17,13 +17,13 @@
 //! let call_id = manager.create_call("sip:bob@example.com".to_string());
 //! ```
 
-pub mod bitrate_bridge;
+pub(crate) mod bitrate_bridge;
 pub mod call;
-pub mod hold;
-pub mod manager;
-pub mod registration;
-pub mod session_codec;
-pub mod transfer;
+pub(crate) mod hold;
+pub(crate) mod manager;
+pub(crate) mod registration;
+pub(crate) mod session_codec;
+pub(crate) mod transfer;
 
 // Re-export main types
 pub use bitrate_bridge::BitrateBridge;

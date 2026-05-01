@@ -28,11 +28,11 @@
 //! # }
 //! ```
 
-pub mod resolver;
-pub mod tcp;
-pub mod tls;
-pub mod traits;
-pub mod udp;
+pub(crate) mod resolver;
+pub(crate) mod tcp;
+pub(crate) mod tls;
+pub(crate) mod traits;
+pub(crate) mod udp;
 
 // Re-export main types
 pub use resolver::{ResolvedTarget, ResolverError, SipResolver};

@@ -24,10 +24,10 @@
 //! }
 //! ```
 
-pub mod agent;
-pub mod candidate;
-pub mod stun;
-pub mod turn;
+pub(crate) mod agent;
+pub(crate) mod candidate;
+pub(crate) mod stun;
+pub(crate) mod turn;
 
 pub use agent::{CandidatePair, IceAgent, IceConfig, IceError, IceRole, IceState, PairState};
 pub use candidate::{Candidate, CandidateType, Transport};

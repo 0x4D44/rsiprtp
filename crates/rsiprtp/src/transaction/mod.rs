@@ -24,7 +24,7 @@
 //! to the appropriate transaction based on transaction ID matching.
 
 pub mod client;
-pub mod manager;
+pub(crate) mod manager;
 pub mod server;
 pub mod timer;
 

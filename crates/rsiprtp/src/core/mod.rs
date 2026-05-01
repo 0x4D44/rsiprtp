@@ -2,8 +2,8 @@
 
 pub mod config;
 pub mod error;
-pub mod util;
+pub(crate) mod util;
 
 pub use config::*;
 pub use error::*;
-pub use util::{random_u16, random_u32, random_u64};
+pub(crate) use util::{random_u16, random_u32, random_u64};

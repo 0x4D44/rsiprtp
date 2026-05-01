@@ -15,14 +15,11 @@ pub use ropus::{Bitrate, InbandFec};
 /// Default Opus sample rate (48 kHz).
 pub const OPUS_SAMPLE_RATE: u32 = 48000;
 
-/// Default frame size in ms.
-pub const OPUS_FRAME_MS: usize = 20;
-
 /// Samples per 20ms frame at 48kHz.
 pub const OPUS_SAMPLES_PER_FRAME: usize = 960; // 48000 * 0.020
 
 /// Maximum Opus packet size.
-pub const OPUS_MAX_PACKET_SIZE: usize = 4000;
+pub(crate) const OPUS_MAX_PACKET_SIZE: usize = 4000;
 
 /// Opus encoder/decoder configuration.
 #[derive(Debug, Clone)]

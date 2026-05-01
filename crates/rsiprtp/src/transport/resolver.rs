@@ -8,7 +8,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use rsiprtp::transport::resolver::{SipResolver, ResolvedTarget};
+//! use rsiprtp::transport::{SipResolver, ResolvedTarget};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

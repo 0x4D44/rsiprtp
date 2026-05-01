@@ -1,6 +1,6 @@
 //! Audio processing: codecs, jitter buffer, mixing, and file I/O.
 
-pub mod codec;
+pub(crate) mod codec;
 pub mod jitter;
 pub mod mixer;
 pub mod wav;

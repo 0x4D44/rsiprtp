@@ -14,9 +14,9 @@
 //! - [`InviteDialog`]: State machine for INVITE-initiated dialogs
 //! - [`DialogManager`]: Manages multiple dialogs, routes messages
 
-pub mod invite;
-pub mod manager;
-pub mod state;
+pub(crate) mod invite;
+pub(crate) mod manager;
+pub(crate) mod state;
 
 // Re-export main types
 pub use invite::{

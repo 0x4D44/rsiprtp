@@ -103,7 +103,8 @@ impl Default for G722Codec {
 /// Generate a silence frame for G.722.
 ///
 /// Returns 160 bytes (20ms at 64kbps).
-pub fn silence_frame() -> Vec<u8> {
+#[cfg(test)]
+pub(crate) fn silence_frame() -> Vec<u8> {
     // G.722 silence is approximately 0x00 bytes
     vec![0u8; 160]
 }

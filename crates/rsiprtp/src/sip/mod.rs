@@ -3,10 +3,10 @@
 //! This crate wraps the `rsip` crate and provides convenience methods
 //! for common SIP operations.
 
-pub mod auth;
-pub mod headers;
-pub mod message;
-pub mod uri;
+pub(crate) mod auth;
+pub(crate) mod headers;
+pub(crate) mod message;
+pub(crate) mod uri;
 
 #[cfg(test)]
 mod tests;
