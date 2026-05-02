@@ -11799,6 +11799,152 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::call::MediaSession
 pub type rsiprtp::session::call::MediaSession::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::call::MediaSession where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::call::MediaSession::vzip(self) -> V
+pub mod rsiprtp::session::ice_session
+pub struct rsiprtp::session::ice_session::IceLocalParams
+pub rsiprtp::session::ice_session::IceLocalParams::candidates: alloc::vec::Vec<rsiprtp::ice::Candidate>
+pub rsiprtp::session::ice_session::IceLocalParams::pwd: alloc::string::String
+pub rsiprtp::session::ice_session::IceLocalParams::ufrag: alloc::string::String
+impl core::clone::Clone for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::clone(&self) -> rsiprtp::session::ice_session::IceLocalParams
+impl core::fmt::Debug for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Send for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Sync for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceLocalParams
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceLocalParams
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceLocalParams
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceLocalParams::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceLocalParams::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceLocalParams::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceLocalParams::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceLocalParams::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::ice_session::IceLocalParams where T: core::clone::Clone
+pub type rsiprtp::session::ice_session::IceLocalParams::Owned = T
+pub fn rsiprtp::session::ice_session::IceLocalParams::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::ice_session::IceLocalParams::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceLocalParams where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceLocalParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceLocalParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::ice_session::IceLocalParams where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::ice_session::IceLocalParams::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceLocalParams where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceLocalParams::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceLocalParams::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceLocalParams where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceLocalParams
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceLocalParams
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceLocalParams
+pub type rsiprtp::session::ice_session::IceLocalParams::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceLocalParams where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceLocalParams::vzip(self) -> V
+pub struct rsiprtp::session::ice_session::IceRemoteParams
+pub rsiprtp::session::ice_session::IceRemoteParams::candidates: alloc::vec::Vec<rsiprtp::ice::Candidate>
+pub rsiprtp::session::ice_session::IceRemoteParams::pwd: alloc::string::String
+pub rsiprtp::session::ice_session::IceRemoteParams::ufrag: alloc::string::String
+impl core::clone::Clone for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::clone(&self) -> rsiprtp::session::ice_session::IceRemoteParams
+impl core::fmt::Debug for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Send for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Sync for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceRemoteParams
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceRemoteParams
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceRemoteParams
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceRemoteParams::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceRemoteParams::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceRemoteParams::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceRemoteParams::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::ice_session::IceRemoteParams where T: core::clone::Clone
+pub type rsiprtp::session::ice_session::IceRemoteParams::Owned = T
+pub fn rsiprtp::session::ice_session::IceRemoteParams::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceRemoteParams where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceRemoteParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceRemoteParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::ice_session::IceRemoteParams where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::ice_session::IceRemoteParams::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceRemoteParams where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceRemoteParams::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceRemoteParams where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceRemoteParams
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceRemoteParams
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceRemoteParams
+pub type rsiprtp::session::ice_session::IceRemoteParams::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceRemoteParams where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::vzip(self) -> V
+pub struct rsiprtp::session::ice_session::IceSession
+impl rsiprtp::session::ice_session::IceSession
+pub async fn rsiprtp::session::ice_session::IceSession::close(self)
+pub fn rsiprtp::session::ice_session::IceSession::default_candidate(&self) -> core::option::Option<&rsiprtp::ice::Candidate>
+pub async fn rsiprtp::session::ice_session::IceSession::gather(role: rsiprtp::ice::IceRole, stun_servers: alloc::vec::Vec<rsiprtp::ice::StunServer>, gather_timeout: core::time::Duration, check_timeout: core::time::Duration) -> core::result::Result<Self, rsiprtp::ice::IceError>
+pub fn rsiprtp::session::ice_session::IceSession::local(&self) -> &rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceSession::peer_addr(&self) -> core::option::Option<core::net::socket_addr::SocketAddr>
+pub fn rsiprtp::session::ice_session::IceSession::rtp_socket(&self) -> core::option::Option<alloc::sync::Arc<tokio::net::udp::UdpSocket>>
+pub async fn rsiprtp::session::ice_session::IceSession::run_checks(&mut self, remote: rsiprtp::session::ice_session::IceRemoteParams) -> core::result::Result<core::net::socket_addr::SocketAddr, rsiprtp::ice::IceError>
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceSession
+impl core::marker::Send for rsiprtp::session::ice_session::IceSession
+impl core::marker::Sync for rsiprtp::session::ice_session::IceSession
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceSession
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceSession
+impl !core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceSession
+impl !core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceSession
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceSession::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceSession::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceSession::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceSession::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceSession::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceSession where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceSession where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceSession where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceSession
+pub fn rsiprtp::session::ice_session::IceSession::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceSession where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceSession::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceSession::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceSession::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceSession::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceSession where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceSession::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceSession
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceSession
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceSession
+pub type rsiprtp::session::ice_session::IceSession::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceSession where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceSession::vzip(self) -> V
 pub enum rsiprtp::session::CallDirection
 pub rsiprtp::session::CallDirection::Inbound
 pub rsiprtp::session::CallDirection::Outbound
@@ -13144,6 +13290,151 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::HoldResponse
 pub type rsiprtp::session::HoldResponse::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::HoldResponse where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::HoldResponse::vzip(self) -> V
+pub struct rsiprtp::session::IceLocalParams
+pub rsiprtp::session::IceLocalParams::candidates: alloc::vec::Vec<rsiprtp::ice::Candidate>
+pub rsiprtp::session::IceLocalParams::pwd: alloc::string::String
+pub rsiprtp::session::IceLocalParams::ufrag: alloc::string::String
+impl core::clone::Clone for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::clone(&self) -> rsiprtp::session::ice_session::IceLocalParams
+impl core::fmt::Debug for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Send for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Sync for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceLocalParams
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceLocalParams
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceLocalParams
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceLocalParams
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceLocalParams::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceLocalParams::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceLocalParams::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceLocalParams where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceLocalParams::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceLocalParams::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::ice_session::IceLocalParams where T: core::clone::Clone
+pub type rsiprtp::session::ice_session::IceLocalParams::Owned = T
+pub fn rsiprtp::session::ice_session::IceLocalParams::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::ice_session::IceLocalParams::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceLocalParams where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceLocalParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceLocalParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceLocalParams::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::ice_session::IceLocalParams where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::ice_session::IceLocalParams::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceLocalParams::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceLocalParams where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceLocalParams::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceLocalParams::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceLocalParams where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceLocalParams::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceLocalParams
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceLocalParams
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceLocalParams
+pub type rsiprtp::session::ice_session::IceLocalParams::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceLocalParams where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceLocalParams::vzip(self) -> V
+pub struct rsiprtp::session::IceRemoteParams
+pub rsiprtp::session::IceRemoteParams::candidates: alloc::vec::Vec<rsiprtp::ice::Candidate>
+pub rsiprtp::session::IceRemoteParams::pwd: alloc::string::String
+pub rsiprtp::session::IceRemoteParams::ufrag: alloc::string::String
+impl core::clone::Clone for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::clone(&self) -> rsiprtp::session::ice_session::IceRemoteParams
+impl core::fmt::Debug for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Send for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Sync for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceRemoteParams
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceRemoteParams
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceRemoteParams
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceRemoteParams
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceRemoteParams::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceRemoteParams::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceRemoteParams where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceRemoteParams::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceRemoteParams::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::ice_session::IceRemoteParams where T: core::clone::Clone
+pub type rsiprtp::session::ice_session::IceRemoteParams::Owned = T
+pub fn rsiprtp::session::ice_session::IceRemoteParams::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceRemoteParams where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceRemoteParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceRemoteParams where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceRemoteParams::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::ice_session::IceRemoteParams where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::ice_session::IceRemoteParams::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceRemoteParams
+pub fn rsiprtp::session::ice_session::IceRemoteParams::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceRemoteParams where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceRemoteParams::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceRemoteParams where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceRemoteParams::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceRemoteParams
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceRemoteParams
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceRemoteParams
+pub type rsiprtp::session::ice_session::IceRemoteParams::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceRemoteParams where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceRemoteParams::vzip(self) -> V
+pub struct rsiprtp::session::IceSession
+impl rsiprtp::session::ice_session::IceSession
+pub async fn rsiprtp::session::ice_session::IceSession::close(self)
+pub fn rsiprtp::session::ice_session::IceSession::default_candidate(&self) -> core::option::Option<&rsiprtp::ice::Candidate>
+pub async fn rsiprtp::session::ice_session::IceSession::gather(role: rsiprtp::ice::IceRole, stun_servers: alloc::vec::Vec<rsiprtp::ice::StunServer>, gather_timeout: core::time::Duration, check_timeout: core::time::Duration) -> core::result::Result<Self, rsiprtp::ice::IceError>
+pub fn rsiprtp::session::ice_session::IceSession::local(&self) -> &rsiprtp::session::ice_session::IceLocalParams
+pub fn rsiprtp::session::ice_session::IceSession::peer_addr(&self) -> core::option::Option<core::net::socket_addr::SocketAddr>
+pub fn rsiprtp::session::ice_session::IceSession::rtp_socket(&self) -> core::option::Option<alloc::sync::Arc<tokio::net::udp::UdpSocket>>
+pub async fn rsiprtp::session::ice_session::IceSession::run_checks(&mut self, remote: rsiprtp::session::ice_session::IceRemoteParams) -> core::result::Result<core::net::socket_addr::SocketAddr, rsiprtp::ice::IceError>
+impl core::marker::Freeze for rsiprtp::session::ice_session::IceSession
+impl core::marker::Send for rsiprtp::session::ice_session::IceSession
+impl core::marker::Sync for rsiprtp::session::ice_session::IceSession
+impl core::marker::Unpin for rsiprtp::session::ice_session::IceSession
+impl core::marker::UnsafeUnpin for rsiprtp::session::ice_session::IceSession
+impl !core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::ice_session::IceSession
+impl !core::panic::unwind_safe::UnwindSafe for rsiprtp::session::ice_session::IceSession
+impl<T, U> core::convert::Into<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::From<T>
+pub fn rsiprtp::session::ice_session::IceSession::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::Into<T>
+pub type rsiprtp::session::ice_session::IceSession::Error = core::convert::Infallible
+pub fn rsiprtp::session::ice_session::IceSession::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::ice_session::IceSession where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::ice_session::IceSession::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::ice_session::IceSession::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> core::any::Any for rsiprtp::session::ice_session::IceSession where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::ice_session::IceSession where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::ice_session::IceSession where T: ?core::marker::Sized
+pub fn rsiprtp::session::ice_session::IceSession::borrow_mut(&mut self) -> &mut T
+impl<T> core::convert::From<T> for rsiprtp::session::ice_session::IceSession
+pub fn rsiprtp::session::ice_session::IceSession::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::ice_session::IceSession where T: core::any::Any
+pub fn rsiprtp::session::ice_session::IceSession::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceSession::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::ice_session::IceSession::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::ice_session::IceSession::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::ice_session::IceSession where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::ice_session::IceSession::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::ice_session::IceSession
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::ice_session::IceSession
+impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceSession
+pub type rsiprtp::session::ice_session::IceSession::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceSession where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::ice_session::IceSession::vzip(self) -> V
 pub struct rsiprtp::session::ManagerConfig
 pub rsiprtp::session::ManagerConfig::call_config: rsiprtp::session::call::CallConfig
 pub rsiprtp::session::ManagerConfig::local_rtp_addr: alloc::string::String
