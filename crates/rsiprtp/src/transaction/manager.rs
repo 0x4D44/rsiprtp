@@ -503,6 +503,15 @@ impl TransactionManager {
                         Event::AckReceived => ManagerEvent::AckReceived,
                         Event::Timeout => ManagerEvent::Timeout,
                         Event::TransportError => ManagerEvent::TransportError,
+                        // PRACK events are wired to the manager / call layer
+                        // in Phase 4 (HLD § session/manager.rs). Until then
+                        // they are dropped at the transaction boundary —
+                        // the transaction is still Sans-IO-correct because
+                        // the buffer-drain rule on final responses ensures
+                        // PrackTimeout cannot fire post-final. Keeping this
+                        // match exhaustive so adding new variants is a
+                        // build-time error.
+                        Event::PrackReceived(_) | Event::PrackTimeout { .. } => continue,
                     };
                     actions.push(ManagerAction::Event(handle, manager_event));
                 }

@@ -592,6 +592,17 @@ impl SipResponse {
         &self.inner
     }
 
+    /// Mutable access to the underlying rsip response. Used by the
+    /// transaction layer to inject reliable-provisional headers (RFC 3262
+    /// §4) into a TU-built response without round-tripping through the
+    /// wire-byte representation.
+    ///
+    /// Restricted to crate visibility — external callers must not mutate
+    /// `Via` / status code / etc. on a constructed response.
+    pub(crate) fn inner_mut(&mut self) -> &mut rsip::Response {
+        &mut self.inner
+    }
+
     /// Create a builder for a new response.
     pub fn builder() -> SipResponseBuilder {
         SipResponseBuilder::new()

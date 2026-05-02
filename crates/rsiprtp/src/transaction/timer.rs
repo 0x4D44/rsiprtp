@@ -134,6 +134,11 @@ pub enum Timer {
     J,
     /// Timer K: Wait in Completed state (non-INVITE client).
     K,
+    /// Timer N: Reliable provisional retransmit / abandon (RFC 3262 §3).
+    ///
+    /// Per outstanding reliable 1xx response: starts at T1, doubles up to T2,
+    /// abandoned at 64*T1 if no PRACK arrives.
+    N,
 }
 
 impl std::fmt::Display for Timer {
@@ -150,6 +155,7 @@ impl std::fmt::Display for Timer {
             Timer::I => write!(f, "Timer I"),
             Timer::J => write!(f, "Timer J"),
             Timer::K => write!(f, "Timer K"),
+            Timer::N => write!(f, "Timer N"),
         }
     }
 }
@@ -358,6 +364,7 @@ mod tests {
         assert_eq!(Timer::I.to_string(), "Timer I");
         assert_eq!(Timer::J.to_string(), "Timer J");
         assert_eq!(Timer::K.to_string(), "Timer K");
+        assert_eq!(Timer::N.to_string(), "Timer N");
     }
 
     // ActiveTimer tests
