@@ -39,8 +39,13 @@
 - UDP, TCP, and TLS transports built on Tokio
 - RFC 3263 SIP URI resolution (NAPTR / SRV / A) via [`SipResolver`]
 - SRTP encryption with SDES key exchange (RFC 3711 + RFC 4568)
-- ICE / STUN / TURN building blocks (RFC 8445 / 5389 / 5766) — exposed as
-  libraries; not yet wired into `CallManager` (see [Scope](#scope))
+- ICE / STUN / TURN (RFC 8445 / 5389 / 5766), with an `IceSession` helper
+  that gathers candidates and runs connectivity checks alongside
+  `CallManager`. Host and server-reflexive candidates are supported;
+  TURN relay candidates (the `TurnClient` exists in `ice::turn` but is
+  not wired into `IceSession`), trickle ICE, ICE restart, IPv6
+  dual-stack interop, symmetric-NAT peer-reflexive (prflx) discovery,
+  and RFC 7675 consent-freshness keepalives are not yet implemented.
 
 [`SipResolver`]: https://docs.rs/rsiprtp/latest/rsiprtp/transport/struct.SipResolver.html
 
@@ -77,6 +82,9 @@ Worked end-to-end programs live in
   call and record the caller's audio to a WAV file.
 - [`ai_bridge.rs`](crates/rsiprtp/examples/ai_bridge.rs) — bridge a SIP call
   into an external audio pipeline (the same shape `gabby` uses).
+- [`ice_call.rs`](crates/rsiprtp/examples/ice_call.rs) — two `CallManager`s
+  on loopback driving an `IceSession` through a full gather / offer /
+  answer / connectivity-check / probe flow.
 
 Run one with environment configuration, for example:
 
@@ -139,9 +147,6 @@ issue first:
   support only — no event-state machines, presence, BLF, or MWI.
 - **MESSAGE / SIMPLE / MSRP** messaging.
 - **SIP over WebSocket** (RFC 7118).
-- **ICE end-to-end through `CallManager`.** The agent / STUN / TURN libraries
-  are complete and usable directly, but the glue that generates SDP
-  candidates and drives connectivity checks from the call layer is not done.
 - **Video codecs** and FEC (RED / ULPFEC / RTX).
 
 ## Status

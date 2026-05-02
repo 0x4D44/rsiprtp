@@ -42,7 +42,11 @@
 //! - [`sdp`]: SDP parsing and offer/answer negotiation
 //! - [`rtp`]: RTP packet handling
 //! - [`srtp`]: SRTP encryption with SDES key exchange (RFC 4568)
-//! - [`ice`]: ICE/STUN/TURN for NAT traversal
+//! - [`ice`]: ICE/STUN/TURN for NAT traversal (host + server-reflexive
+//!   candidates; TURN relay candidates, trickle, ICE restart, IPv6
+//!   dual-stack interop, symmetric-NAT prflx, and RFC 7675 consent
+//!   freshness are not yet supported). Drive it via
+//!   [`session::IceSession`] alongside [`session::CallManager`].
 //! - [`media`]: Audio codecs and jitter buffer
 //! - [`session`]: High-level call management
 
