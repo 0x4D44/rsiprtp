@@ -1,6 +1,6 @@
 [package]
 name = "full_test"
-description = "Internal dev runner: orchestrates fmt, clippy, deny, audit, tests, doc, and coverage; emits a self-contained HTML report"
+description = "Internal dev runner: orchestrates fmt, clippy, deny, build, tests, doc, and coverage; emits a self-contained HTML report"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

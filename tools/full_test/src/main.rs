@@ -51,6 +51,13 @@ struct DocResult {
 }
 
 #[derive(Debug, Clone)]
+struct BuildResult {
+    passed: bool,
+    duration: Duration,
+    stderr_tail: String,
+}
+
+#[derive(Debug, Clone)]
 struct CoverageMetrics {
     lines_covered: usize,
     lines_total: usize,
@@ -108,7 +115,7 @@ USAGE:
 
 OPTIONS:
     --skip-quality    Skip cargo fmt + cargo clippy
-    --skip-supply     Skip cargo deny + cargo audit
+    --skip-supply     Skip cargo deny
     --skip-coverage   Skip cargo llvm-cov
     -h, --help        Show this help and exit"
     );
@@ -172,6 +179,15 @@ fn run_quality_check(
     cargo_args: &[&str],
     is_issue: fn(&str) -> bool,
 ) -> QualityResult {
+    run_quality_check_with(check_name, cargo_args, is_issue, None)
+}
+
+fn run_quality_check_with(
+    check_name: &str,
+    cargo_args: &[&str],
+    is_issue: fn(&str) -> bool,
+    is_transient: Option<fn(&str) -> bool>,
+) -> QualityResult {
     let start = Instant::now();
     let output = Command::new("cargo")
         .args(cargo_args)
@@ -183,6 +199,41 @@ fn run_quality_check(
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let passed = output.status.success();
+
+    classify_quality_output(
+        check_name,
+        passed,
+        &stdout,
+        &stderr,
+        duration,
+        is_issue,
+        is_transient,
+    )
+}
+
+fn classify_quality_output(
+    check_name: &str,
+    passed: bool,
+    stdout: &str,
+    stderr: &str,
+    duration: Duration,
+    is_issue: fn(&str) -> bool,
+    is_transient: Option<fn(&str) -> bool>,
+) -> QualityResult {
+    if !passed {
+        if let Some(detector) = is_transient {
+            if detector(stderr) || detector(stdout) {
+                return QualityResult {
+                    check_name: check_name.to_string(),
+                    passed: true,
+                    skipped: true,
+                    skip_reason: Some("transient".to_string()),
+                    duration,
+                    issues: Vec::new(),
+                };
+            }
+        }
+    }
 
     let issues: Vec<String> = stdout
         .lines()
@@ -213,41 +264,45 @@ fn skipped_quality(check_name: &str, reason: &str) -> QualityResult {
     }
 }
 
+fn fmt_is_issue(line: &str) -> bool {
+    line.starts_with("Diff in ")
+}
+
+fn clippy_is_issue(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("warning: ") || t.starts_with("error:") || t.starts_with("error[")
+}
+
+fn deny_is_issue(line: &str) -> bool {
+    let t = line.trim_start();
+    t.starts_with("error[") || t.starts_with("warning[") || t.starts_with("error:")
+}
+
+fn deny_is_transient(text: &str) -> bool {
+    text.contains("failed to fetch") || text.contains("unable to update")
+}
+
 fn run_fmt_check() -> QualityResult {
-    run_quality_check("cargo fmt", &["fmt", "--check"], |l| {
-        l.starts_with("Diff in")
-            || l.ends_with(".rs")
-            || l.contains("would reformat")
-            || l.contains("error")
-            || l.contains("warning:")
-    })
+    run_quality_check("cargo fmt", &["fmt", "--check"], fmt_is_issue)
 }
 
 fn run_clippy() -> QualityResult {
     let mut args: Vec<&str> = vec!["clippy"];
     args.extend_from_slice(EXCL);
     args.extend_from_slice(&["--all-targets", "--", "-D", "warnings"]);
-    run_quality_check("cargo clippy", &args, |l| {
-        l.contains("warning:") || l.contains("error:") || l.contains("error[")
-    })
+    run_quality_check("cargo clippy", &args, clippy_is_issue)
 }
 
 fn run_cargo_deny() -> QualityResult {
     if !tool_available("deny") {
         return skipped_quality("cargo deny", "not installed");
     }
-    run_quality_check("cargo deny", &["deny", "check"], |l| {
-        l.starts_with("error") || l.contains("error[") || l.starts_with("warning")
-    })
-}
-
-fn run_cargo_audit() -> QualityResult {
-    if !tool_available("audit") {
-        return skipped_quality("cargo audit", "not installed");
-    }
-    run_quality_check("cargo audit", &["audit"], |l| {
-        l.starts_with("error") || l.contains("vulnerability") || l.starts_with("warning")
-    })
+    run_quality_check_with(
+        "cargo deny",
+        &["deny", "check"],
+        deny_is_issue,
+        Some(deny_is_transient),
+    )
 }
 
 fn run_cargo_test() -> SuiteResults {
@@ -273,6 +328,34 @@ fn run_cargo_test() -> SuiteResults {
     }
 
     suite
+}
+
+fn run_cargo_build() -> BuildResult {
+    let start = Instant::now();
+    let mut args: Vec<&str> = vec!["build"];
+    args.extend_from_slice(EXCL);
+    args.push("--locked");
+    let output = Command::new("cargo")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("Failed to execute cargo build");
+    let duration = start.elapsed();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let passed = output.status.success();
+
+    let stderr_tail = if passed {
+        String::new()
+    } else {
+        tail_lines(&stderr, 50)
+    };
+
+    BuildResult {
+        passed,
+        duration,
+        stderr_tail,
+    }
 }
 
 fn run_doc() -> DocResult {
@@ -541,6 +624,9 @@ fn record_non_test_cargo_failure(
 }
 
 fn category_for(test_name: &str) -> &'static str {
+    if test_name.contains("(line ") {
+        return "Doc tests";
+    }
     let head = test_name.split("::").next().unwrap_or("");
     match head {
         "sip" => "SIP",
@@ -657,7 +743,7 @@ fn generate_html_report(
     fmt_result: Option<&QualityResult>,
     clippy_result: Option<&QualityResult>,
     deny_result: Option<&QualityResult>,
-    audit_result: Option<&QualityResult>,
+    build_result: Option<&BuildResult>,
     test_result: Option<&SuiteResults>,
     doc_result: Option<&DocResult>,
     coverage_result: Option<&CoverageResult>,
@@ -671,11 +757,18 @@ fn generate_html_report(
     let mut total_failed: usize = 0;
     let mut total_skipped: usize = 0;
 
-    let quality_passes = [fmt_result, clippy_result, deny_result, audit_result];
+    let quality_passes = [fmt_result, clippy_result, deny_result];
     for q in quality_passes.iter().flatten() {
         if q.skipped {
             total_skipped += 1;
         } else if q.passed {
+            total_passed += 1;
+        } else {
+            total_failed += 1;
+        }
+    }
+    if let Some(r) = build_result {
+        if r.passed {
             total_passed += 1;
         } else {
             total_failed += 1;
@@ -740,6 +833,21 @@ fn generate_html_report(
     );
     for q in quality_passes.iter().flatten() {
         write_quality_row(&mut html, q);
+    }
+    if let Some(r) = build_result {
+        let (status_class, status_text, p, f) = if r.passed {
+            ("status-pass", "PASS", "1", "0")
+        } else {
+            ("status-fail", "FAIL", "0", "1")
+        };
+        html.push_str(&format!(
+            "<tr><td>cargo build</td><td class=\"{}\">{}</td><td>{}</td><td>{}</td><td>0</td><td>{:.2}s</td></tr>\n",
+            status_class,
+            status_text,
+            p,
+            f,
+            r.duration.as_secs_f64()
+        ));
     }
     if let Some(r) = test_result {
         let (status_class, status_text) = if r.failed == 0 {
@@ -870,6 +978,14 @@ fn generate_html_report(
         Some(CoverageResult::Skipped) | None => {}
     }
 
+    if let Some(r) = build_result {
+        if !r.passed {
+            html.push_str("<h2>Build</h2>\n");
+            html.push_str("<p class=\"status-fail\">cargo build FAILED</p>\n");
+            html.push_str(&format!("<pre>{}</pre>\n", html_escape(&r.stderr_tail)));
+        }
+    }
+
     if let Some(r) = doc_result {
         if !r.passed {
             html.push_str("<h2>Doc Build</h2>\n");
@@ -956,7 +1072,7 @@ fn generate_markdown_report(
     fmt_result: Option<&QualityResult>,
     clippy_result: Option<&QualityResult>,
     deny_result: Option<&QualityResult>,
-    audit_result: Option<&QualityResult>,
+    build_result: Option<&BuildResult>,
     test_result: Option<&SuiteResults>,
     doc_result: Option<&DocResult>,
     coverage_result: Option<&CoverageResult>,
@@ -973,7 +1089,7 @@ fn generate_markdown_report(
     md.push_str("## Summary\n\n");
     md.push_str("| Pass | Status | Duration |\n");
     md.push_str("|------|--------|----------|\n");
-    let qps = [fmt_result, clippy_result, deny_result, audit_result];
+    let qps = [fmt_result, clippy_result, deny_result];
     for q in qps.iter().flatten() {
         let status = if q.skipped {
             format!("SKIP ({})", q.skip_reason.as_deref().unwrap_or(""))
@@ -987,6 +1103,14 @@ fn generate_markdown_report(
             q.check_name,
             status,
             q.duration.as_secs_f64()
+        ));
+    }
+    if let Some(r) = build_result {
+        let status = if r.passed { "PASS" } else { "FAIL" };
+        md.push_str(&format!(
+            "| cargo build | {} | {:.2}s |\n",
+            status,
+            r.duration.as_secs_f64()
         ));
     }
     if let Some(r) = test_result {
@@ -1134,7 +1258,6 @@ fn main() {
     let mut fmt_res: Option<QualityResult> = None;
     let mut clippy_res: Option<QualityResult> = None;
     let mut deny_res: Option<QualityResult> = None;
-    let mut audit_res: Option<QualityResult> = None;
     let mut coverage_res: Option<CoverageResult> = None;
 
     if !opts.skip_quality {
@@ -1157,15 +1280,18 @@ fn main() {
         let r = run_cargo_deny();
         print_pass_result(&quality_line(&r));
         deny_res = Some(r);
-
-        print_pass_heartbeat(4, total_passes, "cargo audit");
-        let r = run_cargo_audit();
-        print_pass_result(&quality_line(&r));
-        audit_res = Some(r);
     } else {
         println!("[3/{total_passes}] cargo deny check ... SKIP (--skip-supply)");
-        println!("[4/{total_passes}] cargo audit ... SKIP (--skip-supply)");
     }
+
+    print_pass_heartbeat(4, total_passes, "cargo build --locked");
+    let build_inner = run_cargo_build();
+    println!(
+        "{} in {:.1}s",
+        if build_inner.passed { "PASS" } else { "FAIL" },
+        build_inner.duration.as_secs_f64()
+    );
+    let build_res: Option<BuildResult> = Some(build_inner);
 
     print_pass_heartbeat(5, total_passes, "cargo test");
     println!("running...");
@@ -1228,7 +1354,7 @@ fn main() {
         fmt_res.as_ref(),
         clippy_res.as_ref(),
         deny_res.as_ref(),
-        audit_res.as_ref(),
+        build_res.as_ref(),
         test_res.as_ref(),
         doc_res.as_ref(),
         coverage_res.as_ref(),
@@ -1248,7 +1374,7 @@ fn main() {
         fmt_res.as_ref(),
         clippy_res.as_ref(),
         deny_res.as_ref(),
-        audit_res.as_ref(),
+        build_res.as_ref(),
         test_res.as_ref(),
         doc_res.as_ref(),
         coverage_res.as_ref(),
@@ -1260,16 +1386,16 @@ fn main() {
     println!("Report saved to: {}", report_path.display());
 
     let mut overall_ok = true;
-    for q in [
-        fmt_res.as_ref(),
-        clippy_res.as_ref(),
-        deny_res.as_ref(),
-        audit_res.as_ref(),
-    ]
-    .iter()
-    .flatten()
+    for q in [fmt_res.as_ref(), clippy_res.as_ref(), deny_res.as_ref()]
+        .iter()
+        .flatten()
     {
         if !q.skipped && !q.passed {
+            overall_ok = false;
+        }
+    }
+    if let Some(r) = build_res.as_ref() {
+        if !r.passed {
             overall_ok = false;
         }
     }
@@ -1701,5 +1827,130 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
         assert!(md.contains("# rsiprtp Full Test Report"));
         assert!(md.contains("## Summary"));
         assert!(md.contains("Test Breakdown by Category"));
+    }
+
+    #[test]
+    fn fmt_is_issue_only_matches_diff_in_lines() {
+        assert!(fmt_is_issue("Diff in /path/to/foo.rs:12"));
+        assert!(!fmt_is_issue("error: rustfmt failed somewhere"));
+        assert!(!fmt_is_issue("warning: unused manifest key"));
+        assert!(!fmt_is_issue("crates/rsiprtp-core/src/error.rs"));
+        assert!(!fmt_is_issue("would reformat foo.rs"));
+        assert!(!fmt_is_issue(""));
+    }
+
+    #[test]
+    fn clippy_is_issue_anchors_at_line_start() {
+        assert!(clippy_is_issue("warning: unused variable"));
+        assert!(clippy_is_issue("error: aborting due to previous error"));
+        assert!(clippy_is_issue("error[E0382]: borrow of moved value"));
+        assert!(clippy_is_issue("    warning: nested clippy lint"));
+        // Cargo's own "warning: unused manifest key" still starts with "warning: " so
+        // it does match — the original concern was that lines containing but not
+        // beginning with "warning:" (e.g. paths) should not match. Verify that:
+        assert!(!clippy_is_issue("note: this warning: appears mid-line"));
+        assert!(!clippy_is_issue("/path/to/error.rs:1:1"));
+        assert!(!clippy_is_issue("rsiprtp-core/src/error.rs"));
+        assert!(!clippy_is_issue(""));
+    }
+
+    #[test]
+    fn deny_is_transient_recognises_known_signatures() {
+        assert!(deny_is_transient(
+            "error: failed to fetch advisory database\n"
+        ));
+        assert!(deny_is_transient("warning: unable to update index"));
+        assert!(!deny_is_transient(
+            "error[license]: license `GPL-3.0` is not allowed"
+        ));
+        assert!(!deny_is_transient(
+            "error[advisory]: RUSTSEC-2024-0001 found"
+        ));
+    }
+
+    #[test]
+    fn deny_transient_failure_classified_as_skipped() {
+        let stderr =
+            "error: failed to fetch `https://github.com/RustSec/advisory-db.git`\n  unable to update";
+        let r = classify_quality_output(
+            "cargo deny",
+            false,
+            "",
+            stderr,
+            Duration::from_secs(2),
+            deny_is_issue,
+            Some(deny_is_transient),
+        );
+        assert!(r.skipped);
+        assert!(r.passed); // skip is treated as pass for overall_ok
+        assert_eq!(r.skip_reason.as_deref(), Some("transient"));
+    }
+
+    #[test]
+    fn deny_real_violation_classified_as_failed() {
+        let stderr = "error[license]: license `GPL-3.0` is not allowed for crate foo v1.0.0\n";
+        let r = classify_quality_output(
+            "cargo deny",
+            false,
+            "",
+            stderr,
+            Duration::from_secs(2),
+            deny_is_issue,
+            Some(deny_is_transient),
+        );
+        assert!(!r.skipped);
+        assert!(!r.passed);
+        assert!(!r.issues.is_empty());
+    }
+
+    #[test]
+    fn categorize_tests_recognises_doc_tests() {
+        let mk = |n: &str, ok: bool| TestResult {
+            name: n.to_string(),
+            passed: ok,
+            output: String::new(),
+        };
+        let tests = vec![
+            mk("sip::parser::a", true),
+            mk("src/lib.rs - foo::Bar::baz (line 123)", true),
+            mk("src/lib.rs - quux (line 7)", false),
+            mk("integration_basic_calls::test_x", true),
+        ];
+        let cats = categorize_tests(&tests);
+        let lookup: std::collections::HashMap<&str, &CategoryStats> =
+            cats.iter().map(|c| (c.name.as_str(), c)).collect();
+        assert!(lookup.contains_key("Doc tests"), "missing Doc tests");
+        assert_eq!(lookup["Doc tests"].total, 2);
+        assert_eq!(lookup["Doc tests"].passed, 1);
+        assert_eq!(lookup["Doc tests"].failed, 1);
+        assert!(lookup.contains_key("SIP"));
+        assert!(lookup.contains_key("Integration"));
+    }
+
+    #[test]
+    fn build_failure_marks_run_as_failed() {
+        let r = BuildResult {
+            passed: false,
+            duration: Duration::from_secs(2),
+            stderr_tail: "error[E0432]: unresolved import\n".to_string(),
+        };
+        assert!(!r.passed);
+
+        let now = Local::now();
+        let html = generate_html_report(
+            None,
+            None,
+            None,
+            Some(&r),
+            None,
+            None,
+            None,
+            "abc",
+            now,
+            "Default",
+        );
+        assert!(html.contains("cargo build"));
+        assert!(html.contains("cargo build FAILED"));
+        assert!(html.contains("status-fail"));
     }
 }
