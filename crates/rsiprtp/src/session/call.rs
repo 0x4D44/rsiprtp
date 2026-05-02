@@ -13,6 +13,7 @@ use crate::rtp::rtcp::{RtcpCompound, RtcpPacket};
 use crate::rtp::session::CongestionController;
 use crate::rtp::{RtpPacket, RtpSession};
 use crate::sdp::negotiation::{Codec, NegotiatedMedia};
+use crate::sdp::parser::SessionDescription;
 
 use crate::session::bitrate_bridge::BitrateBridge;
 use crate::session::session_codec::SessionCodec;
@@ -463,6 +464,33 @@ impl MediaSession {
     }
 }
 
+/// Cached state for an inbound call awaiting a deferred SDP answer.
+///
+/// Populated by `CallManager::accept_inbound_invite` when codec
+/// negotiation succeeds, and consumed by `CallManager::build_answer_for`
+/// once the application has finished gathering ICE candidates. We cache
+/// **both** the parsed offer and the `NegotiatedMedia` so the answer can
+/// be rebuilt with the real ICE port without re-running `create_answer`:
+///
+/// * `offer` — the original offer SDP. Cloned and patched into the answer
+///   skeleton (origin, session-level connection, media slot ordering all
+///   come from here). Without it we'd have no `o=`/`s=`/`t=` to rebuild
+///   the session frame.
+/// * `negotiated` — the result of the single negotiation pass. Used to
+///   drive the answer's `m=` formats, rtpmap/fmtp/direction attrs, and
+///   to wire the `MediaSession` once the port is known. Without it we'd
+///   have to redo offer/answer matching just to reach the same outcome.
+///
+/// Holding both costs one extra `SessionDescription` clone per inbound
+/// ICE call but eliminates a second `create_answer` invocation (which
+/// would otherwise allocate a port-zero throwaway answer just to feed
+/// `apply_default_candidate`).
+#[derive(Debug)]
+pub(crate) struct PendingAnswer {
+    pub(crate) offer: SessionDescription,
+    pub(crate) negotiated: NegotiatedMedia,
+}
+
 /// A SIP call.
 #[derive(Debug)]
 pub struct Call {
@@ -482,6 +510,14 @@ pub struct Call {
     negotiated_media: Option<NegotiatedMedia>,
     /// Media session.
     media: Option<MediaSession>,
+    /// Cached offer + negotiated media for the deferred-answer path.
+    /// `Some` only on inbound calls created via
+    /// `CallManager::accept_inbound_invite`; cleared once
+    /// `build_answer_for` consumes it (single-use per call). Invariant:
+    /// `media.is_some()` XOR `pending_answer.is_some()` for inbound
+    /// calls before the answer is built — they represent two stages of
+    /// the same handoff.
+    pending_answer: Option<PendingAnswer>,
     /// Pending events.
     events: Vec<CallEvent>,
 }
@@ -498,6 +534,7 @@ impl Call {
             dialog: None,
             negotiated_media: None,
             media: None,
+            pending_answer: None,
             events: Vec::new(),
         }
     }
@@ -513,6 +550,34 @@ impl Call {
             dialog: Some(dialog),
             negotiated_media: None,
             media: None,
+            pending_answer: None,
+            events: vec![CallEvent::StateChanged(CallState::Ringing)],
+        }
+    }
+
+    /// Create a new inbound call with a deferred answer pending.
+    ///
+    /// Used by `CallManager::accept_inbound_invite`: codec negotiation
+    /// has run against the offer, but the SDP answer (and the
+    /// `MediaSession`) won't be built until the application's ICE
+    /// gather completes and `build_answer_for` runs. The cached state
+    /// is consumed via `take_pending_answer`.
+    pub(crate) fn new_inbound_pending(
+        config: Arc<CallConfig>,
+        remote_uri: String,
+        dialog: Dialog,
+        pending: PendingAnswer,
+    ) -> Self {
+        Self {
+            id: CallId::new(),
+            state: CallState::Ringing,
+            direction: CallDirection::Inbound,
+            config,
+            remote_uri,
+            dialog: Some(dialog),
+            negotiated_media: None,
+            media: None,
+            pending_answer: Some(pending),
             events: vec![CallEvent::StateChanged(CallState::Ringing)],
         }
     }
@@ -652,6 +717,18 @@ impl Call {
     /// Check if call can receive media.
     pub fn can_receive_media(&self) -> bool {
         matches!(self.state, CallState::EarlyMedia | CallState::Established)
+    }
+
+    /// True if this call was accepted via `accept_inbound_invite` and
+    /// is still awaiting `build_answer_for` (or `reject_inbound_invite`).
+    pub(crate) fn has_pending_answer(&self) -> bool {
+        self.pending_answer.is_some()
+    }
+
+    /// Take the cached offer + negotiated media, clearing it from the call.
+    /// Single-use: subsequent calls return `None`.
+    pub(crate) fn take_pending_answer(&mut self) -> Option<PendingAnswer> {
+        self.pending_answer.take()
     }
 }
 

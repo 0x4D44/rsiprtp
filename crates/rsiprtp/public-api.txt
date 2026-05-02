@@ -5344,8 +5344,10 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::call::CallId where V
 pub fn rsiprtp::session::call::CallId::vzip(self) -> V
 pub struct rsiprtp::prelude::CallManager
 impl rsiprtp::session::CallManager
+pub fn rsiprtp::session::CallManager::accept_inbound_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::active_calls(&self) -> alloc::vec::Vec<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::answer_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> bool
+pub fn rsiprtp::session::CallManager::build_answer_for(&mut self, call_id: &rsiprtp::session::call::CallId, inputs: &rsiprtp::session::IceAnswerInputs<'_>) -> core::option::Option<rsiprtp::sdp::parser::SessionDescription>
 pub fn rsiprtp::session::CallManager::call_count(&self) -> usize
 pub fn rsiprtp::session::CallManager::codecs(&self) -> &[rsiprtp::sdp::negotiation::Codec]
 pub fn rsiprtp::session::CallManager::create_call(&mut self, remote_uri: alloc::string::String) -> rsiprtp::session::call::CallId
@@ -5361,6 +5363,7 @@ pub fn rsiprtp::session::CallManager::handle_provisional(&mut self, call_id: &rs
 pub fn rsiprtp::session::CallManager::local_rtp_addr(&self) -> &str
 pub fn rsiprtp::session::CallManager::new(config: rsiprtp::session::ManagerConfig) -> Self
 pub fn rsiprtp::session::CallManager::reject_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
+pub fn rsiprtp::session::CallManager::reject_inbound_invite(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::remove_call(&mut self, call_id: &rsiprtp::session::call::CallId)
 pub fn rsiprtp::session::CallManager::terminate_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 impl core::marker::Freeze for rsiprtp::session::CallManager
@@ -13027,8 +13030,10 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::call::CallId where V
 pub fn rsiprtp::session::call::CallId::vzip(self) -> V
 pub struct rsiprtp::session::CallManager
 impl rsiprtp::session::CallManager
+pub fn rsiprtp::session::CallManager::accept_inbound_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::active_calls(&self) -> alloc::vec::Vec<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::answer_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> bool
+pub fn rsiprtp::session::CallManager::build_answer_for(&mut self, call_id: &rsiprtp::session::call::CallId, inputs: &rsiprtp::session::IceAnswerInputs<'_>) -> core::option::Option<rsiprtp::sdp::parser::SessionDescription>
 pub fn rsiprtp::session::CallManager::call_count(&self) -> usize
 pub fn rsiprtp::session::CallManager::codecs(&self) -> &[rsiprtp::sdp::negotiation::Codec]
 pub fn rsiprtp::session::CallManager::create_call(&mut self, remote_uri: alloc::string::String) -> rsiprtp::session::call::CallId
@@ -13044,6 +13049,7 @@ pub fn rsiprtp::session::CallManager::handle_provisional(&mut self, call_id: &rs
 pub fn rsiprtp::session::CallManager::local_rtp_addr(&self) -> &str
 pub fn rsiprtp::session::CallManager::new(config: rsiprtp::session::ManagerConfig) -> Self
 pub fn rsiprtp::session::CallManager::reject_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
+pub fn rsiprtp::session::CallManager::reject_inbound_invite(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::remove_call(&mut self, call_id: &rsiprtp::session::call::CallId)
 pub fn rsiprtp::session::CallManager::terminate_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 impl core::marker::Freeze for rsiprtp::session::CallManager
@@ -13291,6 +13297,58 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::HoldResponse
 pub type rsiprtp::session::HoldResponse::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::HoldResponse where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::HoldResponse::vzip(self) -> V
+pub struct rsiprtp::session::IceAnswerInputs<'a>
+pub rsiprtp::session::IceAnswerInputs::default_candidate: &'a rsiprtp::ice::Candidate
+pub rsiprtp::session::IceAnswerInputs::local: &'a rsiprtp::session::ice_session::IceLocalParams
+impl<'a> rsiprtp::session::IceAnswerInputs<'a>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::new(default_candidate: &'a rsiprtp::ice::Candidate, local: &'a rsiprtp::session::ice_session::IceLocalParams) -> Self
+impl<'a> core::clone::Clone for rsiprtp::session::IceAnswerInputs<'a>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::clone(&self) -> rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::fmt::Debug for rsiprtp::session::IceAnswerInputs<'a>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::marker::Freeze for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::marker::Send for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::marker::Sync for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::marker::Unpin for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::marker::UnsafeUnpin for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::IceAnswerInputs<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for rsiprtp::session::IceAnswerInputs<'a>
+impl<T, U> core::convert::Into<U> for rsiprtp::session::IceAnswerInputs<'a> where U: core::convert::From<T>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::IceAnswerInputs<'a> where U: core::convert::Into<T>
+pub type rsiprtp::session::IceAnswerInputs<'a>::Error = core::convert::Infallible
+pub fn rsiprtp::session::IceAnswerInputs<'a>::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::IceAnswerInputs<'a> where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::IceAnswerInputs<'a>::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::IceAnswerInputs<'a>::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::IceAnswerInputs<'a> where T: core::clone::Clone
+pub type rsiprtp::session::IceAnswerInputs<'a>::Owned = T
+pub fn rsiprtp::session::IceAnswerInputs<'a>::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::IceAnswerInputs<'a>::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::IceAnswerInputs<'a> where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::IceAnswerInputs<'a>::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::IceAnswerInputs<'a> where T: ?core::marker::Sized
+pub fn rsiprtp::session::IceAnswerInputs<'a>::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::IceAnswerInputs<'a> where T: ?core::marker::Sized
+pub fn rsiprtp::session::IceAnswerInputs<'a>::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::IceAnswerInputs<'a> where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::IceAnswerInputs<'a>::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::IceAnswerInputs<'a>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::IceAnswerInputs<'a> where T: core::any::Any
+pub fn rsiprtp::session::IceAnswerInputs<'a>::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::IceAnswerInputs<'a>::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::IceAnswerInputs<'a>::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::IceAnswerInputs<'a> where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::IceAnswerInputs<'a>::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::IceAnswerInputs<'a>
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::IceAnswerInputs<'a>
+impl<T> typenum::type_operators::Same for rsiprtp::session::IceAnswerInputs<'a>
+pub type rsiprtp::session::IceAnswerInputs<'a>::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::IceAnswerInputs<'a> where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::IceAnswerInputs<'a>::vzip(self) -> V
 pub struct rsiprtp::session::IceLocalParams
 pub rsiprtp::session::IceLocalParams::candidates: alloc::vec::Vec<rsiprtp::ice::Candidate>
 pub rsiprtp::session::IceLocalParams::pwd: alloc::string::String

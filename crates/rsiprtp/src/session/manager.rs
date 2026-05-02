@@ -7,11 +7,48 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::dialog::DialogId;
-use crate::sdp::negotiation::{create_answer, process_answer, Codec};
-use crate::sdp::parser::SessionDescription;
+use crate::ice::Candidate;
+use crate::sdp::ice_attrs;
+use crate::sdp::negotiation::{
+    create_answer, create_media_attributes, process_answer, Codec, NegotiatedMedia,
+};
+use crate::sdp::parser::{Direction, SessionDescription};
 use crate::session::call::{
     Call, CallConfig, CallDirection, CallEndReason, CallEvent, CallId, CallState, Dialog,
+    PendingAnswer,
 };
+use crate::session::ice_session::IceLocalParams;
+
+/// Inputs to [`CallManager::build_answer_for`].
+///
+/// Bundles the default candidate (used to patch `m=`/`c=`) with the full
+/// `IceLocalParams` (ufrag / pwd / candidate list). Both come from the
+/// same `IceSession`; passing them as one struct prevents the silent
+/// misuse of feeding a `default_candidate` that isn't in
+/// `ice_local.candidates`. The borrow-only shape keeps it cheap to
+/// construct on every call without forcing the caller to clone.
+#[derive(Debug, Clone, Copy)]
+pub struct IceAnswerInputs<'a> {
+    /// Candidate the answer's `c=` and `m=` port should reflect — the
+    /// reachable address for non-ICE peers (RFC 8839 §4.3.1). Should be
+    /// one of the entries in `local.candidates`; the agent's
+    /// `IceSession::default_candidate` is the canonical source.
+    pub default_candidate: &'a Candidate,
+    /// All gathered local candidates and credentials. Written verbatim
+    /// into the answer's `a=ice-ufrag` / `a=ice-pwd` / `a=candidate:`
+    /// lines.
+    pub local: &'a IceLocalParams,
+}
+
+impl<'a> IceAnswerInputs<'a> {
+    /// Construct from a candidate and the local ICE params.
+    pub fn new(default_candidate: &'a Candidate, local: &'a IceLocalParams) -> Self {
+        Self {
+            default_candidate,
+            local,
+        }
+    }
+}
 
 /// Manager event for the application layer.
 #[derive(Debug)]
@@ -136,27 +173,209 @@ impl CallManager {
         dialog: Dialog,
         offer_sdp: &SessionDescription,
     ) -> Option<(CallId, SessionDescription, u16)> {
-        // Extract remote URI from the dialog (set when dialog was created from INVITE)
-        let remote_uri = dialog.remote_uri().to_string();
-
-        let call = Call::new_inbound(self.call_config.clone(), remote_uri, dialog);
-        let call_id = call.id().clone();
-
-        // Negotiate media
         let local_port = self.allocate_rtp_port();
-        let result = create_answer(offer_sdp, &self.call_config.codecs, local_port);
-
-        let (answer_sdp, negotiated) = result?;
-
+        let (answer_sdp, negotiated) =
+            create_answer(offer_sdp, &self.call_config.codecs, local_port)?;
         let media = negotiated.into_iter().next().expect("negotiated media");
+        let call_id = self.create_inbound_call_internal(dialog, media, local_port)?;
+        Some((call_id, answer_sdp, local_port))
+    }
+
+    /// Accept an inbound INVITE without building the SDP answer yet.
+    ///
+    /// This is the deferred-answer entry point used by ICE flows: the
+    /// application gathers ICE candidates asynchronously and then calls
+    /// [`build_answer_for`](Self::build_answer_for) to produce the answer
+    /// SDP once gathering completes. The call is created, the dialog is
+    /// mapped, and a [`ManagerEvent::IncomingCall`] event is emitted as
+    /// usual; only the SDP answer (and the media session it implies) is
+    /// deferred.
+    ///
+    /// For non-ICE flows prefer [`handle_incoming_invite`](Self::handle_incoming_invite),
+    /// which does the same bookkeeping and builds the answer in one
+    /// synchronous call.
+    ///
+    /// Returns `None` if codec negotiation finds no compatible media in
+    /// the offer — matching `handle_incoming_invite`'s rejection contract.
+    ///
+    /// If the application later determines it cannot answer (ICE gather
+    /// fails, user abandons the call, etc.), call
+    /// [`reject_inbound_invite`](Self::reject_inbound_invite) to clear
+    /// the pending state and obtain the dialog ID for a `5xx` response —
+    /// `terminate_call` is for established calls and won't act on a
+    /// pending one.
+    pub fn accept_inbound_invite(
+        &mut self,
+        dialog: Dialog,
+        offer_sdp: &SessionDescription,
+    ) -> Option<CallId> {
+        // Negotiate exactly once. The `NegotiatedMedia` is cached on the
+        // call alongside the offer; `build_answer_for` patches the cached
+        // offer with the real ICE port and rebuilds attrs from the cached
+        // codec — no second `create_answer` invocation, no port-zero
+        // throwaway answer.
+        let (_, mut negotiated) = create_answer(offer_sdp, &self.call_config.codecs, 0)?;
+        let media = negotiated.pop()?;
+
+        let pending = PendingAnswer {
+            offer: offer_sdp.clone(),
+            negotiated: media,
+        };
+
+        self.create_inbound_call_pending(dialog, pending)
+    }
+
+    /// Reject an inbound call accepted via
+    /// [`accept_inbound_invite`](Self::accept_inbound_invite) before any
+    /// answer was built.
+    ///
+    /// Use this when the application can no longer answer the call —
+    /// ICE gather failed, the user abandoned, or any local-policy
+    /// rejection. Transitions the call to `Terminated` and emits
+    /// `CallEvent::Ended(CallEndReason::Error)`. Returns the
+    /// `DialogId` so the caller can send a `5xx` rejection upstream.
+    ///
+    /// Returns `None` when the call is unknown, was not created via
+    /// `accept_inbound_invite`, or already had its answer built — those
+    /// states have other termination paths (`reject_call` while
+    /// `Ringing`, `terminate_call` once `Established`).
+    pub fn reject_inbound_invite(&mut self, call_id: &CallId) -> Option<DialogId> {
+        let call = self.calls.get_mut(call_id)?;
+
+        // Guard the precondition explicitly: `Ringing` AND a pending
+        // answer cached. Either alone isn't enough — a normal inbound
+        // call is also `Ringing` but routes through `reject_call`.
+        if call.state() != CallState::Ringing || !call.has_pending_answer() {
+            return None;
+        }
+
+        // Drop the cache; nothing else looks at it after rejection.
+        let _ = call.take_pending_answer();
+        call.handle_ended(CallEndReason::Error);
+        let dialog_id = call.dialog_id().cloned();
+
+        self.events.push(ManagerEvent::CallEvent(
+            call_id.clone(),
+            CallEvent::Ended(CallEndReason::Error),
+        ));
+
+        dialog_id
+    }
+
+    /// Build the SDP answer for a call accepted via
+    /// [`accept_inbound_invite`](Self::accept_inbound_invite).
+    ///
+    /// Reuses the codec negotiation cached at accept time: the offer
+    /// SDP is cloned and patched with the real ICE port, the audio
+    /// media's formats / rtpmap / fmtp / direction are rewritten from
+    /// the cached `NegotiatedMedia`, and ICE attributes are written.
+    /// `c=` is patched to the address family of `inputs.default_candidate`;
+    /// the SDP origin (`o=`) line is left as written by the offerer.
+    /// Mixed-family SDP (e.g. IPv4 origin with an IPv6 `c=` line) is
+    /// allowed by RFC 4566 but rare in the wild; the function does not
+    /// normalize. The call's media session is wired up to the ICE port;
+    /// the application is expected to drive RTP from the ICE-owned
+    /// socket.
+    ///
+    /// Returns `None` if the call has no pending answer to build —
+    /// either the call ID is unknown, the call was not created by
+    /// [`accept_inbound_invite`](Self::accept_inbound_invite), or
+    /// `build_answer_for` was already called for this call (the cache
+    /// is single-use).
+    pub fn build_answer_for(
+        &mut self,
+        call_id: &CallId,
+        inputs: &IceAnswerInputs<'_>,
+    ) -> Option<SessionDescription> {
+        let local_port = inputs.default_candidate.address.port();
+
+        let pending = {
+            let call = self.calls.get_mut(call_id)?;
+            call.take_pending_answer()?
+        };
+        let PendingAnswer {
+            mut offer,
+            negotiated,
+        } = pending;
+
+        // Rebuild the answer's audio m= line from the cached negotiation.
+        // `create_answer` would do the same patching — but it would also
+        // re-run codec matching, which we already paid for at accept time.
+        // The patches here are deterministic and small.
+        let answer_direction = swap_direction(negotiated.direction);
+        let audio = offer
+            .media
+            .iter_mut()
+            .find(|m| m.media_type == crate::sdp::parser::MediaType::Audio)?;
+        audio.port = local_port;
+        audio.formats = vec![negotiated.codec.payload_type.to_string()];
+        audio.attributes = create_media_attributes(&negotiated.codec, answer_direction);
+
+        // Find the audio media's index for `apply_default_candidate`.
+        let audio_idx = offer
+            .media
+            .iter()
+            .position(|m| m.media_type == crate::sdp::parser::MediaType::Audio)
+            .expect("audio media present (just patched above)");
+
+        ice_attrs::apply_default_candidate(&mut offer, audio_idx, inputs.default_candidate);
+        let audio = offer.media.get_mut(audio_idx).expect("audio media present");
+        ice_attrs::write_ice_credentials(audio, &inputs.local.ufrag, &inputs.local.pwd);
+        ice_attrs::write_candidates(audio, &inputs.local.candidates);
+        ice_attrs::write_rtcp_mux(audio);
+
+        let call = self.calls.get_mut(call_id).expect("call exists");
+        if let Err(e) = call.set_negotiated_media(negotiated, local_port) {
+            tracing::warn!(error = %e, "build_answer_for: media session construction failed");
+            return None;
+        }
+
+        Some(offer)
+    }
+
+    /// Bookkeeping for an inbound call accepted with a pending answer.
+    /// Mirrors `create_inbound_call_internal` but constructs the call
+    /// directly with the cached `PendingAnswer`, keeping the field
+    /// private to `Call`.
+    fn create_inbound_call_pending(
+        &mut self,
+        dialog: Dialog,
+        pending: PendingAnswer,
+    ) -> Option<CallId> {
+        let remote_uri = dialog.remote_uri().to_string();
+        let call = Call::new_inbound_pending(self.call_config.clone(), remote_uri, dialog, pending);
+        let call_id = call.id().clone();
 
         self.calls.insert(call_id.clone(), call);
 
-        // Update call with negotiated media. If the negotiated codec is
-        // unsupported by `MediaSession::for_negotiated`, surface the
-        // error by rejecting the INVITE — the call has nothing to do
-        // with no media session, and silently accepting would leave a
-        // dialog with no media path.
+        let call = self.calls.get(&call_id).expect("call inserted");
+        let dialog_id = call.dialog_id().expect("dialog id").clone();
+        self.dialog_to_call.insert(dialog_id, call_id.clone());
+
+        self.events
+            .push(ManagerEvent::IncomingCall(call_id.clone()));
+
+        Some(call_id)
+    }
+
+    /// Shared bookkeeping for inbound calls accepted with the answer
+    /// already built: register the call, attach negotiated media, map
+    /// the dialog, and emit `IncomingCall`. The deferred-answer path
+    /// (`accept_inbound_invite`) goes through
+    /// `create_inbound_call_pending` instead, which carries the cached
+    /// offer + negotiation in place of an attached `MediaSession`.
+    fn create_inbound_call_internal(
+        &mut self,
+        dialog: Dialog,
+        media: NegotiatedMedia,
+        local_port: u16,
+    ) -> Option<CallId> {
+        let remote_uri = dialog.remote_uri().to_string();
+        let call = Call::new_inbound(self.call_config.clone(), remote_uri, dialog);
+        let call_id = call.id().clone();
+
+        self.calls.insert(call_id.clone(), call);
+
         let call = self.calls.get_mut(&call_id).expect("call inserted");
         if let Err(e) = call.set_negotiated_media(media, local_port) {
             tracing::warn!(error = %e, "rejecting INVITE: media session construction failed");
@@ -164,7 +383,6 @@ impl CallManager {
             return None;
         }
 
-        // Register dialog mapping
         let dialog_id = call.dialog_id().expect("dialog id");
         self.dialog_to_call
             .insert(dialog_id.clone(), call_id.clone());
@@ -172,7 +390,7 @@ impl CallManager {
         self.events
             .push(ManagerEvent::IncomingCall(call_id.clone()));
 
-        Some((call_id, answer_sdp, local_port))
+        Some(call_id)
     }
 
     /// Handle a 200 OK response to our INVITE.
@@ -286,7 +504,13 @@ impl CallManager {
 
     /// Terminate a call locally (send BYE).
     ///
-    /// Returns the dialog ID that should be used to send BYE.
+    /// Returns the dialog ID that should be used to send BYE. Acts only
+    /// on calls in the `Established` state — for inbound calls accepted
+    /// via [`accept_inbound_invite`](Self::accept_inbound_invite) but
+    /// not yet answered, use
+    /// [`reject_inbound_invite`](Self::reject_inbound_invite) instead;
+    /// for ordinary `Ringing` calls (via `handle_incoming_invite`), use
+    /// [`reject_call`](Self::reject_call).
     pub fn terminate_call(&mut self, call_id: &CallId) -> Option<DialogId> {
         let call = self.calls.get_mut(call_id)?;
 
@@ -355,6 +579,20 @@ impl CallManager {
     /// Get the local RTP address.
     pub fn local_rtp_addr(&self) -> &str {
         &self.config.local_rtp_addr
+    }
+}
+
+/// Swap an offered direction to the answer-side direction.
+///
+/// Mirrors the logic baked into `create_answer`: SendOnly/RecvOnly
+/// swap, SendRecv and Inactive stay. Pulled out so the deferred-answer
+/// path can apply the same rule without re-running negotiation.
+fn swap_direction(d: Direction) -> Direction {
+    match d {
+        Direction::SendRecv => Direction::SendRecv,
+        Direction::SendOnly => Direction::RecvOnly,
+        Direction::RecvOnly => Direction::SendOnly,
+        Direction::Inactive => Direction::Inactive,
     }
 }
 
@@ -1137,5 +1375,374 @@ a=rtpmap:96 H264/90000
         assert!(events
             .iter()
             .any(|e| matches!(e, ManagerEvent::CallStateChanged(_, CallState::Established))));
+    }
+
+    // accept_inbound_invite / build_answer_for tests
+
+    use crate::ice::Candidate;
+    use crate::session::ice_session::IceLocalParams;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    fn host_candidate(ip: [u8; 4], port: u16) -> Candidate {
+        Candidate::host(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3])), port),
+            1,
+        )
+    }
+
+    fn ice_local(host: &Candidate) -> IceLocalParams {
+        IceLocalParams {
+            ufrag: "abc1234".to_string(),
+            pwd: "0123456789abcdef01234567".to_string(),
+            candidates: vec![host.clone()],
+        }
+    }
+
+    #[test]
+    fn accept_inbound_invite_creates_call_without_answer() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-300".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+
+        assert_eq!(manager.call_count(), 1);
+
+        let call = manager.get_call(&call_id).expect("call exists");
+        assert_eq!(call.direction(), CallDirection::Inbound);
+        assert_eq!(call.state(), CallState::Ringing);
+        assert!(
+            call.media().is_none(),
+            "media must not be attached until build_answer_for runs"
+        );
+
+        let dialog_id = call.dialog_id().expect("dialog id").clone();
+        assert!(manager.get_call_by_dialog(&dialog_id).is_some());
+
+        let events = manager.drain_events();
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ManagerEvent::IncomingCall(_))));
+    }
+
+    #[test]
+    fn accept_inbound_invite_no_compatible_media() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-301".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_video_only_sdp();
+        let result = manager.accept_inbound_invite(dialog, &offer_sdp);
+
+        assert!(result.is_none());
+        assert_eq!(manager.call_count(), 0);
+    }
+
+    #[test]
+    fn build_answer_for_emits_ice_attrs() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-302".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+
+        let host = host_candidate([10, 0, 0, 5], 7100);
+        let local = ice_local(&host);
+        let inputs = IceAnswerInputs::new(&host, &local);
+
+        let answer = manager
+            .build_answer_for(&call_id, &inputs)
+            .expect("build_answer_for");
+
+        let conn = answer.connection.as_ref().expect("session-level c=");
+        assert_eq!(conn.address, "192.168.1.1");
+
+        let audio = answer.audio_media().expect("audio media");
+        assert_eq!(audio.port, 7100);
+        let mconn = audio.connection.as_ref().expect("media-level c=");
+        assert_eq!(mconn.address, "10.0.0.5");
+        assert_eq!(mconn.addr_type, "IP4");
+
+        let (ufrag, pwd) =
+            ice_attrs::read_ice_credentials(audio).expect("ICE credentials on answer");
+        assert_eq!(ufrag, "abc1234");
+        assert_eq!(pwd, "0123456789abcdef01234567");
+
+        let cands = ice_attrs::read_candidates(audio);
+        assert_eq!(cands, vec![host.clone()]);
+        assert!(ice_attrs::read_rtcp_mux(audio));
+
+        let call = manager.get_call(&call_id).expect("call exists");
+        assert!(call.media().is_some(), "media wired up after answer build");
+        assert_eq!(call.media().unwrap().local_port(), 7100);
+    }
+
+    #[test]
+    fn build_answer_for_unknown_call() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let host = host_candidate([10, 0, 0, 5], 7100);
+        let local = ice_local(&host);
+        let inputs = IceAnswerInputs::new(&host, &local);
+
+        let fake = CallId::new();
+        let answer = manager.build_answer_for(&fake, &inputs);
+        assert!(answer.is_none());
+    }
+
+    #[test]
+    fn build_answer_for_called_twice() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-303".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+
+        let host = host_candidate([10, 0, 0, 5], 7100);
+        let local = ice_local(&host);
+        let inputs = IceAnswerInputs::new(&host, &local);
+
+        assert!(manager.build_answer_for(&call_id, &inputs).is_some());
+        assert!(
+            manager.build_answer_for(&call_id, &inputs).is_none(),
+            "second call returns None — pending answer cleared"
+        );
+    }
+
+    #[test]
+    fn accept_then_reject_inbound_invite_terminates_cleanly() {
+        // R1: a call accepted via `accept_inbound_invite` and never
+        // answered (e.g. ICE gather failed) must terminate via
+        // `reject_inbound_invite` — `terminate_call` won't act because
+        // the call is `Ringing`, not `Established`.
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-304".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+        // Drain the IncomingCall event so the rejection event is the
+        // only thing in the queue at the assert below.
+        let _ = manager.drain_events();
+
+        // `terminate_call` refuses the Ringing+pending state.
+        assert!(
+            manager.terminate_call(&call_id).is_none(),
+            "terminate_call must not act on a pending inbound call"
+        );
+
+        // `reject_inbound_invite` returns the dialog ID and terminates.
+        let dialog_id = manager
+            .reject_inbound_invite(&call_id)
+            .expect("reject_inbound_invite returns dialog id");
+
+        // Snapshot the call state and the dialog id from the immutable
+        // view, then drop the borrow before draining events (which
+        // needs `&mut self`).
+        {
+            let call = manager.get_call(&call_id).expect("call still present");
+            assert_eq!(call.state(), CallState::Terminated);
+            assert!(
+                !call.has_pending_answer(),
+                "pending answer must be cleared on rejection"
+            );
+            assert_eq!(call.dialog_id(), Some(&dialog_id));
+        }
+
+        // `Ended(Error)` is emitted.
+        let events = manager.drain_events();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ManagerEvent::CallEvent(_, CallEvent::Ended(CallEndReason::Error))
+        )));
+
+        // Second rejection is a no-op.
+        assert!(manager.reject_inbound_invite(&call_id).is_none());
+    }
+
+    #[test]
+    fn reject_inbound_invite_after_build_is_noop() {
+        // A call that already had its answer built should not be
+        // rejected via `reject_inbound_invite` — the `pending_answer`
+        // is cleared, so `has_pending_answer` is false.
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-305".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+
+        let host = host_candidate([10, 0, 0, 5], 7100);
+        let local = ice_local(&host);
+        let inputs = IceAnswerInputs::new(&host, &local);
+        manager
+            .build_answer_for(&call_id, &inputs)
+            .expect("build_answer_for");
+
+        assert!(
+            manager.reject_inbound_invite(&call_id).is_none(),
+            "reject must be a no-op once the answer is built"
+        );
+    }
+
+    #[test]
+    fn reject_inbound_invite_unknown_call() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let fake = CallId::new();
+        assert!(manager.reject_inbound_invite(&fake).is_none());
+    }
+
+    #[test]
+    fn reject_inbound_invite_on_normal_ringing_call_is_noop() {
+        // A Ringing call that came in via `handle_incoming_invite` (i.e.
+        // already has media, no pending answer) must NOT be rejected by
+        // `reject_inbound_invite` — that's `reject_call`'s job.
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-306".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let (call_id, _, _) = manager
+            .handle_incoming_invite(dialog, &offer_sdp)
+            .expect("handle_incoming_invite");
+
+        // State is Ringing, but no pending answer — must no-op.
+        assert!(manager.reject_inbound_invite(&call_id).is_none());
+    }
+
+    #[test]
+    fn inbound_ice_full_flow_unit() {
+        // A1: full happy path at the manager layer — accept, build
+        // answer, validate the SDP, answer the call, observe media.
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        let dialog = Dialog::new_uas(
+            "call-307".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+
+        let offer_sdp = test_sdp();
+        let call_id = manager
+            .accept_inbound_invite(dialog, &offer_sdp)
+            .expect("accept_inbound_invite");
+
+        let host = host_candidate([10, 0, 0, 5], 7100);
+        let local = ice_local(&host);
+        let inputs = IceAnswerInputs::new(&host, &local);
+
+        let answer = manager
+            .build_answer_for(&call_id, &inputs)
+            .expect("build_answer_for");
+
+        // Wire-format round-trip: the answer must serialize and parse
+        // back cleanly.
+        let answer_str = answer.to_string();
+        let parsed = SessionDescription::parse(&answer_str).expect("answer SDP parses");
+
+        // Connection patched to candidate's family/address.
+        let mconn = parsed
+            .audio_media()
+            .expect("audio media")
+            .connection
+            .as_ref()
+            .expect("media-level c=");
+        assert_eq!(mconn.address, "10.0.0.5");
+        assert_eq!(mconn.addr_type, "IP4");
+
+        // m= port is the candidate's port.
+        let audio = parsed.audio_media().expect("audio media");
+        assert_eq!(audio.port, 7100);
+
+        // ICE attrs round-trip.
+        let (ufrag, pwd) = ice_attrs::read_ice_credentials(audio).expect("ICE credentials parsed");
+        assert_eq!(ufrag, "abc1234");
+        assert_eq!(pwd, "0123456789abcdef01234567");
+        let cands = ice_attrs::read_candidates(audio);
+        assert_eq!(cands, vec![host.clone()]);
+        assert!(ice_attrs::read_rtcp_mux(audio));
+
+        // Codec line: PCMU was the offer's preferred codec.
+        let rtpmaps = audio.rtpmaps();
+        assert!(
+            rtpmaps.iter().any(|r| r.encoding == "PCMU"),
+            "answer must carry PCMU rtpmap"
+        );
+
+        // The call is still Ringing — `build_answer_for` only constructs
+        // the answer; sending and `answer_call` are the app's job.
+        let call = manager.get_call(&call_id).expect("call");
+        assert_eq!(call.state(), CallState::Ringing);
+
+        // `answer_call` flips Established and media is now wired.
+        assert!(manager.answer_call(&call_id));
+        let call = manager.get_call(&call_id).expect("call");
+        assert_eq!(call.state(), CallState::Established);
+        assert!(call.media().is_some(), "media must be wired after build");
+        assert_eq!(call.media().unwrap().local_port(), 7100);
     }
 }

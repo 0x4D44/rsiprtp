@@ -235,7 +235,11 @@ fn negotiate_media(
 }
 
 /// Create media attributes for a negotiated codec.
-fn create_media_attributes(codec: &Codec, direction: Direction) -> Vec<Attribute> {
+///
+/// Crate-visible so the deferred-answer path in
+/// `CallManager::build_answer_for` can rebuild media attrs from a cached
+/// `NegotiatedMedia` without re-running offer/answer matching.
+pub(crate) fn create_media_attributes(codec: &Codec, direction: Direction) -> Vec<Attribute> {
     let mut attrs = Vec::new();
 
     // rtpmap

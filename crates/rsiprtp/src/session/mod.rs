@@ -36,7 +36,7 @@ pub use hold::{
     CallHoldInfo, HoldError, HoldManager, HoldRequest, HoldResponse, HoldState, MediaDirection,
 };
 pub use ice_session::{IceLocalParams, IceRemoteParams, IceSession};
-pub use manager::{CallManager, ManagerConfig, ManagerEvent};
+pub use manager::{CallManager, IceAnswerInputs, ManagerConfig, ManagerEvent};
 pub use registration::{
     RegistrationConfig, RegistrationError, RegistrationManager, RegistrationState,
 };
