@@ -622,6 +622,7 @@ name = "full_test"
 version = "0.3.0"
 dependencies = [
  "chrono",
+ "serde_json",
 ]
 
 [[package]]

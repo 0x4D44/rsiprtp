@@ -31,7 +31,6 @@ struct SuiteResults {
     skipped: usize,
     duration: Duration,
     tests: Vec<TestResult>,
-    process_failure: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +51,7 @@ struct DocResult {
 }
 
 #[derive(Debug, Clone)]
-struct CoverageResult {
+struct CoverageMetrics {
     lines_covered: usize,
     lines_total: usize,
     functions_covered: usize,
@@ -63,6 +62,26 @@ struct CoverageResult {
     regions_total: usize,
     branch_enabled: bool,
     duration: Duration,
+}
+
+#[derive(Debug, Clone)]
+enum CoverageResult {
+    Skipped,
+    Failed {
+        duration: Duration,
+        stderr_tail: String,
+    },
+    Ok(CoverageMetrics),
+}
+
+impl CoverageResult {
+    fn passed(&self) -> bool {
+        matches!(self, CoverageResult::Ok(_))
+    }
+
+    fn is_skipped(&self) -> bool {
+        matches!(self, CoverageResult::Skipped)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,37 +167,33 @@ fn is_nightly_toolchain() -> bool {
         .unwrap_or(false)
 }
 
-fn run_fmt_check() -> QualityResult {
+fn run_quality_check(
+    check_name: &str,
+    cargo_args: &[&str],
+    is_issue: fn(&str) -> bool,
+) -> QualityResult {
     let start = Instant::now();
     let output = Command::new("cargo")
-        .args(["fmt", "--check"])
+        .args(cargo_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .expect("Failed to execute cargo fmt");
+        .unwrap_or_else(|e| panic!("Failed to execute cargo {}: {e}", cargo_args[0]));
     let duration = start.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let passed = output.status.success();
 
-    let mut issues = Vec::new();
-    for line in stdout.lines().chain(stderr.lines()) {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("Diff in")
-            || trimmed.ends_with(".rs")
-            || trimmed.contains("would reformat")
-            || trimmed.contains("error")
-            || trimmed.contains("warning:")
-        {
-            issues.push(trimmed.to_string());
-        }
-    }
+    let issues: Vec<String> = stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && is_issue(l))
+        .map(String::from)
+        .collect();
 
     QualityResult {
-        check_name: "cargo fmt".to_string(),
+        check_name: check_name.to_string(),
         passed,
         skipped: false,
         skip_reason: None,
@@ -187,127 +202,52 @@ fn run_fmt_check() -> QualityResult {
     }
 }
 
+fn skipped_quality(check_name: &str, reason: &str) -> QualityResult {
+    QualityResult {
+        check_name: check_name.to_string(),
+        passed: true,
+        skipped: true,
+        skip_reason: Some(reason.to_string()),
+        duration: Duration::ZERO,
+        issues: Vec::new(),
+    }
+}
+
+fn run_fmt_check() -> QualityResult {
+    run_quality_check("cargo fmt", &["fmt", "--check"], |l| {
+        l.starts_with("Diff in")
+            || l.ends_with(".rs")
+            || l.contains("would reformat")
+            || l.contains("error")
+            || l.contains("warning:")
+    })
+}
+
 fn run_clippy() -> QualityResult {
-    let start = Instant::now();
     let mut args: Vec<&str> = vec!["clippy"];
     args.extend_from_slice(EXCL);
     args.extend_from_slice(&["--all-targets", "--", "-D", "warnings"]);
-    let output = Command::new("cargo")
-        .args(&args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("Failed to execute cargo clippy");
-    let duration = start.elapsed();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let passed = output.status.success();
-
-    let mut issues = Vec::new();
-    for line in stdout.lines().chain(stderr.lines()) {
-        let trimmed = line.trim();
-        if trimmed.contains("warning:") || trimmed.contains("error:") || trimmed.contains("error[")
-        {
-            issues.push(trimmed.to_string());
-        }
-    }
-
-    QualityResult {
-        check_name: "cargo clippy".to_string(),
-        passed,
-        skipped: false,
-        skip_reason: None,
-        duration,
-        issues,
-    }
+    run_quality_check("cargo clippy", &args, |l| {
+        l.contains("warning:") || l.contains("error:") || l.contains("error[")
+    })
 }
 
 fn run_cargo_deny() -> QualityResult {
     if !tool_available("deny") {
-        return QualityResult {
-            check_name: "cargo deny".to_string(),
-            passed: true,
-            skipped: true,
-            skip_reason: Some("not installed".to_string()),
-            duration: Duration::ZERO,
-            issues: Vec::new(),
-        };
+        return skipped_quality("cargo deny", "not installed");
     }
-    let start = Instant::now();
-    let output = Command::new("cargo")
-        .args(["deny", "check"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("Failed to execute cargo deny");
-    let duration = start.elapsed();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let passed = output.status.success();
-
-    let mut issues = Vec::new();
-    for line in stdout.lines().chain(stderr.lines()) {
-        let trimmed = line.trim();
-        if trimmed.starts_with("error")
-            || trimmed.contains("error[")
-            || trimmed.starts_with("warning")
-        {
-            issues.push(trimmed.to_string());
-        }
-    }
-
-    QualityResult {
-        check_name: "cargo deny".to_string(),
-        passed,
-        skipped: false,
-        skip_reason: None,
-        duration,
-        issues,
-    }
+    run_quality_check("cargo deny", &["deny", "check"], |l| {
+        l.starts_with("error") || l.contains("error[") || l.starts_with("warning")
+    })
 }
 
 fn run_cargo_audit() -> QualityResult {
     if !tool_available("audit") {
-        return QualityResult {
-            check_name: "cargo audit".to_string(),
-            passed: true,
-            skipped: true,
-            skip_reason: Some("not installed".to_string()),
-            duration: Duration::ZERO,
-            issues: Vec::new(),
-        };
+        return skipped_quality("cargo audit", "not installed");
     }
-    let start = Instant::now();
-    let output = Command::new("cargo")
-        .args(["audit"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .expect("Failed to execute cargo audit");
-    let duration = start.elapsed();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let passed = output.status.success();
-
-    let mut issues = Vec::new();
-    for line in stdout.lines().chain(stderr.lines()) {
-        let trimmed = line.trim();
-        if trimmed.starts_with("error")
-            || trimmed.contains("vulnerability")
-            || trimmed.starts_with("warning")
-        {
-            issues.push(trimmed.to_string());
-        }
-    }
-
-    QualityResult {
-        check_name: "cargo audit".to_string(),
-        passed,
-        skipped: false,
-        skip_reason: None,
-        duration,
-        issues,
-    }
+    run_quality_check("cargo audit", &["audit"], |l| {
+        l.starts_with("error") || l.contains("vulnerability") || l.starts_with("warning")
+    })
 }
 
 fn run_cargo_test() -> SuiteResults {
@@ -351,9 +291,13 @@ fn run_doc() -> DocResult {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let passed = output.status.success();
 
-    let lines: Vec<&str> = stderr.lines().collect();
-    let start_idx = lines.len().saturating_sub(50);
-    let stderr_tail = lines[start_idx..].join("\n");
+    let stderr_tail = if passed {
+        String::new()
+    } else {
+        let lines: Vec<&str> = stderr.lines().collect();
+        let start_idx = lines.len().saturating_sub(50);
+        lines[start_idx..].join("\n")
+    };
 
     DocResult {
         passed,
@@ -362,9 +306,9 @@ fn run_doc() -> DocResult {
     }
 }
 
-fn run_coverage() -> Option<CoverageResult> {
+fn run_coverage() -> CoverageResult {
     if !tool_available("llvm-cov") {
-        return None;
+        return CoverageResult::Skipped;
     }
     let use_branch = is_nightly_toolchain();
     let start = Instant::now();
@@ -376,57 +320,77 @@ fn run_coverage() -> Option<CoverageResult> {
     }
     args.extend_from_slice(&["--json", "--no-cfg-coverage"]);
 
-    let output = Command::new("cargo")
+    let output = match Command::new("cargo")
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            return CoverageResult::Failed {
+                duration: start.elapsed(),
+                stderr_tail: format!("failed to spawn cargo llvm-cov: {e}"),
+            };
+        }
+    };
     let duration = start.elapsed();
     if !output.status.success() {
-        return None;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return CoverageResult::Failed {
+            duration,
+            stderr_tail: tail_lines(&stderr, 50),
+        };
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_coverage_json(&stdout, duration, use_branch)
+    match parse_coverage_json(&stdout, duration, use_branch) {
+        Some(m) => CoverageResult::Ok(m),
+        None => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            CoverageResult::Failed {
+                duration,
+                stderr_tail: format!(
+                    "could not parse llvm-cov JSON output\n\nstderr (last lines):\n{}",
+                    tail_lines(&stderr, 50)
+                ),
+            }
+        }
+    }
+}
+
+fn tail_lines(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
 }
 
 fn parse_coverage_json(
     json: &str,
     duration: Duration,
     branch_enabled: bool,
-) -> Option<CoverageResult> {
-    let totals_idx = json.find("\"totals\"")?;
-    let totals = &json[totals_idx..];
-
-    Some(CoverageResult {
-        lines_covered: extract_json_number(totals, "\"lines\"", "\"covered\"").unwrap_or(0),
-        lines_total: extract_json_number(totals, "\"lines\"", "\"count\"").unwrap_or(0),
-        functions_covered: extract_json_number(totals, "\"functions\"", "\"covered\"").unwrap_or(0),
-        functions_total: extract_json_number(totals, "\"functions\"", "\"count\"").unwrap_or(0),
-        branches_covered: extract_json_number(totals, "\"branches\"", "\"covered\"").unwrap_or(0),
-        branches_total: extract_json_number(totals, "\"branches\"", "\"count\"").unwrap_or(0),
-        regions_covered: extract_json_number(totals, "\"regions\"", "\"covered\"").unwrap_or(0),
-        regions_total: extract_json_number(totals, "\"regions\"", "\"count\"").unwrap_or(0),
+) -> Option<CoverageMetrics> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let totals = value.get("data")?.as_array()?.first()?.get("totals")?;
+    let metric = |section: &str, key: &str| -> usize {
+        totals
+            .get(section)
+            .and_then(|s| s.get(key))
+            .and_then(serde_json::Value::as_u64)
+            .map(|n| n as usize)
+            .unwrap_or(0)
+    };
+    Some(CoverageMetrics {
+        lines_covered: metric("lines", "covered"),
+        lines_total: metric("lines", "count"),
+        functions_covered: metric("functions", "covered"),
+        functions_total: metric("functions", "count"),
+        branches_covered: metric("branches", "covered"),
+        branches_total: metric("branches", "count"),
+        regions_covered: metric("regions", "covered"),
+        regions_total: metric("regions", "count"),
         branch_enabled,
         duration,
     })
-}
-
-fn extract_json_number(json: &str, section_key: &str, value_key: &str) -> Option<usize> {
-    let section_start = json.find(section_key)?;
-    let section = &json[section_start..];
-    let brace_start = section.find('{')?;
-    let section_content = &section[brace_start..];
-    let brace_end = section_content.find('}')?;
-    let inner = &section_content[..brace_end];
-    let value_start = inner.find(value_key)?;
-    let after_key = &inner[value_start + value_key.len()..];
-    let after_colon = after_key.trim_start().strip_prefix(':')?;
-    let num_str = after_colon.trim_start();
-    let end = num_str
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(num_str.len());
-    num_str[..end].parse().ok()
 }
 
 fn parse_test_output(stdout: &str, stderr: &str, duration: Duration) -> SuiteResults {
@@ -481,7 +445,6 @@ fn parse_test_output(stdout: &str, stderr: &str, duration: Duration) -> SuiteRes
         skipped,
         duration,
         tests,
-        process_failure: false,
     }
 }
 
@@ -570,7 +533,6 @@ fn record_non_test_cargo_failure(
 
     results.total += 1;
     results.failed += 1;
-    results.process_failure = true;
     results.tests.push(TestResult {
         name: "cargo::test::process_failure".to_string(),
         passed: false,
@@ -731,6 +693,13 @@ fn generate_html_report(
             total_failed += 1;
         }
     }
+    if let Some(r) = coverage_result {
+        match r {
+            CoverageResult::Skipped => {}
+            CoverageResult::Failed { .. } => total_failed += 1,
+            CoverageResult::Ok(_) => total_passed += 1,
+        }
+    }
 
     let mut html = String::with_capacity(64 * 1024);
     html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
@@ -804,10 +773,17 @@ fn generate_html_report(
         ));
     }
     if let Some(r) = coverage_result {
-        html.push_str(&format!(
-            "<tr><td>cargo llvm-cov</td><td class=\"status-pass\">PASS</td><td>1</td><td>0</td><td>0</td><td>{:.2}s</td></tr>\n",
-            r.duration.as_secs_f64()
-        ));
+        match r {
+            CoverageResult::Skipped => {}
+            CoverageResult::Ok(m) => html.push_str(&format!(
+                "<tr><td>cargo llvm-cov</td><td class=\"status-pass\">PASS</td><td>1</td><td>0</td><td>0</td><td>{:.2}s</td></tr>\n",
+                m.duration.as_secs_f64()
+            )),
+            CoverageResult::Failed { duration, .. } => html.push_str(&format!(
+                "<tr><td>cargo llvm-cov</td><td class=\"status-fail\">FAIL</td><td>0</td><td>1</td><td>0</td><td>{:.2}s</td></tr>\n",
+                duration.as_secs_f64()
+            )),
+        }
     }
     html.push_str("</table>\n");
 
@@ -867,23 +843,31 @@ fn generate_html_report(
         }
     }
 
-    if let Some(r) = coverage_result {
-        html.push_str("<h2>Coverage</h2>\n");
-        html.push_str(
-            "<table>\n<tr><th>Metric</th><th>Covered</th><th>Total</th><th>Percent</th></tr>\n",
-        );
-        write_cov_row(&mut html, "Lines", r.lines_covered, r.lines_total);
-        write_cov_row(
-            &mut html,
-            "Functions",
-            r.functions_covered,
-            r.functions_total,
-        );
-        write_cov_row(&mut html, "Regions", r.regions_covered, r.regions_total);
-        if r.branch_enabled {
-            write_cov_row(&mut html, "Branches", r.branches_covered, r.branches_total);
+    match coverage_result {
+        Some(CoverageResult::Ok(r)) => {
+            html.push_str("<h2>Coverage</h2>\n");
+            html.push_str(
+                "<table>\n<tr><th>Metric</th><th>Covered</th><th>Total</th><th>Percent</th></tr>\n",
+            );
+            write_cov_row(&mut html, "Lines", r.lines_covered, r.lines_total);
+            write_cov_row(
+                &mut html,
+                "Functions",
+                r.functions_covered,
+                r.functions_total,
+            );
+            write_cov_row(&mut html, "Regions", r.regions_covered, r.regions_total);
+            if r.branch_enabled {
+                write_cov_row(&mut html, "Branches", r.branches_covered, r.branches_total);
+            }
+            html.push_str("</table>\n");
         }
-        html.push_str("</table>\n");
+        Some(CoverageResult::Failed { stderr_tail, .. }) => {
+            html.push_str("<h2>Coverage</h2>\n");
+            html.push_str("<p class=\"status-fail\">cargo llvm-cov FAILED</p>\n");
+            html.push_str(&format!("<pre>{}</pre>\n", html_escape(stderr_tail)));
+        }
+        Some(CoverageResult::Skipped) | None => {}
     }
 
     if let Some(r) = doc_result {
@@ -1026,16 +1010,27 @@ fn generate_markdown_report(
         ));
     }
     if let Some(r) = coverage_result {
-        let pct = if r.lines_total > 0 {
-            r.lines_covered as f64 / r.lines_total as f64 * 100.0
-        } else {
-            0.0
-        };
-        md.push_str(&format!(
-            "| cargo llvm-cov | PASS ({:.1}% lines) | {:.2}s |\n",
-            pct,
-            r.duration.as_secs_f64()
-        ));
+        match r {
+            CoverageResult::Skipped => {}
+            CoverageResult::Ok(m) => {
+                let pct = if m.lines_total > 0 {
+                    m.lines_covered as f64 / m.lines_total as f64 * 100.0
+                } else {
+                    0.0
+                };
+                md.push_str(&format!(
+                    "| cargo llvm-cov | PASS ({:.1}% lines) | {:.2}s |\n",
+                    pct,
+                    m.duration.as_secs_f64()
+                ));
+            }
+            CoverageResult::Failed { duration, .. } => {
+                md.push_str(&format!(
+                    "| cargo llvm-cov | FAIL | {:.2}s |\n",
+                    duration.as_secs_f64()
+                ));
+            }
+        }
     }
     md.push('\n');
 
@@ -1063,7 +1058,7 @@ fn generate_markdown_report(
         }
     }
 
-    if let Some(r) = coverage_result {
+    if let Some(CoverageResult::Ok(r)) = coverage_result {
         md.push_str("## Coverage\n\n");
         md.push_str("| Metric | Covered | Total | Percent |\n");
         md.push_str("|--------|---------|-------|---------|\n");
@@ -1199,28 +1194,28 @@ fn main() {
 
     if !opts.skip_coverage {
         print_pass_heartbeat(7, total_passes, "cargo llvm-cov");
-        if !tool_available("llvm-cov") {
-            println!("SKIP (not installed)");
-        } else {
-            println!("running...");
-            match run_coverage() {
-                Some(r) => {
-                    let pct = if r.lines_total > 0 {
-                        r.lines_covered as f64 / r.lines_total as f64 * 100.0
-                    } else {
-                        0.0
-                    };
-                    println!(
-                        "       {:.1}% lines in {:.1}s",
-                        pct,
-                        r.duration.as_secs_f64()
-                    );
-                    coverage_res = Some(r);
-                }
-                None => {
-                    println!("       FAIL (could not parse coverage)");
-                }
+        println!("running...");
+        let r = run_coverage();
+        match &r {
+            CoverageResult::Skipped => println!("       SKIP (not installed)"),
+            CoverageResult::Ok(m) => {
+                let pct = if m.lines_total > 0 {
+                    m.lines_covered as f64 / m.lines_total as f64 * 100.0
+                } else {
+                    0.0
+                };
+                println!(
+                    "       {:.1}% lines in {:.1}s",
+                    pct,
+                    m.duration.as_secs_f64()
+                );
             }
+            CoverageResult::Failed { duration, .. } => {
+                println!("       FAIL in {:.1}s", duration.as_secs_f64());
+            }
+        }
+        if !matches!(r, CoverageResult::Skipped) {
+            coverage_res = Some(r);
         }
     } else {
         println!("[7/{total_passes}] cargo llvm-cov ... SKIP (--skip-coverage)");
@@ -1285,6 +1280,11 @@ fn main() {
     }
     if let Some(r) = doc_res.as_ref() {
         if !r.passed {
+            overall_ok = false;
+        }
+    }
+    if let Some(r) = coverage_res.as_ref() {
+        if !r.is_skipped() && !r.passed() {
             overall_ok = false;
         }
     }
@@ -1403,12 +1403,10 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
             skipped: 0,
             duration: Duration::ZERO,
             tests: Vec::new(),
-            process_failure: false,
         };
         record_non_test_cargo_failure(&mut suite, "exit code 101", stdout, stderr);
         assert_eq!(suite.total, 1);
         assert_eq!(suite.failed, 1);
-        assert!(suite.process_failure);
         let synth = &suite.tests[0];
         assert_eq!(synth.name, "cargo::test::process_failure");
         assert!(!synth.passed);
@@ -1510,29 +1508,113 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
     }
 
     #[test]
-    fn extract_json_number_basic() {
-        let json = r#"{"totals":{"lines":{"count":120,"covered":80},"functions":{"count":10,"covered":7}}}"#;
-        let totals = &json[json.find("\"totals\"").unwrap()..];
-        assert_eq!(
-            extract_json_number(totals, "\"lines\"", "\"covered\""),
-            Some(80)
+    fn parse_coverage_json_extracts_totals() {
+        let json = r#"{
+            "data": [{
+                "totals": {
+                    "lines":     {"count": 120, "covered": 80},
+                    "functions": {"count": 10,  "covered": 7},
+                    "regions":   {"count": 50,  "covered": 30},
+                    "branches":  {"count": 0,   "covered": 0}
+                }
+            }]
+        }"#;
+        let m = parse_coverage_json(json, Duration::from_secs(2), false).unwrap();
+        assert_eq!(m.lines_total, 120);
+        assert_eq!(m.lines_covered, 80);
+        assert_eq!(m.functions_total, 10);
+        assert_eq!(m.functions_covered, 7);
+        assert_eq!(m.regions_total, 50);
+        assert_eq!(m.regions_covered, 30);
+        assert!(!m.branch_enabled);
+    }
+
+    #[test]
+    fn parse_coverage_json_handles_missing_keys() {
+        let json = r#"{"data":[{"totals":{"lines":{"count":10,"covered":5}}}]}"#;
+        let m = parse_coverage_json(json, Duration::ZERO, false).unwrap();
+        assert_eq!(m.lines_covered, 5);
+        assert_eq!(m.functions_total, 0);
+        assert_eq!(m.regions_total, 0);
+    }
+
+    #[test]
+    fn parse_coverage_json_rejects_malformed_input() {
+        assert!(parse_coverage_json("not json", Duration::ZERO, false).is_none());
+        assert!(parse_coverage_json("{}", Duration::ZERO, false).is_none());
+    }
+
+    #[test]
+    fn parse_coverage_json_tolerates_nested_subobjects() {
+        let json = r#"{
+            "data": [{
+                "totals": {
+                    "lines": {
+                        "count": 100,
+                        "covered": 90,
+                        "extra": {"nested": true, "foo": [1,2,3]}
+                    },
+                    "functions": {"count": 8, "covered": 8},
+                    "regions":   {"count": 1, "covered": 1},
+                    "branches":  {"count": 0, "covered": 0}
+                }
+            }]
+        }"#;
+        let m = parse_coverage_json(json, Duration::ZERO, false).unwrap();
+        assert_eq!(m.lines_covered, 90);
+        assert_eq!(m.lines_total, 100);
+    }
+
+    #[test]
+    fn coverage_failure_marks_run_as_failed() {
+        let r = CoverageResult::Failed {
+            duration: Duration::from_secs(3),
+            stderr_tail: "thread 'main' panicked\n".to_string(),
+        };
+        assert!(!r.passed());
+        assert!(!r.is_skipped());
+
+        let skipped = CoverageResult::Skipped;
+        assert!(!skipped.passed());
+        assert!(skipped.is_skipped());
+
+        let ok = CoverageResult::Ok(CoverageMetrics {
+            lines_covered: 1,
+            lines_total: 1,
+            functions_covered: 1,
+            functions_total: 1,
+            branches_covered: 0,
+            branches_total: 0,
+            regions_covered: 1,
+            regions_total: 1,
+            branch_enabled: false,
+            duration: Duration::ZERO,
+        });
+        assert!(ok.passed());
+        assert!(!ok.is_skipped());
+    }
+
+    #[test]
+    fn coverage_failure_renders_in_html_report() {
+        let now = Local::now();
+        let cov = CoverageResult::Failed {
+            duration: Duration::from_secs(3),
+            stderr_tail: "thread 'main' panicked at 'boom'".to_string(),
+        };
+        let html = generate_html_report(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&cov),
+            "abc",
+            now,
+            "Default",
         );
-        assert_eq!(
-            extract_json_number(totals, "\"lines\"", "\"count\""),
-            Some(120)
-        );
-        assert_eq!(
-            extract_json_number(totals, "\"functions\"", "\"covered\""),
-            Some(7)
-        );
-        assert_eq!(
-            extract_json_number(totals, "\"missing\"", "\"covered\""),
-            None
-        );
-        assert_eq!(
-            extract_json_number(totals, "\"lines\"", "\"missing\""),
-            None
-        );
+        assert!(html.contains("cargo llvm-cov FAILED"));
+        assert!(html.contains("status-fail"));
     }
 
     #[test]
@@ -1556,9 +1638,8 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
                     output: "boom".into(),
                 },
             ],
-            process_failure: false,
         };
-        let cov = CoverageResult {
+        let cov = CoverageResult::Ok(CoverageMetrics {
             lines_covered: 10,
             lines_total: 20,
             functions_covered: 5,
@@ -1569,7 +1650,7 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
             regions_total: 8,
             branch_enabled: false,
             duration: Duration::from_secs(1),
-        };
+        });
         let html = generate_html_report(
             None,
             None,
@@ -1604,7 +1685,6 @@ test result: FAILED. 2 passed; 1 failed; 1 ignored; 0 measured
                 passed: true,
                 output: String::new(),
             }],
-            process_failure: false,
         };
         let md = generate_markdown_report(
             None,
