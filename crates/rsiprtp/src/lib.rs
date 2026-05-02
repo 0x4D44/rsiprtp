@@ -6,7 +6,7 @@
 //! - AI agent call bridges with mixing
 //!
 //! `rsiprtp` targets traditional VoIP / SIP-trunking use cases. It is **not**
-//! a WebRTC stack: there is no DTLS-SRTP handshake (only SDES key exchange),
+//! a WebRTC stack: there is no DTLS-SRTP handshake (SDES per RFC 4568),
 //! no video, and no SIP-over-WebSocket transport. See the README for the
 //! full scope.
 //!
@@ -41,8 +41,7 @@
 //! - [`transport`]: UDP/TCP/TLS network transport
 //! - [`sdp`]: SDP parsing and offer/answer negotiation
 //! - [`rtp`]: RTP packet handling
-//! - [`srtp`]: SRTP encryption (SDES key exchange; DTLS-SRTP framing types
-//!   are present, but the DTLS handshake itself is not yet implemented)
+//! - [`srtp`]: SRTP encryption with SDES key exchange (RFC 4568)
 //! - [`ice`]: ICE/STUN/TURN for NAT traversal
 //! - [`media`]: Audio codecs and jitter buffer
 //! - [`session`]: High-level call management

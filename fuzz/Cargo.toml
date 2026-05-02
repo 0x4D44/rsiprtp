@@ -96,13 +96,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "srtp_use_ext"
-path = "fuzz_targets/srtp_use_ext.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "sip_uri"
 path = "fuzz_targets/sip_uri.rs"
 test = false

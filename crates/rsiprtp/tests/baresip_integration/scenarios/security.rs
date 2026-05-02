@@ -109,6 +109,7 @@ async fn test_srtp_encryption_simulation() {
     endpoint_a.hangup(&handle_a).await.unwrap();
 }
 
+// NOTE: simulation only — rsiprtp does not implement DTLS-SRTP.
 /// Test DTLS-SRTP key exchange simulation
 ///
 /// In a real implementation, this would:
