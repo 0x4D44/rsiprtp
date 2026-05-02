@@ -171,6 +171,9 @@ pub struct DialogInfo {
     pub remote_uri: String,
     /// Remote target (Contact URI from peer).
     pub remote_target: String,
+    /// Local contact URI (the URI we advertise in our Contact: header
+    /// for in-dialog requests/responses, RFC 3261 §12.2.1.1).
+    pub local_contact: String,
     /// Route set.
     pub route_set: RouteSet,
     /// Whether this is a secure dialog (established over TLS).
@@ -197,6 +200,12 @@ impl DialogInfo {
         // Detect if dialog is secure from transport (TLS/SIPS)
         let secure = Self::detect_secure_transport(request);
 
+        // For UAC, our local contact is the Contact we put in the INVITE.
+        let local_contact = request
+            .contact_uri()
+            .map(|u| u.to_string())
+            .unwrap_or_default();
+
         Some(Self {
             id,
             state,
@@ -205,6 +214,7 @@ impl DialogInfo {
             local_uri,
             remote_uri,
             remote_target,
+            local_contact,
             route_set,
             secure,
         })
@@ -231,8 +241,6 @@ impl DialogInfo {
         // Detect if dialog is secure from transport
         let secure = Self::detect_secure_transport(request);
 
-        let _ = local_contact; // Will be used when sending responses
-
         Some(Self {
             id,
             state,
@@ -241,6 +249,7 @@ impl DialogInfo {
             local_uri,
             remote_uri: remote_uri.to_string(),
             remote_target,
+            local_contact: local_contact.to_string(),
             route_set,
             secure,
         })

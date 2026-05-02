@@ -354,6 +354,23 @@ impl InviteServerTransaction {
         &self.request
     }
 
+    /// True if this server transaction's INVITE matches the given
+    /// Call-ID / From-tag pair. Used by the manager to route an
+    /// inbound PRACK to the correct INVITE server transaction
+    /// (RFC 3262 §7.2: PRACK acknowledges a reliable provisional in
+    /// the same dialog as the INVITE that triggered it).
+    pub fn matches_invite_dialog(&self, call_id: &str, from_tag: &str) -> bool {
+        let req_call_id = match self.request.call_id() {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        let req_from_tag = match self.request.from_tag() {
+            Ok(t) => t,
+            Err(_) => return false,
+        };
+        req_call_id == call_id && req_from_tag == from_tag
+    }
+
     /// Handle a timer firing.
     pub fn handle_timeout(&mut self, timer: Timer) {
         match (self.state, timer) {
@@ -1364,10 +1381,7 @@ mod tests {
 
     /// Drive Timer N until the buffer empties or `max_ticks` is reached.
     /// Returns the total number of ticks fired.
-    fn drive_timer_n_to_completion(
-        tx: &mut InviteServerTransaction,
-        max_ticks: usize,
-    ) -> usize {
+    fn drive_timer_n_to_completion(tx: &mut InviteServerTransaction, max_ticks: usize) -> usize {
         let mut ticks = 0;
         while ticks < max_ticks && !tx.reliable_provisionals.is_empty() {
             tx.handle_timeout(Timer::N);
@@ -1396,10 +1410,7 @@ mod tests {
             wire.contains("Require: 100rel"),
             "wire missing Require: 100rel: {wire}"
         );
-        assert!(
-            wire.contains("RSeq: 1"),
-            "wire missing RSeq: 1: {wire}"
-        );
+        assert!(wire.contains("RSeq: 1"), "wire missing RSeq: 1: {wire}");
 
         let t1 = TimerValues::default().t1;
         assert!(
@@ -1484,7 +1495,13 @@ mod tests {
         }
 
         let timeout = events.iter().find(|ev| {
-            matches!(ev, Event::PrackTimeout { rseq: 1, final_sent: FinalSent::None })
+            matches!(
+                ev,
+                Event::PrackTimeout {
+                    rseq: 1,
+                    final_sent: FinalSent::None
+                }
+            )
         });
         assert!(
             timeout.is_some(),
@@ -1754,10 +1771,7 @@ mod tests {
             line.contains("precondition"),
             "Require missing precondition: {line}"
         );
-        assert!(
-            line.contains("100rel"),
-            "Require missing 100rel: {line}"
-        );
+        assert!(line.contains("100rel"), "Require missing 100rel: {line}");
     }
 
     /// B1 round-trip: the stamped wire bytes must parse cleanly back into

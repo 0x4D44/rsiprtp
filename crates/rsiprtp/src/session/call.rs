@@ -4,16 +4,17 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::core::random_u32;
-use crate::dialog::DialogId;
+use crate::dialog::{DialogId, Role, RouteSet};
 use crate::media::{Bitrate, JitterBuffer, JitterBufferConfig, OpusConfig, PlayoutDecision};
 use crate::rtp::rtcp::{RtcpCompound, RtcpPacket};
 use crate::rtp::session::CongestionController;
 use crate::rtp::{RtpPacket, RtpSession};
 use crate::sdp::negotiation::{Codec, NegotiatedMedia};
 use crate::sdp::parser::SessionDescription;
+use crate::sip::SipRequest;
 
 use crate::session::bitrate_bridge::BitrateBridge;
 use crate::session::session_codec::SessionCodec;
@@ -23,6 +24,16 @@ use crate::session::session_codec::SessionCodec;
 /// This is a lightweight representation used by the session layer to track
 /// which SIP dialog a call belongs to, without containing the full dialog
 /// state machine (which is managed by the dialog layer).
+///
+/// In addition to identifying the dialog, this struct carries the
+/// routing state needed to build correct in-dialog requests
+/// (RFC 3261 §12.2.1.1): `route_set` (from Record-Route on the
+/// dialog-establishing message), `remote_target` (peer's Contact), and
+/// `local_contact` (our Contact). Phase 4 in-dialog requests (PRACK,
+/// UPDATE, refresh re-INVITE, expiry BYE) are built by reconstructing
+/// an `InviteDialog` from these fields and threading the build through
+/// the dialog layer's `build_prack` / `build_update` /
+/// `build_in_dialog_request` / `build_bye_with_reason` methods.
 #[derive(Debug, Clone)]
 pub struct Dialog {
     /// Dialog identifier.
@@ -33,10 +44,32 @@ pub struct Dialog {
     remote_uri: String,
     /// Local CSeq.
     local_cseq: u32,
+    /// Our role in this dialog (UAC vs UAS). Used when reconstructing
+    /// an `InviteDialog` to drive Phase 3 builders for in-dialog
+    /// requests.
+    role: Role,
+    /// Route set derived from Record-Route on the dialog-establishing
+    /// message. Populated when the call transitions to Established
+    /// (200 OK to INVITE). Empty until then.
+    route_set: RouteSet,
+    /// Peer's Contact URI from the dialog-establishing message
+    /// (request URI for in-dialog requests when no Record-Route).
+    /// Populated when the call transitions to Established. Empty
+    /// otherwise.
+    remote_target: String,
+    /// Our Contact URI advertised in the INVITE / 200 OK so the peer
+    /// can address future in-dialog requests to us. Populated by the
+    /// session manager.
+    local_contact: String,
 }
 
 impl Dialog {
     /// Create a new dialog for a UAC (caller).
+    ///
+    /// `route_set`, `remote_target`, and `local_contact` start empty —
+    /// they are populated later via [`Dialog::set_remote_target`] /
+    /// [`Dialog::set_route_set`] / [`Dialog::set_local_contact`] (or
+    /// via `populate_from_uac_response`) when the dialog establishes.
     pub fn new_uac(
         call_id: String,
         from_tag: String,
@@ -50,6 +83,10 @@ impl Dialog {
             local_uri,
             remote_uri,
             local_cseq: cseq,
+            role: Role::Uac,
+            route_set: RouteSet::new(),
+            remote_target: String::new(),
+            local_contact: String::new(),
         }
     }
 
@@ -68,6 +105,10 @@ impl Dialog {
             local_uri,
             remote_uri,
             local_cseq: cseq,
+            role: Role::Uas,
+            route_set: RouteSet::new(),
+            remote_target: String::new(),
+            local_contact: String::new(),
         }
     }
 
@@ -95,6 +136,144 @@ impl Dialog {
     pub fn next_cseq(&mut self) -> u32 {
         self.local_cseq += 1;
         self.local_cseq
+    }
+
+    /// Get our role (UAC / UAS) in this dialog.
+    pub fn role(&self) -> Role {
+        self.role
+    }
+
+    /// Read-only access to the route set (derived from Record-Route).
+    pub fn route_set(&self) -> &RouteSet {
+        &self.route_set
+    }
+
+    /// Read-only access to the peer's remote target (Contact URI).
+    pub fn remote_target(&self) -> &str {
+        &self.remote_target
+    }
+
+    /// Read-only access to our local Contact URI.
+    pub fn local_contact(&self) -> &str {
+        &self.local_contact
+    }
+
+    /// Set the remote target (peer's Contact URI).
+    pub fn set_remote_target(&mut self, target: String) {
+        self.remote_target = target;
+    }
+
+    /// Set the route set from a list of Record-Route header values.
+    /// Pass `reverse = true` for the UAC side (RFC 3261 §12.1.2).
+    pub fn set_route_set_from_record_routes(&mut self, record_routes: &[String], reverse: bool) {
+        self.route_set = RouteSet::from_record_route_values(record_routes, reverse);
+    }
+
+    /// Set the route set directly (for test fixtures or transport-aware
+    /// composition).
+    pub fn set_route_set(&mut self, route_set: RouteSet) {
+        self.route_set = route_set;
+    }
+
+    /// Set the local Contact URI.
+    pub fn set_local_contact(&mut self, contact: String) {
+        self.local_contact = contact;
+    }
+
+    /// Populate UAS-side routing fields from the inbound INVITE.
+    ///
+    /// Sets:
+    /// - `route_set` from the INVITE's `Record-Route` headers, in
+    ///   *forward* order (UAS path; RFC 3261 §12.1.1 — the UAC reverses
+    ///   per §12.1.2, the UAS does not).
+    /// - `remote_target` from the INVITE's `Contact:` URI.
+    /// - `local_contact` from the supplied `local_contact` (whatever the
+    ///   UAS uses in its 200 OK Contact, typically derived from the
+    ///   manager's `local_rtp_addr` or the application's bind addr).
+    ///
+    /// Without this populate, UAS-driven in-dialog requests (BYE,
+    /// UPDATE 200 OK, re-INVITE refresh) go out without the right
+    /// Route headers and Contact, breaking carrier-routed dialogs.
+    /// This is a no-op when called on a UAC dialog.
+    pub fn populate_uas_from_invite(&mut self, invite: &SipRequest, local_contact: String) {
+        if self.role != Role::Uas {
+            return;
+        }
+        let record_routes = invite.record_routes();
+        if !record_routes.is_empty() {
+            // RFC 3261 §12.1.1: UAS keeps Record-Route order as-is.
+            self.set_route_set_from_record_routes(&record_routes, false);
+        }
+        if let Some(contact) = invite.contact_uri() {
+            self.remote_target = contact.to_string();
+        }
+        self.local_contact = local_contact;
+    }
+
+    /// Populate UAC-side routing fields from an inbound response on the
+    /// dialog (provisional with To-tag or 2xx).
+    ///
+    /// Sets:
+    /// - `route_set` from the response's `Record-Route` headers, in
+    ///   *reverse* order (UAC path; RFC 3261 §12.1.2).
+    /// - `remote_target` from the response's `Contact:` URI.
+    /// - `local_contact` from the supplied `local_contact` (the UAC's
+    ///   own Contact in the original INVITE).
+    ///
+    /// Idempotent: callers may invoke this on every 18x carrying a
+    /// To-tag and on the 200 OK; the population converges. This lets
+    /// PRACK go out with correct Route headers in the early-dialog
+    /// state — before 200 OK arrives — so a routed PRACK actually
+    /// reaches the UAS through the same proxy chain as the INVITE.
+    /// This is a no-op when called on a UAS dialog.
+    pub fn populate_uac_from_response(
+        &mut self,
+        response: &crate::sip::SipResponse,
+        local_contact: String,
+    ) {
+        if self.role != Role::Uac {
+            return;
+        }
+        let record_routes = response.record_routes();
+        if !record_routes.is_empty() {
+            // RFC 3261 §12.1.2: UAC reverses Record-Route.
+            self.set_route_set_from_record_routes(&record_routes, true);
+        }
+        if let Some(contact) = response.contact_uri() {
+            self.remote_target = contact.to_string();
+        }
+        if !local_contact.is_empty() {
+            self.local_contact = local_contact;
+        }
+    }
+
+    /// Reconstruct a full `InviteDialog` from this lightweight session
+    /// dialog so the session manager can use the dialog layer's
+    /// builders (`build_prack`, `build_update`, `build_bye_with_reason`,
+    /// `handle_update`) — eliminating session-layer duplication of
+    /// in-dialog request construction.
+    ///
+    /// The returned `InviteDialog` is transient: changes to its
+    /// `local_seq` are not propagated back. Callers update
+    /// `Dialog::local_cseq` themselves to keep CSeq monotonic.
+    pub(crate) fn to_invite_dialog(&self) -> crate::dialog::InviteDialog {
+        let info = crate::dialog::DialogInfo {
+            id: self.id.clone(),
+            state: crate::dialog::DialogState::Confirmed,
+            local_seq: self.local_cseq,
+            remote_seq: None,
+            local_uri: self.local_uri.clone(),
+            remote_uri: self.remote_uri.clone(),
+            remote_target: if self.remote_target.is_empty() {
+                self.remote_uri.clone()
+            } else {
+                self.remote_target.clone()
+            },
+            local_contact: self.local_contact.clone(),
+            route_set: self.route_set.clone(),
+            secure: false,
+        };
+        crate::dialog::InviteDialog::from_dialog_info(info, self.role)
     }
 }
 
@@ -139,6 +318,14 @@ pub struct CallConfig {
     pub rtp_port_start: u16,
     /// RTP port range end.
     pub rtp_port_end: u16,
+    /// Session-Expires offered on outbound INVITEs (RFC 4028).
+    /// Duration::ZERO disables the entire session-timer feature:
+    /// no Supported: timer, no Session-Expires emitted, no
+    /// tick-driven refresh.
+    pub session_expires: Duration,
+    /// Min-SE offered on outbound INVITEs and rejection threshold
+    /// for inbound INVITEs (returns 422 if peer's offer < this).
+    pub min_se: Duration,
 }
 
 impl Default for CallConfig {
@@ -149,6 +336,8 @@ impl Default for CallConfig {
             codecs: vec![Codec::pcmu(), Codec::pcma()],
             rtp_port_start: 10000,
             rtp_port_end: 20000,
+            session_expires: Duration::from_secs(1800),
+            min_se: Duration::from_secs(90),
         }
     }
 }
@@ -520,11 +709,34 @@ pub struct Call {
     pending_answer: Option<PendingAnswer>,
     /// Pending events.
     events: Vec<CallEvent>,
+    /// Negotiated session-expires (None until 200 OK to INVITE).
+    pub session_expires: Option<Duration>,
+    /// Effective min_se (copied from config; allows a per-call override
+    /// path even though we don't expose one publicly today).
+    pub min_se: Duration,
+    /// Negotiated refresher (None until 200 OK to INVITE).
+    pub refresher: Option<crate::sip::headers::Refresher>,
+    /// Set only when WE are the refresher; UPDATE goes out at this
+    /// deadline. Mutually exclusive with expiry_at.
+    pub refresh_at: Option<Instant>,
+    /// Set only when the PEER is the refresher; if no refresh arrives
+    /// by this deadline we BYE the call. Mutually exclusive with
+    /// refresh_at.
+    pub expiry_at: Option<Instant>,
+    /// Sticky flag: peer responded 405/501 to our UPDATE; refresh
+    /// falls back to re-INVITE.
+    pub update_unsupported: bool,
+    /// Set by the app when a UAC transaction is in flight on this
+    /// dialog. `tick` skips firing a refresh while this is true to
+    /// avoid colliding with an in-flight re-INVITE / UPDATE
+    /// (HLD §6, risk row).
+    pub uac_in_flight: bool,
 }
 
 impl Call {
     /// Create a new outbound call.
     pub fn new_outbound(config: Arc<CallConfig>, remote_uri: String) -> Self {
+        let min_se = config.min_se;
         Self {
             id: CallId::new(),
             state: CallState::Idle,
@@ -536,11 +748,19 @@ impl Call {
             media: None,
             pending_answer: None,
             events: Vec::new(),
+            session_expires: None,
+            min_se,
+            refresher: None,
+            refresh_at: None,
+            expiry_at: None,
+            update_unsupported: false,
+            uac_in_flight: false,
         }
     }
 
     /// Create a new inbound call.
     pub fn new_inbound(config: Arc<CallConfig>, remote_uri: String, dialog: Dialog) -> Self {
+        let min_se = config.min_se;
         Self {
             id: CallId::new(),
             state: CallState::Ringing,
@@ -552,6 +772,13 @@ impl Call {
             media: None,
             pending_answer: None,
             events: vec![CallEvent::StateChanged(CallState::Ringing)],
+            session_expires: None,
+            min_se,
+            refresher: None,
+            refresh_at: None,
+            expiry_at: None,
+            update_unsupported: false,
+            uac_in_flight: false,
         }
     }
 
@@ -568,6 +795,7 @@ impl Call {
         dialog: Dialog,
         pending: PendingAnswer,
     ) -> Self {
+        let min_se = config.min_se;
         Self {
             id: CallId::new(),
             state: CallState::Ringing,
@@ -579,6 +807,13 @@ impl Call {
             media: None,
             pending_answer: Some(pending),
             events: vec![CallEvent::StateChanged(CallState::Ringing)],
+            session_expires: None,
+            min_se,
+            refresher: None,
+            refresh_at: None,
+            expiry_at: None,
+            update_unsupported: false,
+            uac_in_flight: false,
         }
     }
 
@@ -729,6 +964,27 @@ impl Call {
     /// is still awaiting `build_answer_for` (or `reject_inbound_invite`).
     pub(crate) fn has_pending_answer(&self) -> bool {
         self.pending_answer.is_some()
+    }
+
+    /// Slide whichever session-timer deadline applies forward by the
+    /// negotiated session-expires interval (RFC 4028 §7).
+    ///
+    /// Called on every successful in-dialog 2xx for UPDATE or INVITE —
+    /// session-timer refresh, hold/resume, transfer completion, all
+    /// reset the deadline. If we are the refresher, `refresh_at`
+    /// slides by se/2; if the peer is the refresher, `expiry_at`
+    /// slides by se. No-op when session timers were not negotiated
+    /// (`session_expires` is None).
+    pub fn slide_deadlines(&mut self, now: Instant) {
+        let Some(se) = self.session_expires else {
+            return;
+        };
+        if self.refresh_at.is_some() {
+            self.refresh_at = Some(now + se / 2);
+        }
+        if self.expiry_at.is_some() {
+            self.expiry_at = Some(now + se);
+        }
     }
 
     /// Take the cached offer + negotiated media, clearing it from the call.
@@ -1254,6 +1510,7 @@ mod tests {
             codecs: vec![Codec::pcma()],
             rtp_port_start: 20000,
             rtp_port_end: 30000,
+            ..CallConfig::default()
         });
         let call = Call::new_outbound(config, "sip:bob@example.com".to_string());
 

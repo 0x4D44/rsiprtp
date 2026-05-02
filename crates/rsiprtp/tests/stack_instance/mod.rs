@@ -131,6 +131,7 @@ impl StackInstance {
                 codecs: vec![Codec::pcmu(), Codec::pcma()],
                 rtp_port_start: rtp_port,
                 rtp_port_end,
+                ..CallConfig::default()
             },
         };
 
@@ -421,6 +422,8 @@ impl StackInstance {
                             &call_id,
                             dialog.clone(),
                             &answer_sdp,
+                            Some(&response),
+                            std::time::Instant::now(),
                         );
 
                         // Build and send ACK

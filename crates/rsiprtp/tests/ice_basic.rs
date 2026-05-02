@@ -170,7 +170,13 @@ async fn ice_basic_two_managers_loopback_handshake() {
     // ---- Wire the answer back into A's CallManager ----
     let a_answer_dialog = uac_dialog.clone();
     assert!(
-        a_manager.handle_invite_success(&a_call_id, a_answer_dialog, &answer_parsed),
+        a_manager.handle_invite_success(
+            &a_call_id,
+            a_answer_dialog,
+            &answer_parsed,
+            None,
+            std::time::Instant::now(),
+        ),
         "A: handle_invite_success accepts the answer"
     );
 

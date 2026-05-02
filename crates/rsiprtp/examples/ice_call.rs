@@ -148,7 +148,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // ---- Side A: ingest the 200 OK answer ----
     println!("\n[A] ingesting 200 OK answer");
     let answer_parsed = SessionDescription::parse(&answer_wire)?;
-    if !a_manager.handle_invite_success(&a_call_id, uac_dialog, &answer_parsed) {
+    if !a_manager.handle_invite_success(
+        &a_call_id,
+        uac_dialog,
+        &answer_parsed,
+        None,
+        std::time::Instant::now(),
+    ) {
         return Err("A: handle_invite_success rejected the answer".into());
     }
 

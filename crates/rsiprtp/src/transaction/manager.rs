@@ -6,7 +6,7 @@
 use crate::sip::{Method, SipMessage, SipRequest, SipResponse};
 use crate::transaction::client::invite::{InviteClientTransaction, TransactionId};
 use crate::transaction::client::non_invite::NonInviteClientTransaction;
-use crate::transaction::server::invite::InviteServerTransaction;
+use crate::transaction::server::invite::{FinalSent, InviteServerTransaction};
 use crate::transaction::server::non_invite::NonInviteServerTransaction;
 use crate::transaction::timer::Timer;
 use std::collections::HashMap;
@@ -80,6 +80,19 @@ pub enum ManagerEvent {
     Timeout,
     /// Transport error.
     TransportError,
+
+    // PRACK
+    /// Reliable provisional was abandoned without a matching PRACK
+    /// (RFC 3262 §3). The TU picks the right downstream action per
+    /// `final_sent`: send 504 if no final response was sent yet, send
+    /// BYE if a 2xx already established a dialog, drop silently if a
+    /// non-2xx final has already been sent.
+    PrackTimeout {
+        /// RSeq of the abandoned provisional.
+        rseq: u32,
+        /// What kind of final response (if any) had already been sent.
+        final_sent: FinalSent,
+    },
 }
 
 /// Transaction manager (Sans-IO).
@@ -157,6 +170,17 @@ impl TransactionManager {
     /// Handle an incoming request.
     #[cfg_attr(coverage, inline(never))]
     fn handle_request(&mut self, request: SipRequest) {
+        // PRACK routing (RFC 3262 §7.2): an arriving PRACK acknowledges
+        // a reliable provisional from the matching INVITE server
+        // transaction. We drop the PRACK's RSeq into that transaction
+        // first (so retransmits stop), then fall through to the normal
+        // non-INVITE-server creation so the PRACK gets its own 200 OK.
+        if request.method() == Method::Prack {
+            self.route_prack(&request);
+            // Fall through to create the non-INVITE server tx for the
+            // PRACK itself. The TU will respond 200 OK via send_response.
+        }
+
         // Check if this matches an existing server transaction
         if let Some(id) = TransactionId::from_request(&request) {
             if let Some(&handle) = self.id_to_handle.get(&id) {
@@ -216,6 +240,44 @@ impl TransactionManager {
                 .insert(handle, TransactionType::NonInviteServer);
         } else {
             cover_none_case();
+        }
+    }
+
+    /// Route an inbound PRACK's `RAck` RSeq into the matching INVITE
+    /// server transaction (RFC 3262 §7.2). Silently no-ops if no
+    /// match is found — the unmatched PRACK still gets a non-INVITE
+    /// server transaction created in the normal path, which the TU
+    /// responds to with a 481.
+    fn route_prack(&mut self, request: &SipRequest) {
+        use crate::transaction::server::invite::Event as InviteServerEvent;
+
+        let rack = match request.rack() {
+            Some(r) => r,
+            None => return,
+        };
+        let call_id = match request.call_id() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let from_tag = match request.from_tag() {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        // Find the matching invite server transaction by Call-ID +
+        // From-tag. The combination is unique because we don't fork.
+        let mut handle: Option<TransactionHandle> = None;
+        for (h, tx) in &self.invite_servers {
+            if tx.matches_invite_dialog(&call_id, &from_tag) {
+                handle = Some(*h);
+                break;
+            }
+        }
+        let Some(h) = handle else { return };
+
+        if let Some(tx) = self.invite_servers.get_mut(&h) {
+            tx.handle_event(InviteServerEvent::PrackReceived(rack.rseq));
+            Self::collect_invite_server_actions(h, tx, &mut self.actions);
         }
     }
 
@@ -503,15 +565,24 @@ impl TransactionManager {
                         Event::AckReceived => ManagerEvent::AckReceived,
                         Event::Timeout => ManagerEvent::Timeout,
                         Event::TransportError => ManagerEvent::TransportError,
-                        // PRACK events are wired to the manager / call layer
-                        // in Phase 4 (HLD § session/manager.rs). Until then
-                        // they are dropped at the transaction boundary —
-                        // the transaction is still Sans-IO-correct because
-                        // the buffer-drain rule on final responses ensures
-                        // PrackTimeout cannot fire post-final. Keeping this
-                        // match exhaustive so adding new variants is a
-                        // build-time error.
-                        Event::PrackReceived(_) | Event::PrackTimeout { .. } => continue,
+                        // PrackTimeout is OUTPUT-only: surfaced to the TU
+                        // as a typed manager event so the application can
+                        // pick the right response per RFC 3262 §3
+                        // (504 / BYE / drop). PrackReceived is INPUT-only
+                        // and should never appear here — fed in via
+                        // `route_prack`. Reaching the input arm via
+                        // poll_actions is an invariant violation.
+                        Event::PrackTimeout { rseq, final_sent } => {
+                            ManagerEvent::PrackTimeout { rseq, final_sent }
+                        }
+                        Event::PrackReceived(_) => {
+                            debug_assert!(
+                                false,
+                                "InviteServerTransaction emitted PrackReceived as output \
+                                 — this variant is INPUT-only (see Event docs)"
+                            );
+                            continue;
+                        }
                     };
                     actions.push(ManagerAction::Event(handle, manager_event));
                 }

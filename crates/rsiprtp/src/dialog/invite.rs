@@ -81,6 +81,10 @@ impl InviteDialog {
     /// The dialog is not yet established - call `handle_response` with responses.
     pub fn new_uac(invite: SipRequest) -> Self {
         // Create a placeholder dialog info - will be filled in when response arrives
+        let local_contact = invite
+            .contact_uri()
+            .map(|u| u.to_string())
+            .unwrap_or_default();
         let info = DialogInfo {
             id: DialogId::new("", "", ""),
             state: DialogState::Early,
@@ -97,6 +101,7 @@ impl InviteDialog {
                 .map(|u| u.to_string())
                 .unwrap_or_default(),
             remote_target: String::new(),
+            local_contact,
             route_set: Default::default(),
             secure: false,
         };
@@ -124,6 +129,39 @@ impl InviteDialog {
             actions: Vec::new(),
             ack_sent: false,
         })
+    }
+
+    /// Reconstruct an `InviteDialog` from already-known `DialogInfo` and a
+    /// role.
+    ///
+    /// Used by the session layer to thread Phase 4 in-dialog requests
+    /// (PRACK, UPDATE, refresh re-INVITE, expiry BYE) through the same
+    /// builders the dialog layer uses, so route_set and remote_target
+    /// flow into Route headers and request URIs per RFC 3261 §12.2.1.1.
+    ///
+    /// The original INVITE is not preserved — `handle_response` is not
+    /// useful on a transient instance constructed this way. Only the
+    /// build_* / send_bye paths are intended for this constructor.
+    pub fn from_dialog_info(info: DialogInfo, role: Role) -> Self {
+        // Synthesize a placeholder INVITE so the field is not Optional.
+        // It is not used by the build_* paths.
+        let invite = SipRequest::builder()
+            .method(Method::Invite)
+            .uri(&info.remote_uri)
+            .via("0.0.0.0", 5060, "UDP", "z9hG4bKplaceholder")
+            .from(&info.local_uri, &info.id.local_tag)
+            .to(&info.remote_uri)
+            .call_id(&info.id.call_id)
+            .cseq(info.local_seq.max(1))
+            .build()
+            .expect("placeholder INVITE always builds");
+        Self {
+            info,
+            role,
+            invite,
+            actions: Vec::new(),
+            ack_sent: false,
+        }
     }
 
     /// Get the dialog ID.
@@ -331,7 +369,7 @@ impl InviteDialog {
         let request_uri = self.info.remote_target.clone();
         let routes = self.info.route_set.routes();
 
-        SipRequest::builder()
+        let mut builder = SipRequest::builder()
             .method(Method::Prack)
             .uri(&request_uri)
             .via("0.0.0.0", 5060, "UDP", &branch)
@@ -342,7 +380,14 @@ impl InviteDialog {
             .cseq(cseq)
             .max_forwards(70)
             .rack(rseq, cseq_orig, cseq_method)
-            .route(routes)
+            .route(routes);
+
+        // RFC 3261 §12.2.1.1: in-dialog requests SHOULD carry Contact.
+        if !self.info.local_contact.is_empty() {
+            builder = builder.contact(&self.info.local_contact);
+        }
+
+        builder
             .build()
             .expect("build_prack: dialog state already validated by caller")
     }
@@ -383,6 +428,11 @@ impl InviteDialog {
             ])
             .route(routes);
 
+        // RFC 3261 §12.2.1.1: in-dialog requests SHOULD carry Contact.
+        if !self.info.local_contact.is_empty() {
+            builder = builder.contact(&self.info.local_contact);
+        }
+
         if let Some(secs) = session_expires {
             builder = builder
                 .session_expires(secs, Some(crate::sip::headers::Refresher::Uac))
@@ -415,6 +465,13 @@ impl InviteDialog {
                 Method::Update,
             ]);
 
+        // RFC 3261 §12.2.1.1: in-dialog responses also carry Contact so
+        // the peer's subsequent in-dialog requests can be addressed
+        // directly to us when no Record-Route is present.
+        if !self.info.local_contact.is_empty() {
+            builder = builder.contact(&self.info.local_contact);
+        }
+
         if let Some(se) = req.session_expires() {
             builder = builder.session_expires(se.delta_seconds, se.refresher);
         }
@@ -436,6 +493,20 @@ impl InviteDialog {
     /// for this. Nobody ships strict routing today, so this is
     /// acceptable; revisit if a strict-route peer appears.
     fn build_in_dialog_request(&self, method: Method, cseq: u32) -> Option<SipRequest> {
+        self.build_in_dialog_request_with(method, cseq, &[])
+    }
+
+    /// Build an in-dialog request with extra headers appended verbatim.
+    ///
+    /// The extra headers are emitted via `SipRequestBuilder::header(name,
+    /// value)` so callers can add things like `Reason:` for an
+    /// expiry-driven BYE without bloating the dialog API surface.
+    fn build_in_dialog_request_with(
+        &self,
+        method: Method,
+        cseq: u32,
+        extra_headers: &[(&str, &str)],
+    ) -> Option<SipRequest> {
         let branch = format!("z9hG4bK{}", uuid::Uuid::new_v4().simple());
 
         // Loose-route: request URI stays as remote target; routes go into
@@ -459,7 +530,7 @@ impl InviteDialog {
             ),
         };
 
-        let request = SipRequest::builder()
+        let mut builder = SipRequest::builder()
             .method(method)
             .uri(&request_uri)
             .via("0.0.0.0", 5060, "UDP", &branch) // Will be filled in by transport
@@ -468,11 +539,41 @@ impl InviteDialog {
             .to_tag(to_tag)
             .call_id(&self.info.id.call_id)
             .cseq(cseq)
-            .route(routes)
-            .build()
-            .ok()?;
+            .max_forwards(70)
+            .route(routes);
 
-        Some(request)
+        // RFC 3261 §12.2.1.1: in-dialog requests SHOULD carry Contact.
+        if !self.info.local_contact.is_empty() {
+            builder = builder.contact(&self.info.local_contact);
+        }
+
+        for (name, value) in extra_headers {
+            builder = builder.header(name, value);
+        }
+
+        builder.build().ok()
+    }
+
+    /// Build a BYE that carries an extra `Reason:` header (RFC 3326).
+    ///
+    /// Used by the session-timer expiry path to distinguish a
+    /// session-timer-driven BYE from a normal hangup
+    /// (`Reason: SIP;cause=200;text="Session timer expired"`).
+    /// Returns `None` if the dialog is not in `Confirmed` state.
+    pub fn build_bye_with_reason(&mut self, reason: &str) -> Option<SipRequest> {
+        if self.info.state != DialogState::Confirmed {
+            return None;
+        }
+        // Compute the would-be next CSeq without committing the bump yet.
+        // If the build fails we leave `local_seq` and `state` untouched so
+        // we don't leak a wasted CSeq or strand the dialog in `Terminating`.
+        let cseq = self.info.local_seq.saturating_add(1);
+        let bye = self.build_in_dialog_request_with(Method::Bye, cseq, &[("Reason", reason)])?;
+        // Commit on success.
+        self.info.local_seq = cseq;
+        self.info.state = DialogState::Terminating;
+        self.actions.push(Action::SendRequest(bye.clone()));
+        Some(bye)
     }
 
     /// Drain pending actions.
@@ -1774,7 +1875,9 @@ Content-Length: 0\r\n\
     }
 
     /// Build an inbound UPDATE request carrying optional Session-Expires.
-    fn inbound_update(session_expires: Option<(u32, crate::sip::headers::Refresher)>) -> SipRequest {
+    fn inbound_update(
+        session_expires: Option<(u32, crate::sip::headers::Refresher)>,
+    ) -> SipRequest {
         let mut builder = SipRequest::builder()
             .method(Method::Update)
             .uri("sip:alice@example.com")
@@ -1920,6 +2023,158 @@ Content-Length: 0\r\n\
         assert_eq!(routes.len(), 2);
         assert!(routes[0].contains("proxy1"));
         assert!(routes[1].contains("proxy2"));
+    }
+
+    /// PRACK must carry Contact (RFC 3261 §12.2.1.1).
+    #[test]
+    fn test_build_prack_emits_contact() {
+        let invite = create_invite(); // Contact: <sip:alice@192.168.1.1:5060>
+        let mut dialog = InviteDialog::new_uac(invite.clone());
+        let response = provisional_with_rseq(&invite, 180, 1);
+        dialog.handle_response(response.clone());
+        dialog.poll_actions();
+
+        let prack = dialog.build_prack(&response);
+        let bytes = prack.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+        let contact = parsed_req
+            .contact_uri()
+            .expect("PRACK must carry Contact (RFC 3261 §12.2.1.1)");
+        assert!(contact.to_string().contains("alice"));
+    }
+
+    /// 200 OK to inbound UPDATE must carry Contact.
+    #[test]
+    fn test_handle_update_emits_contact() {
+        let dialog = confirmed_uac_dialog();
+        let req = inbound_update(None);
+        let resp = dialog.handle_update(&req);
+
+        let bytes = resp.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_resp = parsed.as_response().unwrap();
+        let contact = parsed_resp
+            .contact_uri()
+            .expect("200 OK to UPDATE must carry Contact");
+        assert!(contact.to_string().contains("alice"));
+    }
+
+    /// `from_dialog_info` reconstructs an InviteDialog from already-known
+    /// dialog state without the original INVITE — used by the session
+    /// layer to thread Phase 4 in-dialog requests through Phase 3
+    /// builders.
+    #[test]
+    fn test_from_dialog_info_builds_routed_update() {
+        use crate::dialog::state::{DialogId, DialogInfo, DialogState, RouteSet};
+        let info = DialogInfo {
+            id: DialogId::new("call-x", "ftag", "ttag"),
+            state: DialogState::Confirmed,
+            local_seq: 5,
+            remote_seq: None,
+            local_uri: "sip:alice@example.com".into(),
+            remote_uri: "sip:bob@example.com".into(),
+            remote_target: "sip:bob@10.0.0.2:5060".into(),
+            local_contact: "sip:alice@10.0.0.1:5060".into(),
+            route_set: RouteSet::from_record_route_values(
+                &[
+                    "<sip:proxy1.example.com;lr>".to_string(),
+                    "<sip:proxy2.example.com;lr>".to_string(),
+                ],
+                false,
+            ),
+            secure: false,
+        };
+        let mut dialog = InviteDialog::from_dialog_info(info, Role::Uac);
+
+        let update = dialog.build_update(Some(1800));
+        let bytes = update.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+
+        // Routes from the route set.
+        let routes = parsed_req.route_headers();
+        assert_eq!(routes.len(), 2, "UPDATE must carry Route headers from the dialog");
+        assert!(routes[0].contains("proxy1"));
+
+        // Contact from local_contact.
+        let contact = parsed_req
+            .contact_uri()
+            .expect("UPDATE must carry Contact");
+        assert!(contact.to_string().contains("10.0.0.1"));
+
+        // Request URI is the remote target.
+        assert!(parsed_req.uri().to_string().contains("10.0.0.2"));
+
+        // CSeq advanced past local_seq.
+        assert_eq!(parsed_req.cseq().unwrap(), 6);
+    }
+
+    /// `build_bye_with_reason` carries Route, Contact, and the Reason
+    /// header. Used by the manager's session-timer expiry path.
+    #[test]
+    fn test_build_bye_with_reason() {
+        use crate::dialog::state::{DialogId, DialogInfo, DialogState, RouteSet};
+        let info = DialogInfo {
+            id: DialogId::new("call-x", "ftag", "ttag"),
+            state: DialogState::Confirmed,
+            local_seq: 5,
+            remote_seq: None,
+            local_uri: "sip:alice@example.com".into(),
+            remote_uri: "sip:bob@example.com".into(),
+            remote_target: "sip:bob@10.0.0.2:5060".into(),
+            local_contact: "sip:alice@10.0.0.1:5060".into(),
+            route_set: RouteSet::from_record_route_values(
+                &["<sip:proxy.example.com;lr>".to_string()],
+                false,
+            ),
+            secure: false,
+        };
+        let mut dialog = InviteDialog::from_dialog_info(info, Role::Uac);
+
+        let bye = dialog
+            .build_bye_with_reason(r#"SIP;cause=200;text="Session timer expired""#)
+            .expect("BYE built");
+        let bytes = bye.to_bytes();
+        let raw = String::from_utf8(bytes.to_vec()).expect("utf8");
+
+        // Reason header survives.
+        assert!(
+            raw.contains(r#"Reason: SIP;cause=200;text="Session timer expired""#),
+            "BYE must carry the Reason header verbatim, got:\n{}",
+            raw
+        );
+
+        // Route + Contact survive.
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+        assert_eq!(parsed_req.route_headers().len(), 1);
+        assert!(parsed_req.contact_uri().is_some());
+        assert_eq!(parsed_req.method(), Method::Bye);
+        assert_eq!(dialog.state(), DialogState::Terminating);
+    }
+
+    /// `build_bye_with_reason` rejects when the dialog isn't Confirmed.
+    #[test]
+    fn test_build_bye_with_reason_requires_confirmed() {
+        use crate::dialog::state::{DialogId, DialogInfo, DialogState, RouteSet};
+        let info = DialogInfo {
+            id: DialogId::new("call-x", "ftag", "ttag"),
+            state: DialogState::Early,
+            local_seq: 1,
+            remote_seq: None,
+            local_uri: "sip:alice@example.com".into(),
+            remote_uri: "sip:bob@example.com".into(),
+            remote_target: "sip:bob@10.0.0.2:5060".into(),
+            local_contact: "sip:alice@10.0.0.1:5060".into(),
+            route_set: RouteSet::default(),
+            secure: false,
+        };
+        let mut dialog = InviteDialog::from_dialog_info(info, Role::Uac);
+        // `from_dialog_info` always sets Confirmed — overwrite to Early
+        // for this negative case.
+        dialog.info.state = DialogState::Early;
+        assert!(dialog.build_bye_with_reason("test").is_none());
     }
 
     /// PRACK must also carry Route headers from the dialog's route set.

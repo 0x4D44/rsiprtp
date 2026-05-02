@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::dialog::DialogId;
 use crate::ice::Candidate;
@@ -18,6 +19,8 @@ use crate::session::call::{
     PendingAnswer,
 };
 use crate::session::ice_session::IceLocalParams;
+use crate::sip::headers::Refresher;
+use crate::sip::{Method, SipRequest, SipResponse};
 
 /// Inputs to [`CallManager::build_answer_for`].
 ///
@@ -48,6 +51,87 @@ impl<'a> IceAnswerInputs<'a> {
             local,
         }
     }
+}
+
+/// Headers the application should add to an outbound INVITE for the
+/// supported feature set (RFC 4028 session timers + RFC 3262 PRACK).
+///
+/// When `session_expires` is `None`, session timers are disabled
+/// (CallConfig.session_expires == ZERO): emit `supported_tags` and
+/// `allow_methods` only. When `Some`, also emit `Session-Expires:
+/// <secs>;refresher=uac` and `Min-SE: <secs>`.
+#[derive(Debug, Clone)]
+pub struct InviteOfferHeaders {
+    /// Option-tags for the `Supported` header (e.g. `100rel`, `timer`).
+    pub supported_tags: Vec<String>,
+    /// Methods for the `Allow` header.
+    pub allow_methods: Vec<Method>,
+    /// Session-Expires `(delta-seconds, refresher=uac)`. `None` when
+    /// `session_expires == ZERO` in `CallConfig`.
+    pub session_expires: Option<(u32, Refresher)>,
+    /// Min-SE delta-seconds. `None` when session timers are disabled.
+    pub min_se: Option<u32>,
+}
+
+/// Negotiated session-timer state for an inbound INVITE.
+///
+/// Returned by [`CallManager::evaluate_inbound_invite_session_timer`]
+/// so the application knows whether to reject with 422 or proceed.
+#[derive(Debug, Clone)]
+pub enum InboundSessionTimer {
+    /// Session-Expires omitted by peer or peer didn't advertise `timer`
+    /// support — establish the call without session timers.
+    Disabled,
+    /// Session-Expires present and acceptable. We negotiate the
+    /// indicated `(session_expires, refresher)`. `refresher == Uac`
+    /// means peer refreshes; `refresher == Uas` means we refresh.
+    Accept {
+        /// Negotiated interval to echo in our 200 OK and use for deadlines.
+        session_expires: Duration,
+        /// Refresher we picked (RFC 4028 §7.4): UAC if the peer
+        /// advertised `Supported: timer`, else UAS.
+        refresher: Refresher,
+    },
+    /// Peer's `Session-Expires` was below our `Min-SE`; respond 422
+    /// with `Min-SE: <secs>` set from the call config.
+    Reject422 {
+        /// Min-SE to advertise in the 422 response.
+        min_se: u32,
+    },
+}
+
+/// An outbound request emitted by the manager (PRACK, refresh
+/// UPDATE/re-INVITE, expiry BYE) for the application to dispatch via
+/// its transaction layer.
+///
+/// The application is responsible for opening the appropriate
+/// transaction (NonInvite for PRACK / UPDATE / BYE; InviteClient for
+/// a re-INVITE refresh) and threading the response back into the
+/// manager via the existing `handle_*` entry points.
+#[derive(Debug, Clone)]
+pub struct OutboundRequest {
+    /// Call this request belongs to.
+    pub call_id: CallId,
+    /// The request to send.
+    pub request: SipRequest,
+    /// What kind of request this is (so the app can pick the right
+    /// transaction type / response handler).
+    pub kind: OutboundRequestKind,
+}
+
+/// Classification of an [`OutboundRequest`] so the app can route it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboundRequestKind {
+    /// PRACK acknowledging a reliable provisional. NonInvite client tx.
+    Prack,
+    /// Session-timer refresh via UPDATE. NonInvite client tx.
+    SessionTimerUpdate,
+    /// Session-timer refresh via re-INVITE (UPDATE-not-supported
+    /// fallback). InviteClient transaction.
+    SessionTimerReInvite,
+    /// BYE sent because the peer (the refresher) failed to refresh
+    /// within `expiry_at`. NonInvite client tx.
+    SessionTimerExpiryBye,
 }
 
 /// Manager event for the application layer.
@@ -101,6 +185,9 @@ pub struct CallManager {
     next_rtp_port: u16,
     /// Pending events.
     events: Vec<ManagerEvent>,
+    /// Outbound requests the manager has built (PRACK, refresh
+    /// UPDATE/re-INVITE, expiry BYE) waiting for the app to dispatch.
+    pending_outbound_requests: Vec<OutboundRequest>,
 }
 
 impl CallManager {
@@ -116,6 +203,7 @@ impl CallManager {
             dialog_to_call: HashMap::new(),
             next_rtp_port,
             events: Vec::new(),
+            pending_outbound_requests: Vec::new(),
         }
     }
 
@@ -394,11 +482,27 @@ impl CallManager {
     }
 
     /// Handle a 200 OK response to our INVITE.
+    ///
+    /// Establishes the call, attaches negotiated media, registers the
+    /// dialog mapping, and (when `response` is `Some`) applies any
+    /// session-timer state carried by the response — `Session-Expires`
+    /// drives `refresh_at`/`expiry_at` per RFC 4028 §7.1, with
+    /// `now: Instant` as the reference point. Pass `response = None`
+    /// only in test paths that don't exercise session timers.
+    ///
+    /// `dialog` must be a UAC dialog (caller-side). The route_set and
+    /// remote_target on `dialog` are normally populated by the caller
+    /// from the response's Record-Route + Contact; this method does
+    /// not re-derive them. If the caller forgot to populate them,
+    /// in-dialog requests built later will not carry Route headers
+    /// (RFC 3261 §12.2.1.1 violation against routed peers).
     pub fn handle_invite_success(
         &mut self,
         call_id: &CallId,
         dialog: Dialog,
         answer_sdp: &SessionDescription,
+        response: Option<&SipResponse>,
+        now: Instant,
     ) -> bool {
         // Process the SDP answer first
         let negotiated = process_answer(answer_sdp);
@@ -415,6 +519,21 @@ impl CallManager {
             None => return false,
         };
 
+        // Populate the dialog's routing state from the 200 OK so
+        // future in-dialog requests (PRACK, UPDATE, refresh re-INVITE,
+        // expiry BYE) carry correct Route headers + request URI per
+        // RFC 3261 §12.2.1.1.
+        let mut dialog = dialog;
+        if let Some(resp) = response {
+            // UAC: Record-Route is reversed (RFC 3261 §12.1.2).
+            let record_routes = resp.record_routes();
+            if !record_routes.is_empty() {
+                dialog.set_route_set_from_record_routes(&record_routes, true);
+            }
+            if let Some(contact) = resp.contact_uri() {
+                dialog.set_remote_target(contact.to_string());
+            }
+        }
         call.set_dialog(dialog);
         // Surface a media-session construction error by failing the
         // 200-OK handler — the caller treats `false` as "could not
@@ -424,6 +543,14 @@ impl CallManager {
             return false;
         }
         call.handle_answer();
+
+        // Apply session-timer state from the response in the same
+        // call-mut borrow — folds the previously-public
+        // `handle_invite_2xx_session_timer` choreography into a single
+        // entry point so the app can't forget to make the second call.
+        if let Some(resp) = response {
+            Self::apply_invite_2xx_session_timer(call, resp, now);
+        }
 
         // Register dialog mapping
         let dialog_id = call.dialog_id().expect("dialog id");
@@ -436,6 +563,30 @@ impl CallManager {
         ));
 
         true
+    }
+
+    /// Apply a 200 OK's `Session-Expires:` to a call. Internal helper
+    /// used by `handle_invite_success`.
+    fn apply_invite_2xx_session_timer(call: &mut Call, response: &SipResponse, now: Instant) {
+        let Some(se) = response.session_expires() else {
+            return;
+        };
+        // RFC 4028 §7.1: if peer omits the refresher, default to UAC.
+        let refresher = se.refresher.unwrap_or(Refresher::Uac);
+        let session_expires = Duration::from_secs(se.delta_seconds as u64);
+
+        call.session_expires = Some(session_expires);
+        call.refresher = Some(refresher);
+        match refresher {
+            Refresher::Uac => {
+                call.refresh_at = Some(now + session_expires / 2);
+                call.expiry_at = None;
+            }
+            Refresher::Uas => {
+                call.expiry_at = Some(now + session_expires);
+                call.refresh_at = None;
+            }
+        }
     }
 
     /// Handle a 18x provisional response.
@@ -471,6 +622,74 @@ impl CallManager {
         }
     }
 
+    /// Handle a 18x provisional response, populating the UAC dialog's
+    /// routing fields from the response when it carries a To-tag.
+    ///
+    /// This is the early-dialog populate hook (mirrors `handle_invite_success`'s
+    /// 200-OK populate). Without it, PRACK / outbound UPDATE built before
+    /// 200 OK arrive at proxies *without* Route headers because the
+    /// dialog's `route_set` is empty until 2xx — RFC 3261 §12.2.1.1
+    /// requires those headers, and a real carrier with `Record-Route`
+    /// stamping will silently drop our PRACK.
+    ///
+    /// The `local_contact` is what the application advertised as
+    /// `Contact:` in the original outbound INVITE. Idempotent —
+    /// subsequent 1xx + the 200 OK may all call this, the population
+    /// converges to the same triple.
+    ///
+    /// Falls back to the no-tag case (treats response as `100 Trying`-class)
+    /// by simply forwarding to `handle_provisional`.
+    pub fn handle_provisional_response(
+        &mut self,
+        call_id: &CallId,
+        response: &SipResponse,
+        sdp: Option<&SessionDescription>,
+        local_contact: &str,
+    ) {
+        let has_sdp = sdp.is_some();
+
+        // Populate UAC dialog routing if the response carries a To-tag
+        // (i.e. it has established at least an early dialog).
+        if response.to_tag().is_some() {
+            if let Some(call) = self.calls.get_mut(call_id) {
+                if let Some(dialog) = call.dialog_mut() {
+                    dialog.populate_uac_from_response(response, local_contact.to_string());
+                }
+            }
+        }
+
+        // Then run the existing provisional handling (state transition,
+        // early-media setup).
+        self.handle_provisional(call_id, has_sdp, sdp);
+    }
+
+    /// Populate the UAS-side dialog's routing fields from an inbound
+    /// INVITE.
+    ///
+    /// The application MUST call this immediately after
+    /// [`handle_incoming_invite`](Self::handle_incoming_invite) /
+    /// [`accept_inbound_invite`](Self::accept_inbound_invite) on the
+    /// inbound path so any UAS-driven in-dialog request (BYE, the 200 OK
+    /// to UPDATE, a re-INVITE refresh) carries correct Route + Contact
+    /// per RFC 3261 §12.1.1 / §12.2.1.1. `local_contact` is the URI the
+    /// UAS will advertise as Contact in its 200 OK (typically derived
+    /// from the manager's `local_rtp_addr` and the application's bind
+    /// addr).
+    ///
+    /// This is a no-op when the call is unknown or the dialog is UAC.
+    pub fn populate_uas_dialog_routing(
+        &mut self,
+        call_id: &CallId,
+        invite: &SipRequest,
+        local_contact: String,
+    ) {
+        if let Some(call) = self.calls.get_mut(call_id) {
+            if let Some(dialog) = call.dialog_mut() {
+                dialog.populate_uas_from_invite(invite, local_contact);
+            }
+        }
+    }
+
     /// Handle an error response to INVITE.
     pub fn handle_invite_failure(&mut self, call_id: &CallId, status_code: u16) {
         if let Some(call) = self.calls.get_mut(call_id) {
@@ -487,6 +706,581 @@ impl CallManager {
                 CallEvent::Ended(reason),
             ));
         }
+    }
+
+    /// Headers the application should attach to an outbound INVITE.
+    ///
+    /// Always returns the PRACK / UPDATE option-tag and matching
+    /// `Allow` set. When `CallConfig.session_expires == Duration::ZERO`,
+    /// session-timer-related fields are `None` — the app must omit
+    /// `Session-Expires` and `Min-SE` and must NOT add `timer` to
+    /// `Supported`. Otherwise both are populated and `timer` is
+    /// added to `supported_tags`.
+    pub fn invite_offer_headers(&self) -> InviteOfferHeaders {
+        let allow_methods = vec![
+            Method::Invite,
+            Method::Ack,
+            Method::Bye,
+            Method::Cancel,
+            Method::Options,
+            Method::Prack,
+            Method::Update,
+        ];
+
+        if self.call_config.session_expires.is_zero() {
+            // RFC 4028 surface fully suppressed.
+            InviteOfferHeaders {
+                supported_tags: vec!["100rel".to_string()],
+                allow_methods,
+                session_expires: None,
+                min_se: None,
+            }
+        } else {
+            let se_secs = self.call_config.session_expires.as_secs() as u32;
+            let min_se_secs = self.call_config.min_se.as_secs() as u32;
+            InviteOfferHeaders {
+                supported_tags: vec!["timer".to_string(), "100rel".to_string()],
+                allow_methods,
+                session_expires: Some((se_secs, Refresher::Uac)),
+                min_se: Some(min_se_secs),
+            }
+        }
+    }
+
+    /// Handle a reliable 1xx provisional and build the matching PRACK.
+    ///
+    /// Per RFC 3262, when a 1xx (>100) carries `Require: 100rel` and an
+    /// `RSeq:`, the UAC must send a PRACK whose `RAck:` echoes the
+    /// RSeq, the original INVITE's CSeq, and `INVITE`. The PRACK is
+    /// appended to the manager's outbound queue (drainable via
+    /// [`drain_outbound_requests`]) and also returned for callers
+    /// preferring direct dispatch.
+    ///
+    /// Returns `None` when the response is not actually reliable
+    /// (no `RSeq` or the call is unknown) — the app should fall back
+    /// to the existing non-reliable provisional path in that case.
+    pub fn handle_provisional_reliable(
+        &mut self,
+        call_id: &CallId,
+        response: &SipResponse,
+    ) -> Option<SipRequest> {
+        // Sanity-check the response carries RSeq before delegating to
+        // the dialog layer (which debug_asserts on missing RSeq).
+        let _ = response.rseq()?;
+
+        let call = self.calls.get_mut(call_id)?;
+        let dialog = call.dialog_mut()?;
+
+        // Build PRACK through the dialog layer so it picks up the
+        // dialog's route_set and remote_target (RFC 3261 §12.2.1.1)
+        // and emits Contact. The transient InviteDialog also bumps
+        // its own local_seq; we mirror that bump back into the session
+        // dialog so subsequent in-dialog requests stay monotonic.
+        let mut invite_dialog = dialog.to_invite_dialog();
+        let prack = invite_dialog.build_prack(response);
+        // Mirror the cseq bump back to the session dialog.
+        let _ = dialog.next_cseq();
+
+        self.pending_outbound_requests.push(OutboundRequest {
+            call_id: call_id.clone(),
+            request: prack.clone(),
+            kind: OutboundRequestKind::Prack,
+        });
+        Some(prack)
+    }
+
+    /// Evaluate session-timer headers on an inbound INVITE.
+    ///
+    /// Use the result to decide between three paths:
+    /// - [`InboundSessionTimer::Disabled`] — peer didn't request
+    ///   timers; proceed normally.
+    /// - [`InboundSessionTimer::Accept`] — proceed; `accept_session_timer`
+    ///   should be invoked once the call is established (at 200 OK
+    ///   build time) to set the deadlines.
+    /// - [`InboundSessionTimer::Reject422`] — respond 422 with the
+    ///   embedded `Min-SE` and do NOT establish the call.
+    pub fn evaluate_inbound_invite_session_timer(
+        &self,
+        request: &SipRequest,
+    ) -> InboundSessionTimer {
+        let Some(se) = request.session_expires() else {
+            return InboundSessionTimer::Disabled;
+        };
+
+        let min_se_secs = self.call_config.min_se.as_secs() as u32;
+        if (se.delta_seconds as u64) < self.call_config.min_se.as_secs() {
+            return InboundSessionTimer::Reject422 {
+                min_se: min_se_secs,
+            };
+        }
+
+        // RFC 4028 §7.4 / HLD snag 2: as UAS, pick `uac` when the peer
+        // advertised `Supported: timer`, else `uas`.
+        let peer_supports_timer = request
+            .supported()
+            .map(|s| s.0.iter().any(|t| t.eq_ignore_ascii_case("timer")))
+            .unwrap_or(false);
+        let refresher = if peer_supports_timer {
+            Refresher::Uac
+        } else {
+            Refresher::Uas
+        };
+
+        InboundSessionTimer::Accept {
+            session_expires: Duration::from_secs(se.delta_seconds as u64),
+            refresher,
+        }
+    }
+
+    /// Apply the negotiated session-timer state to an established call
+    /// (UAS side, called when our 200 OK is being sent).
+    ///
+    /// `refresher == Uac` means peer refreshes → `expiry_at = now + se`.
+    /// `refresher == Uas` means we refresh → `refresh_at = now + se/2`.
+    pub fn accept_session_timer(
+        &mut self,
+        call_id: &CallId,
+        session_expires: Duration,
+        refresher: Refresher,
+        now: Instant,
+    ) {
+        if let Some(call) = self.calls.get_mut(call_id) {
+            call.session_expires = Some(session_expires);
+            call.refresher = Some(refresher);
+            match refresher {
+                Refresher::Uac => {
+                    call.expiry_at = Some(now + session_expires);
+                    call.refresh_at = None;
+                }
+                Refresher::Uas => {
+                    call.refresh_at = Some(now + session_expires / 2);
+                    call.expiry_at = None;
+                }
+            }
+        }
+    }
+
+    /// Handle an inbound UPDATE request for an existing dialog.
+    ///
+    /// Builds a 200 OK echoing `Session-Expires` (when present),
+    /// slides whichever deadline applies, and returns the response
+    /// for the application to send. Returns `None` when no call
+    /// matches the dialog ID — the application should respond
+    /// `481 Call/Transaction Does Not Exist` itself.
+    pub fn handle_inbound_update(
+        &mut self,
+        dialog_id: &DialogId,
+        request: &SipRequest,
+        now: Instant,
+    ) -> Option<SipResponse> {
+        let call_id = self.dialog_to_call.get(dialog_id)?.clone();
+        let call = self.calls.get_mut(&call_id)?;
+
+        // RFC 4028 §10.3: if the peer's Session-Expires is below our
+        // Min-SE, reject with 422 carrying our Min-SE. Do NOT mutate the
+        // call's session_expires or slide deadlines — the UPDATE is
+        // rejected outright and our negotiated values stand.
+        if let Some(se) = request.session_expires() {
+            let min_se_secs = self.call_config.min_se.as_secs();
+            if (se.delta_seconds as u64) < min_se_secs {
+                let resp = SipResponse::builder()
+                    .status(422, "Session Interval Too Small")
+                    .from_request(request)
+                    .min_se(min_se_secs as u32)
+                    .build()
+                    .ok()?;
+                return Some(resp);
+            }
+            // Accepted — adopt the peer's Session-Expires for future
+            // refresh deadline arithmetic.
+            let new_se = Duration::from_secs(se.delta_seconds as u64);
+            call.session_expires = Some(new_se);
+        }
+        call.slide_deadlines(now);
+
+        // Build the 200 OK through the dialog layer so it carries
+        // Allow + Contact (RFC 3261 §12.2.1.1) and echoes
+        // Session-Expires consistently with PRACK / UPDATE / refresh
+        // builders. The transient InviteDialog reads the dialog's
+        // route_set + remote_target + local_contact; no session-layer
+        // duplication of in-dialog response building.
+        let dialog = call.dialog()?;
+        let invite_dialog = dialog.to_invite_dialog();
+        Some(invite_dialog.handle_update(request))
+    }
+
+    /// Slide both session-timer deadlines on the call matching this
+    /// dialog ID. Call after any successful in-dialog 2xx for UPDATE
+    /// or INVITE (refresh, hold/resume, transfer completion). No-op
+    /// when the dialog or call is unknown, or when session timers are
+    /// not enabled on the call.
+    pub fn slide_deadlines_for_dialog(&mut self, dialog_id: &DialogId, now: Instant) {
+        if let Some(call_id) = self.dialog_to_call.get(dialog_id).cloned() {
+            if let Some(call) = self.calls.get_mut(&call_id) {
+                call.slide_deadlines(now);
+            }
+        }
+    }
+
+    /// Notify the manager that an in-dialog 2xx for `method` was
+    /// received on `call_id`.
+    ///
+    /// The application MUST call this on every successful 2xx response
+    /// to an in-dialog `UPDATE` or `INVITE` it dispatched (refresh,
+    /// hold-resume, transfer completion), so the session-timer
+    /// deadlines slide forward per RFC 4028 §7. Other methods are
+    /// ignored: only UPDATE and INVITE 2xx reset the deadline.
+    ///
+    /// The manager doesn't see outbound transactions itself today, so
+    /// this is the only path that keeps `refresh_at` / `expiry_at`
+    /// honest after manager-built refreshes succeed. Forgetting it
+    /// silently doubles refresh attempts (next tick fires another).
+    pub fn mark_in_dialog_2xx(&mut self, call_id: &CallId, method: Method, now: Instant) {
+        if !matches!(method, Method::Update | Method::Invite) {
+            return;
+        }
+        if let Some(call) = self.calls.get_mut(call_id) {
+            call.slide_deadlines(now);
+        }
+    }
+
+    /// Set or clear the "UAC transaction in flight" flag for a call.
+    ///
+    /// `tick` skips firing a refresh while this is `true` so refresh
+    /// doesn't race a hold / transfer / re-INVITE the application
+    /// already issued. The application is expected to set it on
+    /// transaction creation and clear it on terminal response.
+    pub fn set_uac_in_flight(&mut self, call_id: &CallId, in_flight: bool) {
+        if let Some(call) = self.calls.get_mut(call_id) {
+            call.uac_in_flight = in_flight;
+        }
+    }
+
+    /// App-driven signal: the peer just rejected our outbound UPDATE
+    /// with 405 Method Not Allowed or 501 Not Implemented. Future
+    /// refreshes on this call will use re-INVITE (RFC 4028 §7).
+    ///
+    /// The manager doesn't observe transaction-level responses today,
+    /// so this can't be flipped automatically — the application
+    /// dispatching the UPDATE NonInvite client transaction MUST call
+    /// this on receipt of 405 or 501. Renamed from the old
+    /// `mark_update_unsupported` to make the app-driven contract
+    /// obvious: the manager *notes* what the app observed.
+    pub fn note_update_unsupported(&mut self, call_id: &CallId) {
+        if let Some(call) = self.calls.get_mut(call_id) {
+            call.update_unsupported = true;
+        }
+    }
+
+    /// Drain the queue of outbound requests built by the manager
+    /// (PRACK, refresh UPDATE/re-INVITE, expiry BYE).
+    ///
+    /// The application is responsible for opening the appropriate
+    /// transaction (NonInvite client for PRACK / UPDATE / BYE,
+    /// InviteClient for the re-INVITE refresh) and threading the
+    /// final response back via the existing entry points.
+    pub fn drain_outbound_requests(&mut self) -> Vec<OutboundRequest> {
+        std::mem::take(&mut self.pending_outbound_requests)
+    }
+
+    /// Fire any session-timer deadlines that have elapsed.
+    ///
+    /// For each call in `Established`:
+    /// - When `refresh_at <= now` and we are the refresher and no UAC
+    ///   transaction is in flight: emit a UPDATE refresh (or re-INVITE
+    ///   when `update_unsupported`); tentatively slide `refresh_at`.
+    /// - When `expiry_at <= now` and the peer is the refresher: emit a
+    ///   BYE with `Reason: SIP;cause=200;text="Session timer expired"`,
+    ///   transition the call to `Terminating`, and emit a
+    ///   `CallStateChanged` event.
+    ///
+    /// Idempotent: deadlines slide forward as the actions are emitted,
+    /// so a second call with the same `now` does nothing.
+    pub fn tick(&mut self, now: Instant) {
+        // Snapshot the call IDs to avoid borrow issues during mutation.
+        let ids: Vec<CallId> = self
+            .calls
+            .iter()
+            .filter(|(_, c)| c.state() == CallState::Established)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in ids {
+            // Refresh path.
+            self.maybe_fire_refresh(&id, now);
+            // Expiry path.
+            self.maybe_fire_expiry_bye(&id, now);
+        }
+    }
+
+    /// Soonest deadline across all `Established` calls.
+    ///
+    /// Returns the earliest of `refresh_at` and `expiry_at` over the
+    /// set of established calls; `None` if no established call has
+    /// session timers enabled. The application passes this to
+    /// `tokio::time::sleep_until` to avoid spinning on `tick`.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.calls
+            .values()
+            .filter(|c| c.state() == CallState::Established)
+            .filter_map(|c| match (c.refresh_at, c.expiry_at) {
+                (Some(r), Some(e)) => Some(r.min(e)),
+                (Some(r), None) => Some(r),
+                (None, Some(e)) => Some(e),
+                (None, None) => None,
+            })
+            .min()
+    }
+
+    fn maybe_fire_refresh(&mut self, call_id: &CallId, now: Instant) {
+        let (build_update, body) = {
+            let call = match self.calls.get(call_id) {
+                Some(c) => c,
+                None => return,
+            };
+            let Some(deadline) = call.refresh_at else {
+                return;
+            };
+            if deadline > now {
+                return;
+            }
+            if call.uac_in_flight {
+                return;
+            }
+            let Some(_) = call.dialog() else { return };
+
+            // Pick UPDATE vs re-INVITE based on the unsupported flag.
+            let use_update = !call.update_unsupported;
+
+            // For re-INVITE we need to rebuild the offer SDP from the
+            // negotiated MediaSession (HLD snag 3). UPDATE has no body.
+            let body = if use_update {
+                None
+            } else {
+                Some(self.build_refresh_invite_sdp(call_id))
+            };
+            (use_update, body)
+        };
+
+        // Build the request itself with a separate borrow.
+        let request = if build_update {
+            self.build_update_request(call_id)
+        } else {
+            self.build_reinvite_refresh_request(call_id, body.flatten())
+        };
+        let Some(request) = request else { return };
+
+        let kind = if build_update {
+            OutboundRequestKind::SessionTimerUpdate
+        } else {
+            OutboundRequestKind::SessionTimerReInvite
+        };
+
+        // Tentatively slide the refresh deadline forward; the 200 OK
+        // would slide it again confirmingly, but a 4xx/5xx leaves the
+        // tentative slide which is fine — the next tick will retry
+        // after another se/2.
+        if let Some(call) = self.calls.get_mut(call_id) {
+            if let Some(se) = call.session_expires {
+                call.refresh_at = Some(now + se / 2);
+            }
+        }
+
+        self.pending_outbound_requests.push(OutboundRequest {
+            call_id: call_id.clone(),
+            request,
+            kind,
+        });
+    }
+
+    fn maybe_fire_expiry_bye(&mut self, call_id: &CallId, now: Instant) {
+        let should_fire = {
+            let call = match self.calls.get(call_id) {
+                Some(c) => c,
+                None => return,
+            };
+            matches!(call.expiry_at, Some(deadline) if deadline <= now)
+        };
+        if !should_fire {
+            return;
+        }
+
+        let request = match self.build_expiry_bye_request(call_id) {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Clear the expiry deadline so a second tick doesn't re-fire.
+        if let Some(call) = self.calls.get_mut(call_id) {
+            call.expiry_at = None;
+            call.set_state(CallState::Terminating);
+        }
+
+        self.pending_outbound_requests.push(OutboundRequest {
+            call_id: call_id.clone(),
+            request,
+            kind: OutboundRequestKind::SessionTimerExpiryBye,
+        });
+
+        self.events.push(ManagerEvent::CallStateChanged(
+            call_id.clone(),
+            CallState::Terminating,
+        ));
+    }
+
+    /// Build an in-dialog UPDATE for a session-timer refresh.
+    ///
+    /// No body. Routed through the dialog layer's `build_update`, so
+    /// `Supported: timer`, `Session-Expires: <secs>;refresher=uac`,
+    /// `Allow:`, Contact, and Route headers all come from one builder.
+    fn build_update_request(&mut self, call_id: &CallId) -> Option<SipRequest> {
+        let call = self.calls.get_mut(call_id)?;
+        let se = call.session_expires?;
+        let dialog = call.dialog_mut()?;
+
+        let mut invite_dialog = dialog.to_invite_dialog();
+        let update = invite_dialog.build_update(Some(se.as_secs() as u32));
+        // Mirror the cseq bump back to the session dialog.
+        let _ = dialog.next_cseq();
+        Some(update)
+    }
+
+    /// Build a re-INVITE refresh request when the peer doesn't support
+    /// UPDATE (the `update_unsupported` fallback). The negotiated SDP
+    /// is rebuilt verbatim from `MediaSession` (HLD snag 3) — same
+    /// codec, same port, no renegotiation.
+    ///
+    /// Routed through the dialog layer's
+    /// `build_in_dialog_request_with` (via the public-ish
+    /// `build_bye_with_reason` shape) so Route + Contact are
+    /// consistent. Re-INVITE-with-Reason isn't a use case; we
+    /// extend `build_in_dialog_request_with` indirectly by adding
+    /// Session-Expires, Supported: timer, Allow, and the SDP body
+    /// here using the existing `SipRequestBuilder` chain on top of a
+    /// dialog-built skeleton.
+    fn build_reinvite_refresh_request(
+        &mut self,
+        call_id: &CallId,
+        body: Option<Vec<u8>>,
+    ) -> Option<SipRequest> {
+        use crate::dialog::DialogState;
+
+        let call = self.calls.get_mut(call_id)?;
+        let se = call.session_expires?;
+        let dialog = call.dialog_mut()?;
+
+        // Reconstruct the dialog and pull route_set + remote_target +
+        // local_contact for this re-INVITE. We can't use
+        // `build_update` (different method) and there is no
+        // `build_reinvite` on the dialog layer, so build manually but
+        // sourcing routing from the same DialogInfo the dialog layer
+        // would use — guaranteeing parity with PRACK / UPDATE / BYE.
+        let info = dialog.to_invite_dialog().info().clone();
+        let _ = (DialogState::Confirmed,); // doc cross-ref
+        let next_cseq = dialog.next_cseq();
+        let request_uri = if info.remote_target.is_empty() {
+            info.remote_uri.clone()
+        } else {
+            info.remote_target.clone()
+        };
+        let routes = info.route_set.routes();
+        let branch = format!("z9hG4bK{}", uuid::Uuid::new_v4().simple());
+
+        let mut builder = SipRequest::builder()
+            .method(Method::Invite)
+            .uri(&request_uri)
+            .via(&self.config.local_rtp_addr, 5060, "UDP", &branch)
+            .from(&info.local_uri, &info.id.local_tag)
+            .to(&info.remote_uri)
+            .to_tag(&info.id.remote_tag)
+            .call_id(&info.id.call_id)
+            .cseq(next_cseq)
+            .max_forwards(70)
+            .route(routes)
+            .session_expires(se.as_secs() as u32, Some(Refresher::Uac))
+            .supported(&["timer"])
+            .allow(&[
+                Method::Invite,
+                Method::Ack,
+                Method::Bye,
+                Method::Cancel,
+                Method::Options,
+                Method::Prack,
+                Method::Update,
+            ]);
+
+        // RFC 3261 §12.2.1.1: in-dialog requests SHOULD carry Contact.
+        if !info.local_contact.is_empty() {
+            builder = builder.contact(&info.local_contact);
+        }
+
+        if let Some(body_bytes) = body {
+            builder = builder.body(body_bytes, "application/sdp");
+        }
+
+        builder.build().ok()
+    }
+
+    /// Rebuild the offer SDP for a refresh re-INVITE from the call's
+    /// `MediaSession` and the negotiated codec (HLD snag 3).
+    ///
+    /// Mirrors the established session: same codec at the same port,
+    /// same direction. No codec renegotiation is intended. Returns
+    /// `None` if the call has no media or the SDP can't be built —
+    /// the caller treats `None` as "skip this refresh".
+    fn build_refresh_invite_sdp(&self, call_id: &CallId) -> Option<Vec<u8>> {
+        use crate::sdp::builder::{MediaBuilder, SdpBuilder};
+        let call = self.calls.get(call_id)?;
+        let media = call.media()?;
+        let codec = call.codec()?;
+        let local_addr: std::net::IpAddr = self.config.local_rtp_addr.parse().ok()?;
+        let local_port = media.local_port();
+
+        // Rebuild the audio media line from the negotiated codec. This
+        // is intentionally minimal — the only semantic difference vs
+        // the original offer is that we know exactly which codec the
+        // peer accepted, so we offer just that one. RFC 4028 refresh
+        // is not codec renegotiation.
+        let media_builder = match codec.encoding.to_uppercase().as_str() {
+            "PCMU" => MediaBuilder::audio(local_port).pcmu(),
+            "PCMA" => MediaBuilder::audio(local_port).pcma(),
+            "G722" => MediaBuilder::audio(local_port).g722(),
+            // For codecs without a builder shortcut (e.g. Opus) we fall
+            // back to a generic dynamic payload-type entry.
+            other => MediaBuilder::audio(local_port).codec(
+                codec.payload_type,
+                other,
+                codec.clock_rate,
+                Some(codec.channels),
+            ),
+        };
+
+        let sdp = SdpBuilder::new(local_addr)
+            .session_name("rsiprtp refresh")
+            .add_media(media_builder)
+            .build();
+        Some(sdp.to_string().into_bytes())
+    }
+
+    /// Build an in-dialog BYE for a session-timer expiry. Adds the
+    /// RFC 3326 `Reason: SIP;cause=200;text="Session timer expired"`
+    /// header so operators / peers can distinguish this from a normal
+    /// hangup.
+    ///
+    /// Routed through the dialog layer's `build_bye_with_reason` so
+    /// Route + Contact are sourced from the dialog's route_set +
+    /// remote_target + local_contact (RFC 3261 §12.2.1.1).
+    fn build_expiry_bye_request(&mut self, call_id: &CallId) -> Option<SipRequest> {
+        let call = self.calls.get_mut(call_id)?;
+        let dialog = call.dialog_mut()?;
+
+        let mut invite_dialog = dialog.to_invite_dialog();
+        let bye = invite_dialog.build_bye_with_reason(
+            r#"SIP;cause=200;text="Session timer expired""#,
+        )?;
+        // Mirror the cseq bump back to the session dialog.
+        let _ = dialog.next_cseq();
+        Some(bye)
     }
 
     /// Handle a BYE request.
@@ -724,7 +1518,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         let dialog_id = manager
             .get_call(&call_id)
@@ -810,7 +1604,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(result);
 
@@ -834,7 +1628,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_video_only_sdp();
-        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(!result);
     }
@@ -854,7 +1648,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        let result = manager.handle_invite_success(&fake_id, dialog, &answer_sdp);
+        let result = manager.handle_invite_success(&fake_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(!result);
     }
@@ -999,7 +1793,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         // Now simulate BYE
         let dialog_id = manager
@@ -1052,7 +1846,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         let dialog_id = manager.terminate_call(&call_id);
         assert!(dialog_id.is_some());
@@ -1104,7 +1898,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         let dialog_id = manager
             .get_call(&call_id)
@@ -1369,7 +2163,7 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        manager.handle_invite_success(&call_id, dialog, &answer_sdp);
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         let events = manager.drain_events();
         assert!(events
@@ -1744,5 +2538,1028 @@ a=rtpmap:96 H264/90000
         assert_eq!(call.state(), CallState::Established);
         assert!(call.media().is_some(), "media must be wired after build");
         assert_eq!(call.media().unwrap().local_port(), 7100);
+    }
+
+    // ----- Phase 4: session timer / PRACK wiring -----
+
+    fn established_outbound_call(manager: &mut CallManager) -> CallId {
+        let call_id = manager.create_call("sip:bob@example.com".to_string());
+        let dialog = Dialog::new_uac(
+            "call-st-1".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+        let answer_sdp = test_sdp();
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
+        // Drain seed events so test assertions only see what we triggered.
+        let _ = manager.drain_events();
+        call_id
+    }
+
+    #[test]
+    fn invite_offer_headers_default_emits_timer_and_min_se() {
+        let manager = CallManager::new(ManagerConfig::default());
+        let h = manager.invite_offer_headers();
+        assert!(h.supported_tags.iter().any(|t| t == "timer"));
+        assert!(h.supported_tags.iter().any(|t| t == "100rel"));
+        assert!(h.allow_methods.contains(&Method::Prack));
+        assert!(h.allow_methods.contains(&Method::Update));
+        assert_eq!(h.session_expires.unwrap().0, 1800);
+        assert!(matches!(h.session_expires.unwrap().1, Refresher::Uac));
+        assert_eq!(h.min_se, Some(90));
+    }
+
+    #[test]
+    fn invite_offer_headers_zero_session_expires_suppresses_timer() {
+        let mut cfg = ManagerConfig::default();
+        cfg.call_config.session_expires = Duration::ZERO;
+        let manager = CallManager::new(cfg);
+        let h = manager.invite_offer_headers();
+        // No `timer` tag, no Session-Expires, no Min-SE — but PRACK
+        // and Allow remain.
+        assert!(!h.supported_tags.iter().any(|t| t == "timer"));
+        assert!(h.supported_tags.iter().any(|t| t == "100rel"));
+        assert!(h.session_expires.is_none());
+        assert!(h.min_se.is_none());
+        assert!(h.allow_methods.contains(&Method::Prack));
+    }
+
+    /// Helper for the folded session-timer path: build an outbound
+    /// call, run `handle_invite_success` with a synthetic 200 OK
+    /// carrying the requested Session-Expires, return the call_id.
+    fn establish_with_2xx(
+        manager: &mut CallManager,
+        response: &SipResponse,
+        now: Instant,
+    ) -> CallId {
+        let call_id = manager.create_call("sip:bob@example.com".to_string());
+        let dialog = Dialog::new_uac(
+            "call-st-1".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+        let answer_sdp = test_sdp();
+        manager.handle_invite_success(&call_id, dialog, &answer_sdp, Some(response), now);
+        let _ = manager.drain_events();
+        call_id
+    }
+
+    #[test]
+    fn handle_invite_success_uac_refresher_sets_refresh_at() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .session_expires(60, Some(Refresher::Uac))
+            .build()
+            .expect("response");
+
+        let now = Instant::now();
+        let call_id = establish_with_2xx(&mut manager, &response, now);
+
+        let call = manager.get_call(&call_id).expect("call");
+        assert_eq!(call.session_expires, Some(Duration::from_secs(60)));
+        assert!(matches!(call.refresher, Some(Refresher::Uac)));
+        // We refresh: refresh_at = now + se/2.
+        assert!(call.refresh_at.is_some());
+        assert!(call.expiry_at.is_none());
+    }
+
+    #[test]
+    fn handle_invite_success_uas_refresher_sets_expiry_at() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .session_expires(60, Some(Refresher::Uas))
+            .build()
+            .expect("response");
+
+        let now = Instant::now();
+        let call_id = establish_with_2xx(&mut manager, &response, now);
+
+        let call = manager.get_call(&call_id).expect("call");
+        assert_eq!(call.session_expires, Some(Duration::from_secs(60)));
+        // Peer refreshes: expiry_at set, refresh_at clear.
+        assert!(call.refresh_at.is_none());
+        assert!(call.expiry_at.is_some());
+    }
+
+    #[test]
+    fn handle_invite_success_no_session_expires_leaves_timers_disabled() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .build()
+            .expect("response");
+
+        let call_id = establish_with_2xx(&mut manager, &response, Instant::now());
+
+        let call = manager.get_call(&call_id).expect("call");
+        assert!(call.session_expires.is_none());
+        assert!(call.refresh_at.is_none());
+        assert!(call.expiry_at.is_none());
+    }
+
+    #[test]
+    fn handle_invite_success_emits_state_change_in_single_call() {
+        // Reviewer's load-bearing claim: the folded entry point sets
+        // both call state AND timer deadlines from a single
+        // application call. Asserts both effects are visible after
+        // ONE handle_invite_success(...) call.
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let response = SipResponse::builder()
+            .status(200, "OK")
+            .session_expires(60, Some(Refresher::Uac))
+            .build()
+            .expect("response");
+
+        let call_id = manager.create_call("sip:bob@example.com".to_string());
+        let dialog = Dialog::new_uac(
+            "call-st-1".to_string(),
+            "from-tag".to_string(),
+            "to-tag".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:bob@example.com".to_string(),
+            1,
+        );
+        let answer_sdp = test_sdp();
+        let now = Instant::now();
+        let ok = manager.handle_invite_success(
+            &call_id,
+            dialog,
+            &answer_sdp,
+            Some(&response),
+            now,
+        );
+        assert!(ok);
+
+        // State change emitted.
+        let events = manager.drain_events();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ManagerEvent::CallStateChanged(_, CallState::Established)
+        )));
+
+        // Deadlines applied in the SAME call.
+        let call = manager.get_call(&call_id).expect("call");
+        assert_eq!(call.session_expires, Some(Duration::from_secs(60)));
+        assert!(call.refresh_at.is_some());
+    }
+
+    #[test]
+    fn evaluate_inbound_invite_session_timer_disabled() {
+        let manager = CallManager::new(ManagerConfig::default());
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "ftag")
+            .to("sip:bob@example.com")
+            .call_id("c@h")
+            .cseq(1)
+            .build()
+            .unwrap();
+        assert!(matches!(
+            manager.evaluate_inbound_invite_session_timer(&req),
+            InboundSessionTimer::Disabled
+        ));
+    }
+
+    #[test]
+    fn evaluate_inbound_invite_session_timer_below_min_se_rejects_422() {
+        let manager = CallManager::new(ManagerConfig::default());
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "ftag")
+            .to("sip:bob@example.com")
+            .call_id("c@h")
+            .cseq(1)
+            .session_expires(30, None)
+            .build()
+            .unwrap();
+        match manager.evaluate_inbound_invite_session_timer(&req) {
+            InboundSessionTimer::Reject422 { min_se } => assert_eq!(min_se, 90),
+            other => panic!("expected Reject422, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn evaluate_inbound_invite_session_timer_picks_uac_when_peer_supports() {
+        let manager = CallManager::new(ManagerConfig::default());
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "ftag")
+            .to("sip:bob@example.com")
+            .call_id("c@h")
+            .cseq(1)
+            .session_expires(120, None)
+            .supported(&["timer", "100rel"])
+            .build()
+            .unwrap();
+        match manager.evaluate_inbound_invite_session_timer(&req) {
+            InboundSessionTimer::Accept {
+                session_expires,
+                refresher,
+            } => {
+                assert_eq!(session_expires, Duration::from_secs(120));
+                assert!(matches!(refresher, Refresher::Uac));
+            }
+            other => panic!("expected Accept, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn evaluate_inbound_invite_session_timer_picks_uas_when_peer_silent() {
+        let manager = CallManager::new(ManagerConfig::default());
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@example.com")
+            .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
+            .from("sip:alice@example.com", "ftag")
+            .to("sip:bob@example.com")
+            .call_id("c@h")
+            .cseq(1)
+            .session_expires(120, None)
+            .build()
+            .unwrap();
+        match manager.evaluate_inbound_invite_session_timer(&req) {
+            InboundSessionTimer::Accept { refresher, .. } => {
+                assert!(matches!(refresher, Refresher::Uas));
+            }
+            other => panic!("expected Accept, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn tick_fires_refresh_when_we_are_refresher() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Force us to be the refresher with a deadline already past.
+        let now = Instant::now();
+        let past = now - Duration::from_secs(1);
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(past);
+        }
+
+        manager.tick(now);
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].kind, OutboundRequestKind::SessionTimerUpdate);
+        assert_eq!(outbound[0].request.method(), Method::Update);
+
+        // Idempotent: second tick at the same instant should not
+        // re-fire (deadline slid forward by tick).
+        manager.tick(now);
+        assert!(manager.drain_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn tick_uses_re_invite_when_update_unsupported() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Wire up media so the re-INVITE refresh can rebuild the SDP.
+        let media = NegotiatedMedia {
+            codec: Codec::pcmu(),
+            remote_port: 6000,
+            remote_addr: Some("10.0.0.1".to_string()),
+            direction: Direction::SendRecv,
+        };
+        manager
+            .get_call_mut(&call_id)
+            .unwrap()
+            .set_negotiated_media(media, 5000)
+            .expect("media");
+
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(now - Duration::from_secs(1));
+            call.update_unsupported = true;
+        }
+
+        manager.tick(now);
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].kind, OutboundRequestKind::SessionTimerReInvite);
+        assert_eq!(outbound[0].request.method(), Method::Invite);
+        // Re-INVITE refresh MUST carry SDP — peer answers wouldn't be
+        // legal otherwise (HLD snag 3).
+        assert!(!outbound[0].request.body().is_empty());
+    }
+
+    #[test]
+    fn tick_skips_refresh_when_uac_in_flight() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(now - Duration::from_secs(1));
+            call.uac_in_flight = true;
+        }
+
+        manager.tick(now);
+        assert!(manager.drain_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn tick_byes_call_when_peer_refresher_expired() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(now - Duration::from_secs(1));
+        }
+
+        manager.tick(now);
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].kind, OutboundRequestKind::SessionTimerExpiryBye);
+        assert_eq!(outbound[0].request.method(), Method::Bye);
+
+        // State transitions to Terminating.
+        let call = manager.get_call(&call_id).unwrap();
+        assert_eq!(call.state(), CallState::Terminating);
+
+        // Idempotent: second tick at the same instant must not re-fire.
+        manager.tick(now);
+        assert!(manager.drain_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn tick_skips_non_established_calls() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = manager.create_call("sip:bob@example.com".to_string());
+        // Set deadlines on a Ringing/Idle call — tick must not fire.
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(now - Duration::from_secs(1));
+        }
+        manager.tick(now);
+        assert!(manager.drain_outbound_requests().is_empty());
+    }
+
+    #[test]
+    fn next_deadline_returns_soonest() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let id1 = established_outbound_call(&mut manager);
+
+        // Second established call.
+        let id2 = manager.create_call("sip:carol@example.com".to_string());
+        let dialog = Dialog::new_uac(
+            "call-st-2".to_string(),
+            "ftag2".to_string(),
+            "ttag2".to_string(),
+            "sip:alice@example.com".to_string(),
+            "sip:carol@example.com".to_string(),
+            1,
+        );
+        manager.handle_invite_success(&id2, dialog, &test_sdp(), None, Instant::now());
+        let _ = manager.drain_events();
+
+        let now = Instant::now();
+        manager.get_call_mut(&id1).unwrap().refresh_at = Some(now + Duration::from_secs(30));
+        manager.get_call_mut(&id2).unwrap().expiry_at = Some(now + Duration::from_secs(10));
+
+        let deadline = manager.next_deadline().expect("deadline");
+        // The earlier (id2) wins.
+        assert_eq!(deadline, now + Duration::from_secs(10));
+    }
+
+    #[test]
+    fn next_deadline_none_when_no_timers() {
+        let manager = CallManager::new(ManagerConfig::default());
+        assert!(manager.next_deadline().is_none());
+    }
+
+    #[test]
+    fn slide_deadlines_for_dialog_refreshes_expiry() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let early = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(early + Duration::from_secs(60));
+        }
+
+        let dialog_id = manager
+            .get_call(&call_id)
+            .unwrap()
+            .dialog_id()
+            .cloned()
+            .unwrap();
+
+        let later = early + Duration::from_secs(30);
+        manager.slide_deadlines_for_dialog(&dialog_id, later);
+
+        let call = manager.get_call(&call_id).unwrap();
+        // expiry_at should now be later + 60s, not the old early + 60s.
+        assert_eq!(call.expiry_at, Some(later + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn handle_inbound_update_returns_200_and_slides() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            // Use 120s — above default min_se (90s) so the UPDATE is
+            // accepted rather than rejected with 422 (Fix 4).
+            call.session_expires = Some(Duration::from_secs(120));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(now);
+        }
+        let dialog_id = manager
+            .get_call(&call_id)
+            .unwrap()
+            .dialog_id()
+            .cloned()
+            .unwrap();
+
+        // Build a UPDATE request like a peer would send.
+        let update = SipRequest::builder()
+            .method(Method::Update)
+            .uri("sip:alice@host")
+            .via("10.0.0.1", 5060, "UDP", "z9hG4bKupd")
+            .from("sip:bob@host", "ftag")
+            .to("sip:alice@host")
+            .to_tag("ttag")
+            .call_id("call-st-1")
+            .cseq(2)
+            .session_expires(120, Some(Refresher::Uac))
+            .build()
+            .expect("update");
+
+        let later = now + Duration::from_secs(5);
+        let response = manager
+            .handle_inbound_update(&dialog_id, &update, later)
+            .expect("200 OK built");
+        assert_eq!(response.status_code(), 200);
+        assert!(response.session_expires().is_some());
+
+        let call = manager.get_call(&call_id).unwrap();
+        // Deadline slid to later + 120s.
+        assert_eq!(call.expiry_at, Some(later + Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn handle_provisional_reliable_emits_prack() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Simulated 180 with RSeq + matching CSeq.
+        let response = SipResponse::builder()
+            .status(180, "Ringing")
+            .from_request(
+                &SipRequest::builder()
+                    .method(Method::Invite)
+                    .uri("sip:bob@host")
+                    .via("10.0.0.1", 5060, "UDP", "z9hG4bKabc")
+                    .from("sip:alice@host", "ftag")
+                    .to("sip:bob@host")
+                    .call_id("call-st-1")
+                    .cseq(1)
+                    .build()
+                    .unwrap(),
+            )
+            .require(&["100rel"])
+            .rseq(1)
+            .build()
+            .expect("180");
+
+        let prack = manager
+            .handle_provisional_reliable(&call_id, &response)
+            .expect("PRACK built");
+        assert_eq!(prack.method(), Method::Prack);
+        let rack = prack.rack().expect("RAck on PRACK");
+        assert_eq!(rack.rseq, 1);
+        assert_eq!(rack.cseq, 1);
+        assert_eq!(rack.method, Method::Invite);
+
+        // Also queued for app dispatch.
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].kind, OutboundRequestKind::Prack);
+    }
+
+    #[test]
+    fn note_update_unsupported_sets_flag() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+        manager.note_update_unsupported(&call_id);
+        assert!(manager.get_call(&call_id).unwrap().update_unsupported);
+    }
+
+    /// Reviewer's Fix C oracle: `mark_in_dialog_2xx` slides session-timer
+    /// deadlines on UPDATE / INVITE 2xx, ignores other methods.
+    #[test]
+    fn mark_in_dialog_2xx_slides_only_for_update_and_invite() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let now = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(now + Duration::from_secs(60));
+        }
+
+        // BYE — should NOT slide.
+        let later = now + Duration::from_secs(30);
+        manager.mark_in_dialog_2xx(&call_id, Method::Bye, later);
+        assert_eq!(
+            manager.get_call(&call_id).unwrap().expiry_at,
+            Some(now + Duration::from_secs(60)),
+            "BYE 2xx must not slide deadlines"
+        );
+
+        // UPDATE — slides.
+        manager.mark_in_dialog_2xx(&call_id, Method::Update, later);
+        assert_eq!(
+            manager.get_call(&call_id).unwrap().expiry_at,
+            Some(later + Duration::from_secs(60)),
+            "UPDATE 2xx must slide expiry_at"
+        );
+
+        // INVITE — slides again.
+        let even_later = later + Duration::from_secs(20);
+        manager.mark_in_dialog_2xx(&call_id, Method::Invite, even_later);
+        assert_eq!(
+            manager.get_call(&call_id).unwrap().expiry_at,
+            Some(even_later + Duration::from_secs(60)),
+            "INVITE 2xx must slide expiry_at"
+        );
+    }
+
+    /// Reviewer's Fix A oracle: when the manager builds an in-dialog
+    /// UPDATE for a session-timer refresh, the wire format carries the
+    /// dialog's Route headers, Contact, and uses the remote_target
+    /// as request URI. This is what proves Phase 4 now goes through
+    /// Phase 3's dialog API instead of inlining its own builder.
+    ///
+    /// Uses a *single* proxy so the reversal flag is invisible — the
+    /// multi-proxy reversal contract is asserted separately by
+    /// `route_set_two_proxies_emit_in_uac_reversed_order`.
+    #[test]
+    fn refresh_update_carries_route_and_contact_through_dialog_layer() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Inject route_set + remote_target + local_contact onto the
+        // session-layer dialog as if a routed 200 OK had populated them.
+        // UAC dialog → reverse=true matches production (manager.rs::handle_invite_success).
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            let dialog = call.dialog_mut().unwrap();
+            dialog.set_route_set_from_record_routes(
+                &["<sip:proxy.example.com;lr>".to_string()],
+                true,
+            );
+            dialog.set_remote_target("sip:bob@10.0.0.2:5060".to_string());
+            dialog.set_local_contact("sip:alice@10.0.0.1:5060".to_string());
+            call.session_expires = Some(Duration::from_secs(1800));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(Instant::now());
+        }
+
+        manager.tick(Instant::now() + Duration::from_secs(1));
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1, "tick must emit exactly one refresh");
+        assert_eq!(outbound[0].kind, OutboundRequestKind::SessionTimerUpdate);
+
+        // Round-trip the request through the wire.
+        let bytes = outbound[0].request.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+
+        // Route header from the dialog's route set.
+        let routes = parsed_req.route_headers();
+        assert_eq!(
+            routes.len(),
+            1,
+            "refresh UPDATE must carry the Route header (RFC 3261 §12.2.1.1)"
+        );
+        assert!(routes[0].contains("proxy.example.com"));
+
+        // Contact emitted from local_contact.
+        let contact = parsed_req
+            .contact_uri()
+            .expect("refresh UPDATE must carry Contact");
+        assert!(contact.to_string().contains("10.0.0.1"));
+
+        // Request URI is the remote_target, not the remote_uri.
+        assert!(
+            parsed_req.uri().to_string().contains("10.0.0.2"),
+            "request URI must be the dialog's remote target"
+        );
+    }
+
+    /// Fix 5 oracle: a UAC dialog with two Record-Route proxies emits
+    /// outbound in-dialog requests with `Route:` headers in *reversed*
+    /// order per RFC 3261 §12.1.2. With Record-Route as
+    /// `<proxy1>, <proxy2>` arriving on the response, the UAC
+    /// reverses: subsequent in-dialog requests carry
+    /// `Route: <proxy2>` first, then `Route: <proxy1>`.
+    #[test]
+    fn route_set_two_proxies_emit_in_uac_reversed_order() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Apply UAC reversal as production does on 200 OK.
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            let dialog = call.dialog_mut().unwrap();
+            dialog.set_route_set_from_record_routes(
+                &[
+                    "<sip:proxy1.example.com;lr>".to_string(),
+                    "<sip:proxy2.example.com;lr>".to_string(),
+                ],
+                true, // UAC reversal — matches production at handle_invite_success.
+            );
+            dialog.set_remote_target("sip:bob@10.0.0.2:5060".to_string());
+            dialog.set_local_contact("sip:alice@10.0.0.1:5060".to_string());
+            call.session_expires = Some(Duration::from_secs(1800));
+            call.refresher = Some(Refresher::Uac);
+            call.refresh_at = Some(Instant::now());
+        }
+
+        // Drive a refresh UPDATE through tick.
+        manager.tick(Instant::now() + Duration::from_secs(1));
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+
+        let bytes = outbound[0].request.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+
+        let routes = parsed_req.route_headers();
+        assert_eq!(routes.len(), 2);
+        // Reversed: proxy2 first, then proxy1.
+        assert!(
+            routes[0].contains("proxy2"),
+            "first Route must be proxy2 (UAC reverses Record-Route per RFC 3261 §12.1.2); got {:?}",
+            routes
+        );
+        assert!(
+            routes[1].contains("proxy1"),
+            "second Route must be proxy1 (UAC reverses Record-Route per RFC 3261 §12.1.2); got {:?}",
+            routes
+        );
+    }
+
+    /// Reviewer's Fix A oracle for the expiry-BYE path: BYE built by
+    /// the manager when peer fails to refresh carries Route, Contact,
+    /// and the Reason header. Routed through the dialog layer's
+    /// `build_bye_with_reason`.
+    #[test]
+    fn expiry_bye_carries_route_and_reason_through_dialog_layer() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            let dialog = call.dialog_mut().unwrap();
+            // UAC dialog → reverse=true matches production.
+            dialog.set_route_set_from_record_routes(
+                &["<sip:proxy.example.com;lr>".to_string()],
+                true,
+            );
+            dialog.set_remote_target("sip:bob@10.0.0.2:5060".to_string());
+            dialog.set_local_contact("sip:alice@10.0.0.1:5060".to_string());
+            call.session_expires = Some(Duration::from_secs(60));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(Instant::now());
+        }
+
+        manager.tick(Instant::now() + Duration::from_secs(1));
+        let outbound = manager.drain_outbound_requests();
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(
+            outbound[0].kind,
+            OutboundRequestKind::SessionTimerExpiryBye
+        );
+
+        let bytes = outbound[0].request.to_bytes();
+        let raw = String::from_utf8(bytes.to_vec()).expect("utf8");
+        assert!(
+            raw.contains(r#"Reason: SIP;cause=200;text="Session timer expired""#),
+            "expiry BYE must carry Reason header verbatim"
+        );
+
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+        assert_eq!(parsed_req.method(), Method::Bye);
+        assert_eq!(parsed_req.route_headers().len(), 1);
+        assert!(parsed_req.contact_uri().is_some());
+    }
+
+    /// Fix 2 oracle for PRACK: an early-dialog 18x with To-tag is
+    /// delivered through the manager's response handler
+    /// (`handle_provisional_response`); that populates the UAC dialog's
+    /// routing fields (`route_set`, `remote_target`, `local_contact`)
+    /// from the response's `Record-Route` + `Contact`. The subsequent
+    /// PRACK built by `handle_provisional_reliable` then carries those
+    /// headers — so a routed PRACK actually traverses the same proxy
+    /// chain as the INVITE, before any 200 OK has arrived.
+    #[test]
+    fn prack_carries_route_and_contact_through_dialog_layer() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Fabricate a 180 carrying Record-Route + Contact by parsing
+        // raw text — the SipResponseBuilder doesn't have a generic
+        // `header` setter for Record-Route, and we want this test to
+        // mimic a proxy stamp rather than the manager's own emission.
+        let raw_180 = b"SIP/2.0 180 Ringing\r\n\
+Via: SIP/2.0/UDP 10.0.0.1:5060;branch=z9hG4bKabc\r\n\
+Record-Route: <sip:proxy.example.com;lr>\r\n\
+From: <sip:alice@host>;tag=ftag\r\n\
+To: <sip:bob@host>;tag=ttag\r\n\
+Contact: <sip:bob@10.0.0.2:5060>\r\n\
+Call-ID: call-st-1\r\n\
+CSeq: 1 INVITE\r\n\
+Require: 100rel\r\n\
+RSeq: 1\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let parsed = crate::sip::SipMessage::parse(raw_180).expect("parse 180");
+        let response = parsed.as_response().expect("response").clone();
+
+        // Drive the response through the manager's response handler so
+        // the dialog routing fields populate from Record-Route +
+        // Contact (Fix 2).
+        manager.handle_provisional_response(
+            &call_id,
+            &response,
+            None,
+            "sip:alice@10.0.0.1:5060",
+        );
+
+        // Sanity: the dialog routing fields are now populated. (No
+        // need to inject anything manually.)
+        {
+            let call = manager.get_call(&call_id).unwrap();
+            let dialog = call.dialog().unwrap();
+            assert!(!dialog.route_set().is_empty(), "route_set must be populated from 18x");
+            assert!(
+                dialog.remote_target().contains("10.0.0.2"),
+                "remote_target must come from Contact in 18x"
+            );
+            assert!(
+                dialog.local_contact().contains("10.0.0.1"),
+                "local_contact must come from the supplied UAC contact"
+            );
+        }
+
+        // Now build the PRACK and assert it carries Route + Contact.
+        let prack = manager
+            .handle_provisional_reliable(&call_id, &response)
+            .expect("PRACK built");
+        let bytes = prack.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_req = parsed.as_request().unwrap();
+
+        let routes = parsed_req.route_headers();
+        assert_eq!(routes.len(), 1, "PRACK must carry the dialog's Route header");
+        assert!(routes[0].contains("proxy.example.com"));
+        assert!(parsed_req.contact_uri().is_some(), "PRACK must carry Contact");
+    }
+
+    /// Reviewer's Fix A oracle for inbound UPDATE 200 OK: routed
+    /// through dialog layer's `handle_update`, so it carries Contact
+    /// (RFC 3261 §12.2.1.1).
+    #[test]
+    fn handle_inbound_update_200_carries_contact() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        let dialog_id = {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            let dialog = call.dialog_mut().unwrap();
+            dialog.set_local_contact("sip:alice@10.0.0.1:5060".to_string());
+            dialog.set_remote_target("sip:bob@10.0.0.2:5060".to_string());
+            // 120s — above default min_se (90s) so we hit the 200 OK
+            // path, not the 422 path (Fix 4).
+            call.session_expires = Some(Duration::from_secs(120));
+            call.refresher = Some(Refresher::Uas);
+            call.expiry_at = Some(Instant::now());
+            call.dialog_id().unwrap().clone()
+        };
+
+        let update = SipRequest::builder()
+            .method(Method::Update)
+            .uri("sip:alice@host")
+            .via("10.0.0.2", 5060, "UDP", "z9hG4bKupd")
+            .from("sip:bob@host", "ftag")
+            .to("sip:alice@host")
+            .to_tag("ttag")
+            .call_id("call-st-1")
+            .cseq(7)
+            .session_expires(120, Some(Refresher::Uac))
+            .build()
+            .expect("update");
+
+        let resp = manager
+            .handle_inbound_update(&dialog_id, &update, Instant::now())
+            .expect("200 OK built");
+        let bytes = resp.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_resp = parsed.as_response().unwrap();
+
+        assert_eq!(parsed_resp.status_code(), 200);
+        let contact = parsed_resp
+            .contact_uri()
+            .expect("200 OK to UPDATE must carry Contact (RFC 3261 §12.2.1.1)");
+        assert!(contact.to_string().contains("10.0.0.1"));
+    }
+
+    /// Fix 4 oracle: an inbound UPDATE whose `Session-Expires` is below
+    /// our `Min-SE` must be rejected with `422 Session Interval Too Small`
+    /// carrying our `Min-SE` (RFC 4028 §10.3). The call's session-timer
+    /// state must NOT be mutated and the deadlines must NOT slide — the
+    /// rejected UPDATE is as if it never happened.
+    #[test]
+    fn inbound_update_below_min_se_returns_422() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+        let call_id = established_outbound_call(&mut manager);
+
+        // Default min_se is 90s. Snapshot pre-state so we can assert
+        // unchanged on rejection.
+        let dialog_id;
+        let pre_session_expires;
+        let pre_expiry_at;
+        let baseline = Instant::now();
+        {
+            let call = manager.get_call_mut(&call_id).unwrap();
+            let dialog = call.dialog_mut().unwrap();
+            dialog.set_local_contact("sip:alice@10.0.0.1:5060".to_string());
+            dialog.set_remote_target("sip:bob@10.0.0.2:5060".to_string());
+            call.session_expires = Some(Duration::from_secs(1800));
+            call.refresher = Some(Refresher::Uac);
+            call.expiry_at = Some(baseline + Duration::from_secs(1800));
+            dialog_id = call.dialog_id().unwrap().clone();
+            pre_session_expires = call.session_expires;
+            pre_expiry_at = call.expiry_at;
+        }
+
+        // UPDATE with Session-Expires: 30 — below min_se default 90.
+        let update = SipRequest::builder()
+            .method(Method::Update)
+            .uri("sip:alice@host")
+            .via("10.0.0.2", 5060, "UDP", "z9hG4bKupd")
+            .from("sip:bob@host", "ftag")
+            .to("sip:alice@host")
+            .to_tag("ttag")
+            .call_id("call-st-1")
+            .cseq(7)
+            .session_expires(30, Some(Refresher::Uac))
+            .build()
+            .expect("update");
+
+        let resp = manager
+            .handle_inbound_update(&dialog_id, &update, baseline + Duration::from_secs(60))
+            .expect("422 response built");
+        assert_eq!(
+            resp.status_code(),
+            422,
+            "RFC 4028 §10.3: SE < Min-SE must yield 422"
+        );
+
+        // 422 must carry our Min-SE.
+        let bytes = resp.to_bytes();
+        let parsed = crate::sip::SipMessage::parse(&bytes).unwrap();
+        let parsed_resp = parsed.as_response().unwrap();
+        let min_se = parsed_resp
+            .min_se()
+            .expect("422 must carry Min-SE per RFC 4028 §10.3");
+        assert_eq!(min_se.0, 90);
+
+        // Call state must NOT have changed.
+        let call = manager.get_call(&call_id).unwrap();
+        assert_eq!(
+            call.session_expires, pre_session_expires,
+            "rejected UPDATE must not mutate session_expires"
+        );
+        assert_eq!(
+            call.expiry_at, pre_expiry_at,
+            "rejected UPDATE must not slide expiry_at"
+        );
+    }
+
+    /// Fix 1 oracle: a UAS-side dialog populated via
+    /// `populate_uas_dialog_routing` from an inbound INVITE carries the
+    /// INVITE's `Record-Route` (in same order — UAS does NOT reverse,
+    /// per RFC 3261 §12.1.1) and `Contact` on subsequent UAS-driven
+    /// in-dialog requests (here a BYE).
+    #[test]
+    fn uas_populated_dialog_emits_route_and_contact_on_bye() {
+        let mut manager = CallManager::new(ManagerConfig::default());
+
+        // Construct a UAS-side dialog via the manager's normal inbound path.
+        let dialog = Dialog::new_uas(
+            "call-uas-1".to_string(),
+            "ftag".to_string(),
+            "ttag".to_string(),
+            "sip:alice@host".to_string(),
+            "sip:bob@host".to_string(),
+            1,
+        );
+        let offer_sdp = test_sdp();
+        let (call_id, _, _) = manager
+            .handle_incoming_invite(dialog, &offer_sdp)
+            .expect("incoming");
+
+        // Fabricate the inbound INVITE with Record-Route + Contact.
+        // Two proxies — UAS keeps Record-Route order verbatim per
+        // RFC 3261 §12.1.1.
+        let raw_invite = b"INVITE sip:alice@host SIP/2.0\r\n\
+Via: SIP/2.0/UDP 10.0.0.2:5060;branch=z9hG4bKxxx\r\n\
+Record-Route: <sip:proxy1.example.com;lr>\r\n\
+Record-Route: <sip:proxy2.example.com;lr>\r\n\
+From: <sip:bob@host>;tag=ftag\r\n\
+To: <sip:alice@host>\r\n\
+Contact: <sip:bob@10.0.0.2:5060>\r\n\
+Call-ID: call-uas-1\r\n\
+CSeq: 1 INVITE\r\n\
+Content-Length: 0\r\n\
+\r\n";
+        let parsed = crate::sip::SipMessage::parse(raw_invite).expect("parse INVITE");
+        let invite = parsed.as_request().expect("request").clone();
+
+        // Apply the populate.
+        manager.populate_uas_dialog_routing(
+            &call_id,
+            &invite,
+            "sip:alice@10.0.0.1:5060".to_string(),
+        );
+
+        // Establish the call so the BYE can be built — answer it and
+        // attach the dialog's confirmed state via the existing
+        // `answer_call` choreography.
+        manager.answer_call(&call_id);
+
+        // Set up state required for terminate_call to emit a BYE
+        // through the dialog layer. The session-layer Dialog already
+        // carries the populated routing; we just need to drive
+        // terminate.
+        // Read back the dialog and assert routing populated.
+        let call = manager.get_call(&call_id).unwrap();
+        let dialog = call.dialog().expect("dialog");
+        assert_eq!(
+            dialog.route_set().len(),
+            2,
+            "UAS dialog must carry both Record-Route entries"
+        );
+        // UAS keeps Record-Route order verbatim (no reversal).
+        assert!(
+            dialog.route_set().routes()[0].contains("proxy1"),
+            "UAS first route must be proxy1 (no reversal); got {:?}",
+            dialog.route_set().routes()
+        );
+        assert!(
+            dialog.route_set().routes()[1].contains("proxy2"),
+            "UAS second route must be proxy2 (no reversal); got {:?}",
+            dialog.route_set().routes()
+        );
+        assert!(
+            dialog.remote_target().contains("10.0.0.2"),
+            "remote_target must come from INVITE Contact"
+        );
+        assert!(
+            dialog.local_contact().contains("10.0.0.1"),
+            "local_contact must come from the supplied UAS local Contact"
+        );
     }
 }

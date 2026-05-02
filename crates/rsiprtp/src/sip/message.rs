@@ -334,14 +334,25 @@ impl SipRequest {
         None
     }
 
-    /// Get Record-Route headers as string values.
+    /// Get Record-Route headers as bare value strings.
     ///
-    /// Returns a vector of Record-Route header values for extracting route set.
+    /// Returns a vector of Record-Route header *values* (not full
+    /// header lines). Uses `UntypedHeader::value()` so the returned
+    /// strings are bare URI values (e.g. `<sip:proxy.example.com;lr>`),
+    /// suitable for feeding straight into
+    /// `RouteSet::from_record_route_values`. The previous
+    /// `rr.to_string()` returned the entire header line
+    /// (`Record-Route: <...>`), which the route-set parser silently
+    /// rejected — leaving the dialog's route_set empty even when the
+    /// 200 OK carried Record-Route. Bug surfaced by the Fix 2 PRACK
+    /// integration; verified end-to-end by the multi-proxy reversal
+    /// test.
     pub fn record_routes(&self) -> Vec<String> {
+        use rsip::headers::untyped::UntypedHeader;
         let mut routes = Vec::new();
         for header in self.inner.headers.iter() {
             if let rsip::Header::RecordRoute(rr) = header {
-                routes.push(rr.to_string());
+                routes.push(rr.value().to_string());
             }
         }
         routes
@@ -559,14 +570,25 @@ impl SipResponse {
         None
     }
 
-    /// Get Record-Route headers as string values.
+    /// Get Record-Route headers as bare value strings.
     ///
-    /// Returns a vector of Record-Route header values for extracting route set.
+    /// Returns a vector of Record-Route header *values* (not full
+    /// header lines). Uses `UntypedHeader::value()` so the returned
+    /// strings are bare URI values (e.g. `<sip:proxy.example.com;lr>`),
+    /// suitable for feeding straight into
+    /// `RouteSet::from_record_route_values`. The previous
+    /// `rr.to_string()` returned the entire header line
+    /// (`Record-Route: <...>`), which the route-set parser silently
+    /// rejected — leaving the dialog's route_set empty even when the
+    /// 200 OK carried Record-Route. Bug surfaced by the Fix 2 PRACK
+    /// integration; verified end-to-end by the multi-proxy reversal
+    /// test.
     pub fn record_routes(&self) -> Vec<String> {
+        use rsip::headers::untyped::UntypedHeader;
         let mut routes = Vec::new();
         for header in self.inner.headers.iter() {
             if let rsip::Header::RecordRoute(rr) = header {
-                routes.push(rr.to_string());
+                routes.push(rr.value().to_string());
             }
         }
         routes
@@ -815,6 +837,7 @@ pub struct SipRequestBuilder {
     rack: Option<crate::sip::headers::RAck>,
     allow: Option<Vec<Method>>,
     routes: Option<Vec<String>>,
+    other_headers: Vec<(String, String)>,
 }
 
 impl SipRequestBuilder {
@@ -1040,6 +1063,16 @@ impl SipRequestBuilder {
         self
     }
 
+    /// Append an arbitrary header by name and value.
+    ///
+    /// Used for headers without a dedicated builder (e.g. `Reason`,
+    /// RFC 3326). Multiple calls append multiple headers in order.
+    pub fn header(mut self, name: &str, value: &str) -> Self {
+        self.other_headers
+            .push((name.to_string(), value.to_string()));
+        self
+    }
+
     /// Build the request.
     pub fn build(self) -> Result<SipRequest> {
         // Check for URI parsing errors first (more informative than "Missing URI")
@@ -1204,6 +1237,11 @@ impl SipRequestBuilder {
             for r in routes {
                 headers.push(rsip::Header::Route(rsip::headers::Route::new(r.clone())));
             }
+        }
+
+        // Arbitrary `Other` headers (e.g. Reason, RFC 3326).
+        for (name, value) in &self.other_headers {
+            headers.push(rsip::Header::Other(name.clone(), value.clone()));
         }
 
         // Content-Type and Content-Length
@@ -4024,10 +4062,7 @@ Content-Length: 0\r\n\
             .session_expires()
             .expect("compact form `x` should be recognized");
         assert_eq!(se.delta_seconds, 1800);
-        assert_eq!(
-            se.refresher,
-            Some(crate::sip::headers::Refresher::Uac)
-        );
+        assert_eq!(se.refresher, Some(crate::sip::headers::Refresher::Uac));
     }
 
     #[test]
@@ -4064,10 +4099,7 @@ Content-Length: 0\r\n\
             .session_expires()
             .expect("compact form `x` should be recognized");
         assert_eq!(se.delta_seconds, 600);
-        assert_eq!(
-            se.refresher,
-            Some(crate::sip::headers::Refresher::Uas)
-        );
+        assert_eq!(se.refresher, Some(crate::sip::headers::Refresher::Uas));
     }
 
     /// Round-trip Allow through the request builder, the wire, and back
