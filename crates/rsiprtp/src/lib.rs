@@ -10,6 +10,19 @@
 //! no video, and no SIP-over-WebSocket transport. See the README for the
 //! full scope.
 //!
+//! Carrier-interop signalling features are supported: PRACK / 100rel
+//! reliable provisional responses (RFC 3262, no offer/answer body in
+//! PRACK; reliable provisional acks only), the UPDATE method
+//! (RFC 3311), and session timers (RFC 4028) — both the refresher path
+//! (UPDATE / re-INVITE refresh) and the non-refresher path (BYE on peer
+//! silence) drive from the `CallManager::tick` / `next_deadline` hooks.
+//!
+//! Auto-detection of `Allow:` lacking UPDATE on the 200 OK is not
+//! implemented; the app calls
+//! [`session::CallManager::note_update_unsupported`] on observing a
+//! 405 / 501 to UPDATE, or after parsing the 200 OK's Allow header
+//! itself.
+//!
 //! # Quick Start
 //!
 //! ```rust,ignore
@@ -70,7 +83,8 @@ pub mod prelude {
     // Session management
     pub use crate::session::{
         Call, CallConfig, CallDirection, CallEndReason, CallEvent, CallId, CallManager, CallState,
-        Dialog, ManagerConfig, ManagerEvent, MediaSession, RegistrationConfig, RegistrationError,
+        Dialog, InboundSessionTimer, InviteOfferHeaders, ManagerConfig, ManagerEvent, MediaSession,
+        OutboundRequest, OutboundRequestKind, RegistrationConfig, RegistrationError,
         RegistrationManager, RegistrationState,
     };
 

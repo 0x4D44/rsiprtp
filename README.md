@@ -25,6 +25,10 @@
 - Call hold / resume via re-INVITE with direction changes (`sendrecv` ↔
   `sendonly` / `inactive`)
 - Blind and attended call transfer (REFER, RFC 3515; Replaces, RFC 3891)
+- PRACK / 100rel reliable provisional responses (RFC 3262)
+- UPDATE method (RFC 3311) for in-dialog refresh
+- Session timers (RFC 4028) — both refresher (UPDATE / re-INVITE) and
+  non-refresher (BYE on peer silence) paths
 - Registration with digest challenge handling and periodic refresh
 
 **Media**
@@ -85,6 +89,10 @@ Worked end-to-end programs live in
 - [`ice_call.rs`](crates/rsiprtp/examples/ice_call.rs) — two `CallManager`s
   on loopback driving an `IceSession` through a full gather / offer /
   answer / connectivity-check / probe flow.
+- [`session_timers.rs`](crates/rsiprtp/examples/session_timers.rs) — the
+  PRACK / UPDATE / session-timer choreography (RFC 3262 / 3311 / 4028)
+  showing how `tick` / `next_deadline` / `drain_outbound_requests`
+  thread into a `tokio::select!` event loop.
 
 Run one with environment configuration, for example:
 

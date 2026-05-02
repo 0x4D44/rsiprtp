@@ -1275,9 +1275,8 @@ impl CallManager {
         let dialog = call.dialog_mut()?;
 
         let mut invite_dialog = dialog.to_invite_dialog();
-        let bye = invite_dialog.build_bye_with_reason(
-            r#"SIP;cause=200;text="Session timer expired""#,
-        )?;
+        let bye =
+            invite_dialog.build_bye_with_reason(r#"SIP;cause=200;text="Session timer expired""#)?;
         // Mirror the cseq bump back to the session dialog.
         let _ = dialog.next_cseq();
         Some(bye)
@@ -1604,7 +1603,8 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
+        let result =
+            manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(result);
 
@@ -1628,7 +1628,8 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_video_only_sdp();
-        let result = manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
+        let result =
+            manager.handle_invite_success(&call_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(!result);
     }
@@ -1648,7 +1649,8 @@ a=rtpmap:96 H264/90000
         );
 
         let answer_sdp = test_sdp();
-        let result = manager.handle_invite_success(&fake_id, dialog, &answer_sdp, None, Instant::now());
+        let result =
+            manager.handle_invite_success(&fake_id, dialog, &answer_sdp, None, Instant::now());
 
         assert!(!result);
     }
@@ -2689,21 +2691,14 @@ a=rtpmap:96 H264/90000
         );
         let answer_sdp = test_sdp();
         let now = Instant::now();
-        let ok = manager.handle_invite_success(
-            &call_id,
-            dialog,
-            &answer_sdp,
-            Some(&response),
-            now,
-        );
+        let ok = manager.handle_invite_success(&call_id, dialog, &answer_sdp, Some(&response), now);
         assert!(ok);
 
         // State change emitted.
         let events = manager.drain_events();
-        assert!(events.iter().any(|e| matches!(
-            e,
-            ManagerEvent::CallStateChanged(_, CallState::Established)
-        )));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ManagerEvent::CallStateChanged(_, CallState::Established))));
 
         // Deadlines applied in the SAME call.
         let call = manager.get_call(&call_id).expect("call");
@@ -3266,10 +3261,7 @@ a=rtpmap:96 H264/90000
         manager.tick(Instant::now() + Duration::from_secs(1));
         let outbound = manager.drain_outbound_requests();
         assert_eq!(outbound.len(), 1);
-        assert_eq!(
-            outbound[0].kind,
-            OutboundRequestKind::SessionTimerExpiryBye
-        );
+        assert_eq!(outbound[0].kind, OutboundRequestKind::SessionTimerExpiryBye);
 
         let bytes = outbound[0].request.to_bytes();
         let raw = String::from_utf8(bytes.to_vec()).expect("utf8");
@@ -3320,19 +3312,17 @@ Content-Length: 0\r\n\
         // Drive the response through the manager's response handler so
         // the dialog routing fields populate from Record-Route +
         // Contact (Fix 2).
-        manager.handle_provisional_response(
-            &call_id,
-            &response,
-            None,
-            "sip:alice@10.0.0.1:5060",
-        );
+        manager.handle_provisional_response(&call_id, &response, None, "sip:alice@10.0.0.1:5060");
 
         // Sanity: the dialog routing fields are now populated. (No
         // need to inject anything manually.)
         {
             let call = manager.get_call(&call_id).unwrap();
             let dialog = call.dialog().unwrap();
-            assert!(!dialog.route_set().is_empty(), "route_set must be populated from 18x");
+            assert!(
+                !dialog.route_set().is_empty(),
+                "route_set must be populated from 18x"
+            );
             assert!(
                 dialog.remote_target().contains("10.0.0.2"),
                 "remote_target must come from Contact in 18x"
@@ -3352,9 +3342,16 @@ Content-Length: 0\r\n\
         let parsed_req = parsed.as_request().unwrap();
 
         let routes = parsed_req.route_headers();
-        assert_eq!(routes.len(), 1, "PRACK must carry the dialog's Route header");
+        assert_eq!(
+            routes.len(),
+            1,
+            "PRACK must carry the dialog's Route header"
+        );
         assert!(routes[0].contains("proxy.example.com"));
-        assert!(parsed_req.contact_uri().is_some(), "PRACK must carry Contact");
+        assert!(
+            parsed_req.contact_uri().is_some(),
+            "PRACK must carry Contact"
+        );
     }
 
     /// Reviewer's Fix A oracle for inbound UPDATE 200 OK: routed

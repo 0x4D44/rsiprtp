@@ -2094,13 +2094,15 @@ Content-Length: 0\r\n\
 
         // Routes from the route set.
         let routes = parsed_req.route_headers();
-        assert_eq!(routes.len(), 2, "UPDATE must carry Route headers from the dialog");
+        assert_eq!(
+            routes.len(),
+            2,
+            "UPDATE must carry Route headers from the dialog"
+        );
         assert!(routes[0].contains("proxy1"));
 
         // Contact from local_contact.
-        let contact = parsed_req
-            .contact_uri()
-            .expect("UPDATE must carry Contact");
+        let contact = parsed_req.contact_uri().expect("UPDATE must carry Contact");
         assert!(contact.to_string().contains("10.0.0.1"));
 
         // Request URI is the remote target.
