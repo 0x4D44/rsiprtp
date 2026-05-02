@@ -97,120 +97,24 @@ async fn test_register_with_asterisk() {
     };
 
     let mut reg = RegistrationManager::new(config);
-
-    // Create initial REGISTER
-    let request = reg.create_register().expect("Failed to create REGISTER");
-    assert_eq!(reg.state(), RegistrationState::Registering);
-
-    // Send to Asterisk
     let dest: SocketAddr = ASTERISK_ADDR.parse().unwrap();
-    transport
-        .send_to(&request.to_bytes(), dest)
+
+    // Drive REGISTER + 401 + retry with auth via the high-level driver.
+    reg.register(&transport, dest, Duration::from_secs(5), Duration::from_secs(15))
         .await
-        .expect("Failed to send");
+        .expect("REGISTER failed");
 
-    // Wait for response (should be 401 Unauthorized)
-    let response_msg = timeout(Duration::from_secs(5), transport.recv())
-        .await
-        .expect("Timeout waiting for response")
-        .expect("Failed to receive");
-
-    let msg = SipMessage::parse(&response_msg.data).expect("Failed to parse response");
-    let response = msg.as_response().expect("Expected response");
-
-    println!(
-        "Got response: {} {}",
-        response.status_code(),
-        response.reason()
-    );
-
-    // Handle the response (likely 401, needs auth)
-    let result = reg.handle_response(response);
-
-    match result {
-        Ok(Some(auth_request)) => {
-            // Got 401, retry with authentication
-            println!("Retrying with authentication...");
-            transport
-                .send_to(&auth_request.to_bytes(), dest)
-                .await
-                .expect("Failed to send auth");
-
-            // Wait for final response
-            let final_msg = timeout(Duration::from_secs(5), transport.recv())
-                .await
-                .expect("Timeout waiting for auth response")
-                .expect("Failed to receive auth response");
-
-            let final_parsed =
-                SipMessage::parse(&final_msg.data).expect("Failed to parse auth response");
-            let final_response = final_parsed.as_response().expect("Expected response");
-
-            println!(
-                "Auth response: {} {}",
-                final_response.status_code(),
-                final_response.reason()
-            );
-
-            let final_result = reg.handle_response(final_response);
-            assert!(
-                final_result.is_ok(),
-                "Auth handling failed: {:?}",
-                final_result.err()
-            );
-
-            // Should be registered now
-            assert_eq!(
-                reg.state(),
-                RegistrationState::Registered,
-                "Expected Registered state, got {:?}",
-                reg.state()
-            );
-            assert!(reg.is_registered());
-        }
-        Ok(None) => {
-            // Direct 200 OK (unlikely without auth)
-            assert_eq!(reg.state(), RegistrationState::Registered);
-            assert!(reg.is_registered());
-        }
-        Err(e) => {
-            panic!("Registration failed: {:?}", e);
-        }
-    }
-
+    assert_eq!(reg.state(), RegistrationState::Registered);
+    assert!(reg.is_registered());
     println!("Registration successful!");
 
-    // Now unregister
-    let unreg_request = reg
-        .create_unregister()
-        .expect("Failed to create unregister");
-    transport
-        .send_to(&unreg_request.to_bytes(), dest)
+    // Now unregister via the same driver. Asterisk will accept the stashed
+    // digest credential, so this is a single round-trip.
+    reg.unregister(&transport, dest, Duration::from_secs(5), Duration::from_secs(15))
         .await
-        .expect("Failed to send unregister");
+        .expect("unREGISTER failed");
 
-    // Wait for unregister response
-    let unreg_msg = timeout(Duration::from_secs(5), transport.recv())
-        .await
-        .expect("Timeout waiting for unregister response")
-        .expect("Failed to receive unregister response");
-
-    let unreg_parsed =
-        SipMessage::parse(&unreg_msg.data).expect("Failed to parse unregister response");
-    let unreg_response = unreg_parsed.as_response().expect("Expected response");
-
-    println!(
-        "Unregister response: {} {}",
-        unreg_response.status_code(),
-        unreg_response.reason()
-    );
-
-    // Handle unregister response
-    let _ = reg.handle_response(unreg_response);
-
-    // Should be unregistered
     assert_eq!(reg.state(), RegistrationState::Unregistered);
-
     println!("Unregistration successful!");
 }
 

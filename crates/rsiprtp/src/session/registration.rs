@@ -5,10 +5,13 @@
 
 use crate::sip::{
     generate_branch, generate_call_id, generate_tag, DigestChallenge, DigestCredentials,
-    DigestResponse, Method, SipRequest, SipResponse,
+    DigestResponse, Method, SipMessage, SipRequest, SipResponse,
 };
+use crate::transport::UdpTransport;
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::time::timeout;
 
 /// Registration errors.
 #[derive(Debug, Error)]
@@ -28,6 +31,21 @@ pub enum RegistrationError {
     /// Registration timeout.
     #[error("registration timeout")]
     Timeout,
+
+    /// Transport-level I/O failure while driving REGISTER.
+    #[error("transport error: {0}")]
+    Transport(String),
+
+    /// Received bytes that don't parse as a SIP message, or a request when a
+    /// response was expected.
+    #[error("malformed response: {0}")]
+    Malformed(String),
+
+    /// Authentication still failed after a digest retry — the registrar
+    /// challenged twice. Almost always means wrong credentials; the driver
+    /// won't loop further.
+    #[error("authentication rejected after retry")]
+    AuthRejected,
 }
 
 /// Registration state.
@@ -412,6 +430,105 @@ impl RegistrationManager {
     /// Get the Call-ID for this registration.
     pub fn call_id(&self) -> &str {
         &self.call_id
+    }
+
+    /// Drive a REGISTER + optional digest-auth retry to completion over a
+    /// UDP transport. On `Ok(())` the registration is in `Registered` state
+    /// (or `Unregistered` if the manager was driven through `unregister`
+    /// previously).
+    ///
+    /// Behaviour:
+    /// - Sends the initial REGISTER.
+    /// - Reads responses with `recv_timeout` between datagrams.
+    /// - Swallows `1xx` provisionals (RFC 3261 §10).
+    /// - On a single `401` / `407`, builds and sends the auth retry.
+    /// - A second `401` / `407` is treated as bad credentials and returns
+    ///   [`RegistrationError::AuthRejected`].
+    ///
+    /// The total wall time is bounded by `total_timeout` so a black-holing
+    /// registrar can't hang the caller forever.
+    pub async fn register(
+        &mut self,
+        transport: &UdpTransport,
+        registrar_addr: SocketAddr,
+        recv_timeout: Duration,
+        total_timeout: Duration,
+    ) -> Result<(), RegistrationError> {
+        let request = self.create_register()?;
+        run_request(self, transport, registrar_addr, request, recv_timeout, total_timeout).await
+    }
+
+    /// Symmetric of [`Self::register`] — drives an unREGISTER (`Expires: 0`)
+    /// to completion. If a digest challenge was previously stashed (e.g.
+    /// from a successful `register` call), the unregister is already
+    /// authenticated; otherwise the driver handles a single 401/407 retry
+    /// the same way `register` does.
+    pub async fn unregister(
+        &mut self,
+        transport: &UdpTransport,
+        registrar_addr: SocketAddr,
+        recv_timeout: Duration,
+        total_timeout: Duration,
+    ) -> Result<(), RegistrationError> {
+        let request = self.create_unregister()?;
+        run_request(self, transport, registrar_addr, request, recv_timeout, total_timeout).await
+    }
+}
+
+async fn run_request(
+    manager: &mut RegistrationManager,
+    transport: &UdpTransport,
+    registrar_addr: SocketAddr,
+    initial: SipRequest,
+    recv_timeout: Duration,
+    total_timeout: Duration,
+) -> Result<(), RegistrationError> {
+    let deadline = Instant::now() + total_timeout;
+
+    transport
+        .send_to(&initial.to_bytes(), registrar_addr)
+        .await
+        .map_err(|e| RegistrationError::Transport(e.to_string()))?;
+
+    let mut auth_attempts: u8 = 0;
+
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(RegistrationError::Timeout)?;
+        let wait = recv_timeout.min(remaining);
+
+        let incoming = match timeout(wait, transport.recv()).await {
+            Ok(Ok(msg)) => msg,
+            Ok(Err(e)) => return Err(RegistrationError::Transport(e.to_string())),
+            Err(_) => return Err(RegistrationError::Timeout),
+        };
+
+        let parsed = SipMessage::parse(&incoming.data)
+            .map_err(|e| RegistrationError::Malformed(e.to_string()))?;
+        let response = parsed
+            .as_response()
+            .ok_or_else(|| RegistrationError::Malformed("expected response".into()))?;
+
+        match manager.handle_response(response)? {
+            None => {
+                // Either a 200 (terminal success) or a 1xx (keep waiting).
+                if response.status_code() >= 200 {
+                    return Ok(());
+                }
+                continue;
+            }
+            Some(retry) => {
+                auth_attempts += 1;
+                if auth_attempts > 1 {
+                    return Err(RegistrationError::AuthRejected);
+                }
+                transport
+                    .send_to(&retry.to_bytes(), registrar_addr)
+                    .await
+                    .map_err(|e| RegistrationError::Transport(e.to_string()))?;
+            }
+        }
     }
 }
 
