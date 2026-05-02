@@ -2700,6 +2700,7 @@ pub async fn rsiprtp::ice::IceAgent::set_remote_credentials(&self, ufrag: &str, 
 pub async fn rsiprtp::ice::IceAgent::socket_for(&self, addr: core::net::socket_addr::SocketAddr) -> core::option::Option<alloc::sync::Arc<tokio::net::udp::UdpSocket>>
 pub async fn rsiprtp::ice::IceAgent::start_checks(&self) -> core::result::Result<(), rsiprtp::ice::IceError>
 pub async fn rsiprtp::ice::IceAgent::state(&self) -> rsiprtp::ice::IceState
+pub async fn rsiprtp::ice::IceAgent::stop_responders(&self)
 impl core::marker::Freeze for rsiprtp::ice::IceAgent
 impl core::marker::Send for rsiprtp::ice::IceAgent
 impl core::marker::Sync for rsiprtp::ice::IceAgent

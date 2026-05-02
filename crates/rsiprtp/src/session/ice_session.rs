@@ -125,6 +125,17 @@ impl IceSession {
     /// Call once per `IceSession`. Calling again after success has
     /// undefined behaviour: the underlying agent's pair list is not
     /// reset.
+    ///
+    /// On success, the agent's STUN responders stop reading from the
+    /// bound sockets; the caller takes ownership of the selected
+    /// socket for RTP via [`rtp_socket`](Self::rtp_socket). ICE
+    /// consent-freshness keepalives (RFC 7675) are out of scope (see
+    /// HLD).
+    ///
+    /// Symmetric-NAT peer-reflexive (prflx) candidate discovery is also
+    /// out of scope: the HLD calls for a thin ICE that handles host +
+    /// srflx pairs only. A symmetric-NAT peer would need a relay (TURN)
+    /// to traverse, which is not wired in for Phase 2.5.
     pub async fn run_checks(&mut self, remote: IceRemoteParams) -> Result<SocketAddr, IceError> {
         self.agent
             .set_remote_credentials(&remote.ufrag, &remote.pwd)
@@ -152,6 +163,12 @@ impl IceSession {
             IceError::Failed(format!("no socket for selected local {}", local_addr))
         })?;
 
+        // R3: hand the bound socket back cleanly. The dispatcher tasks
+        // would otherwise keep draining it and steal RTP. Sockets stay
+        // bound; only the responder loops stop. (Symmetric-NAT prflx
+        // is out of scope per HLD — covered above.)
+        self.agent.stop_responders().await;
+
         let peer = pair.remote.address;
         self.socket = Some(socket);
         self.peer = Some(peer);
@@ -178,8 +195,10 @@ impl IceSession {
 #[cfg(test)]
 impl IceSession {
     /// Build an `IceSession` from hand-rolled local params, without
-    /// actually gathering. Test-only — used to drive deterministic
-    /// candidate selection tests.
+    /// actually gathering. Test-only seam for deterministic
+    /// `default_candidate` tests; do not call from production code.
+    /// Already gated on `#[cfg(test)]`, so this is just clarification
+    /// for readers — the symbol is not part of the crate API.
     fn from_local_for_test(role: IceRole, local: IceLocalParams) -> Self {
         let config = IceConfig {
             stun_servers: vec![],
@@ -193,19 +212,6 @@ impl IceSession {
             socket: None,
             peer: None,
         }
-    }
-
-    /// Inject a "post-`run_checks`" state directly. Test-only.
-    ///
-    /// The agent's connectivity-check loop has no STUN responder, so
-    /// two `IceSession`s on loopback cannot complete a real STUN
-    /// exchange against each other. We need a way to exercise the
-    /// `rtp_socket()` / `peer_addr()` / `close()` wiring (which runs
-    /// after `run_checks` succeeds) without depending on a STUN
-    /// responder that doesn't exist.
-    fn inject_validated_for_test(&mut self, socket: Arc<UdpSocket>, peer: SocketAddr) {
-        self.socket = Some(socket);
-        self.peer = Some(peer);
     }
 }
 
@@ -287,33 +293,47 @@ mod tests {
         assert!(chosen.address.ip().is_loopback());
     }
 
-    /// Build a session in a "post-`run_checks`-success" state with a
-    /// real loopback UDP socket and a hand-set peer address. The agent
-    /// has no STUN responder, so a true two-side ICE exchange cannot
-    /// reach `Succeeded` on loopback (R1 enforces "no fallback for
-    /// `IceSession`"); this seam lets us still exercise the wiring
-    /// path that runs after `run_checks` succeeds.
+    /// Gather two `IceSession`s on loopback, exchange their local
+    /// params, and run real connectivity checks against each other.
+    /// Returns the two sessions after both `run_checks` calls have
+    /// returned `Ok`.
     async fn validated_session_pair() -> (IceSession, IceSession) {
-        let socket_a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let socket_b = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
-        let addr_a = socket_a.local_addr().unwrap();
-        let addr_b = socket_b.local_addr().unwrap();
+        let mut a = IceSession::gather(
+            IceRole::Controlling,
+            vec![],
+            short_timeout(),
+            short_timeout(),
+        )
+        .await
+        .expect("gather A");
+        let mut b = IceSession::gather(
+            IceRole::Controlled,
+            vec![],
+            short_timeout(),
+            short_timeout(),
+        )
+        .await
+        .expect("gather B");
 
-        let local_a = IceLocalParams {
-            ufrag: "ufragxxxx".to_string(),
-            pwd: "pwdpwdpwdpwdpwdpwdpwdpwd".to_string(),
-            candidates: vec![Candidate::host(addr_a, 1)],
+        let local_a = a.local().clone();
+        let local_b = b.local().clone();
+
+        let remote_for_a = IceRemoteParams {
+            ufrag: local_b.ufrag.clone(),
+            pwd: local_b.pwd.clone(),
+            candidates: local_b.candidates.clone(),
         };
-        let local_b = IceLocalParams {
-            ufrag: "ufragyyyy".to_string(),
-            pwd: "qwdqwdqwdqwdqwdqwdqwdqwd".to_string(),
-            candidates: vec![Candidate::host(addr_b, 1)],
+        let remote_for_b = IceRemoteParams {
+            ufrag: local_a.ufrag.clone(),
+            pwd: local_a.pwd.clone(),
+            candidates: local_a.candidates.clone(),
         };
 
-        let mut a = IceSession::from_local_for_test(IceRole::Controlling, local_a);
-        let mut b = IceSession::from_local_for_test(IceRole::Controlled, local_b);
-        a.inject_validated_for_test(socket_a, addr_b);
-        b.inject_validated_for_test(socket_b, addr_a);
+        // Run both check loops concurrently — each one's check is the
+        // oracle for the other's responder.
+        let (peer_a, peer_b) = tokio::join!(a.run_checks(remote_for_a), b.run_checks(remote_for_b));
+        peer_a.expect("A run_checks ok");
+        peer_b.expect("B run_checks ok");
         (a, b)
     }
 
@@ -321,14 +341,21 @@ mod tests {
     async fn rtp_socket_and_peer_addr_carry_real_traffic() {
         // R3: prove that the `Arc<UdpSocket>` from `rtp_socket()` and
         // the address from `peer_addr()` actually carry packets to the
-        // peer. Bypass `run_checks` (no STUN responder) and use a test
-        // seam that wires real loopback sockets the same way a real
-        // success path would.
+        // peer. Drives two real `IceSession`s on loopback through real
+        // STUN connectivity checks (the agent's responder answers).
+        //
+        // The probe goes through the live, post-validation socket —
+        // no `close()` call here. `run_checks` is required to stop the
+        // dispatchers internally so the caller's RTP traffic isn't
+        // stolen by the STUN responder loop.
         let (a, b) = validated_session_pair().await;
 
         let socket_a = a.rtp_socket().expect("A has a socket after validation");
         let socket_b = b.rtp_socket().expect("B has a socket after validation");
         let peer_a = a.peer_addr().expect("A has a peer after validation");
+        let peer_b = b.peer_addr().expect("B has a peer after validation");
+        assert_eq!(peer_a, socket_b.local_addr().unwrap());
+        assert_eq!(peer_b, socket_a.local_addr().unwrap());
 
         let probe = b"ping";
         socket_a
@@ -343,9 +370,6 @@ mod tests {
                 .expect("recv on B did not time out")
                 .expect("recv on B ok");
         assert_eq!(&buf[..n], probe, "probe bytes match");
-
-        a.close().await;
-        b.close().await;
     }
 
     #[tokio::test]
@@ -358,7 +382,8 @@ mod tests {
         let peer_a = a.peer_addr().unwrap();
 
         // Drop both sessions — only the cloned Arcs keep the sockets
-        // alive.
+        // alive. Closing also shuts down the dispatcher that would
+        // otherwise drain the socket out from under the test.
         a.close().await;
         b.close().await;
 

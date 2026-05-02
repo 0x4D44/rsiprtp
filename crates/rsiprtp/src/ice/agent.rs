@@ -9,8 +9,17 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::net::UdpSocket;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
+
+/// Wire constants shared by the request/response code paths.
+const MAGIC_COOKIE: u32 = 0x2112A442;
+const BINDING_REQUEST: u16 = 0x0001;
+const BINDING_RESPONSE: u16 = 0x0101;
+const ATTR_USERNAME: u16 = 0x0006;
+const ATTR_MESSAGE_INTEGRITY: u16 = 0x0008;
+const ATTR_XOR_MAPPED_ADDRESS: u16 = 0x0020;
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -161,6 +170,14 @@ fn generate_ice_pwd() -> String {
     chars
 }
 
+/// Per-socket dispatcher state: the dispatcher drains the bound socket,
+/// answers inbound STUN binding requests directly, and forwards inbound
+/// STUN binding responses to whatever check-loop registered the matching
+/// transaction ID. Every access is a write (insert / remove / clear),
+/// so a `Mutex` is the right primitive here — `RwLock` would only add
+/// overhead.
+type PendingResponses = Arc<Mutex<HashMap<[u8; 12], oneshot::Sender<Vec<u8>>>>>;
+
 /// ICE agent.
 pub struct IceAgent {
     config: IceConfig,
@@ -171,6 +188,12 @@ pub struct IceAgent {
     candidate_pairs: Arc<RwLock<Vec<CandidatePair>>>,
     selected_pair: Arc<RwLock<Option<CandidatePair>>>,
     sockets: Arc<RwLock<HashMap<SocketAddr, Arc<UdpSocket>>>>,
+    /// One dispatcher task per bound host socket. Tracked so `close`
+    /// can abort them.
+    responder_tasks: Arc<RwLock<HashMap<SocketAddr, JoinHandle<()>>>>,
+    /// In-flight outgoing STUN transactions, keyed by transaction ID.
+    /// The dispatcher hands the response bytes to the matching oneshot.
+    pending_responses: PendingResponses,
     /// Remote ICE credentials.
     remote_ufrag: Arc<RwLock<Option<String>>>,
     remote_pwd: Arc<RwLock<Option<String>>>,
@@ -188,6 +211,8 @@ impl IceAgent {
             candidate_pairs: Arc::new(RwLock::new(Vec::new())),
             selected_pair: Arc::new(RwLock::new(None)),
             sockets: Arc::new(RwLock::new(HashMap::new())),
+            responder_tasks: Arc::new(RwLock::new(HashMap::new())),
+            pending_responses: Arc::new(Mutex::new(HashMap::new())),
             remote_ufrag: Arc::new(RwLock::new(None)),
             remote_pwd: Arc::new(RwLock::new(None)),
         }
@@ -315,11 +340,13 @@ impl IceAgent {
                     let candidate = Candidate::host(local_addr, 1);
                     candidates.push(candidate);
 
-                    // Store socket
+                    // Store socket and start a dispatcher task for it.
+                    let socket = Arc::new(socket);
                     self.sockets
                         .write()
                         .await
-                        .insert(local_addr, Arc::new(socket));
+                        .insert(local_addr, socket.clone());
+                    self.ensure_dispatcher(local_addr, socket).await;
                 }
                 Err(e) => {
                     warn!("Failed to bind to {}: {}", bind_addr, e);
@@ -330,17 +357,86 @@ impl IceAgent {
         Ok(candidates)
     }
 
+    /// Start (or noop) the per-socket dispatcher loop that answers
+    /// inbound STUN binding requests and routes inbound binding
+    /// responses to the matching outgoing-check oneshot. Idempotent
+    /// per `local_addr`.
+    ///
+    /// Note on the bind-then-spawn window: between `UdpSocket::bind`
+    /// returning and the spawned task issuing its first `recv_from`,
+    /// the kernel buffers any inbound datagrams in the per-socket
+    /// queue. Nothing is lost as long as the queue isn't overrun;
+    /// a STUN check arriving "early" simply waits a few microseconds
+    /// for the loop to drain it.
+    async fn ensure_dispatcher(&self, local_addr: SocketAddr, socket: Arc<UdpSocket>) {
+        let mut tasks = self.responder_tasks.write().await;
+        if tasks.contains_key(&local_addr) {
+            return;
+        }
+
+        let pending = self.pending_responses.clone();
+        let local_ufrag = self.config.local_ufrag.clone();
+        let local_pwd = self.config.local_pwd.clone();
+        let handle = tokio::spawn(async move {
+            stun_dispatcher_loop(socket, pending, local_ufrag, local_pwd).await;
+        });
+        tasks.insert(local_addr, handle);
+    }
+
+    /// Send an outgoing STUN message and await the response (matched
+    /// by transaction ID via the dispatcher) with a timeout. The
+    /// dispatcher must already be running for `socket`'s local address
+    /// — callers ensure this via `ensure_dispatcher` or by binding
+    /// through `gather_host_candidates_with`.
+    async fn send_and_await_response(
+        &self,
+        socket: &UdpSocket,
+        target: SocketAddr,
+        msg: &[u8],
+        txn_id: [u8; 12],
+        timeout_dur: std::time::Duration,
+    ) -> Result<Vec<u8>, std::io::Error> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_responses.lock().await.insert(txn_id, tx);
+
+        let send_result = socket.send_to(msg, target).await;
+        if let Err(e) = send_result {
+            self.pending_responses.lock().await.remove(&txn_id);
+            return Err(e);
+        }
+
+        let result = tokio::time::timeout(timeout_dur, rx).await;
+        // Whatever happened, drop the pending entry.
+        self.pending_responses.lock().await.remove(&txn_id);
+        match result {
+            Ok(Ok(bytes)) => Ok(bytes),
+            Ok(Err(_)) => Err(std::io::Error::other("dispatcher dropped")),
+            Err(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "STUN response timeout",
+            )),
+        }
+    }
+
     /// Gather server-reflexive candidates from STUN servers.
     async fn gather_srflx_candidates(&self) -> Vec<Candidate> {
         let mut candidates = Vec::new();
 
-        let sockets = self.sockets.read().await;
-        for (base_addr, socket) in sockets.iter() {
+        // Snapshot sockets to avoid holding the lock across awaits.
+        let sockets: Vec<(SocketAddr, Arc<UdpSocket>)> = self
+            .sockets
+            .read()
+            .await
+            .iter()
+            .map(|(a, s)| (*a, s.clone()))
+            .collect();
+
+        for (base_addr, socket) in sockets {
             for server in &self.config.stun_servers {
-                match self.stun_binding_request(socket, server).await {
+                match self.stun_binding_request(&socket, server).await {
                     Ok(mapped_addr) => {
-                        if mapped_addr != *base_addr {
-                            let candidate = Candidate::server_reflexive(mapped_addr, *base_addr, 1);
+                        if mapped_addr != base_addr {
+                            let candidate = Candidate::server_reflexive(mapped_addr, base_addr, 1);
                             debug!(
                                 "Discovered srflx candidate: {} (base: {})",
                                 mapped_addr, base_addr
@@ -361,17 +457,12 @@ impl IceAgent {
     /// Send a STUN binding request using an existing socket.
     async fn stun_binding_request(
         &self,
-        socket: &UdpSocket,
+        socket: &Arc<UdpSocket>,
         server: &StunServer,
     ) -> Result<SocketAddr, crate::ice::stun::StunError> {
         use bytes::{Buf, BufMut, BytesMut};
         use rand::RngCore;
         use std::time::Duration;
-        use tokio::time::timeout;
-
-        const MAGIC_COOKIE: u32 = 0x2112A442;
-        const BINDING_REQUEST: u16 = 0x0001;
-        const BINDING_RESPONSE: u16 = 0x0101;
 
         // Generate transaction ID
         let mut txn_id = [0u8; 12];
@@ -384,23 +475,29 @@ impl IceAgent {
         request.put_u32(MAGIC_COOKIE);
         request.put_slice(&txn_id);
 
-        // Send request
-        socket.send_to(&request, server.addr).await?;
+        // Make sure the dispatcher is running for this socket's local
+        // address; otherwise the response will never reach us.
+        let local_addr = match socket.local_addr() {
+            Ok(a) => a,
+            Err(e) => return Err(crate::ice::stun::StunError::Io(e)),
+        };
+        self.ensure_dispatcher(local_addr, socket.clone()).await;
 
-        // Wait for response
-        let mut buf = vec![0u8; 1024];
-        let (len, _) = match timeout(
-            Duration::from_millis(self.config.check_timeout_ms),
-            socket_recv_from(socket, &mut buf),
-        )
-        .await
+        // Send + await via the dispatcher.
+        let timeout_dur = Duration::from_millis(self.config.check_timeout_ms);
+        let response = match self
+            .send_and_await_response(socket, server.addr, &request, txn_id, timeout_dur)
+            .await
         {
-            Ok(result) => result,
-            Err(_) => return Err(crate::ice::stun::StunError::Timeout),
-        }?;
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                return Err(crate::ice::stun::StunError::Timeout);
+            }
+            Err(e) => return Err(crate::ice::stun::StunError::Io(e)),
+        };
 
-        // Parse response (simplified)
-        let data = &buf[..len];
+        // Parse response.
+        let data = response.as_slice();
         if data.len() < 20 {
             return Err(crate::ice::stun::StunError::InvalidResponse(
                 "Too short".into(),
@@ -423,16 +520,16 @@ impl IceAgent {
             ));
         }
 
-        // Skip transaction ID check for simplicity
+        // Skip transaction ID — already matched by the dispatcher.
         buf.advance(12);
 
         // Parse attributes to find XOR-MAPPED-ADDRESS
-        let mut attrs = &data[20..20 + msg_len];
+        let mut attrs = &data[20..20 + msg_len.min(data.len() - 20)];
         while attrs.len() >= 4 {
             let attr_type = attrs.get_u16();
             let attr_len = attrs.get_u16() as usize;
 
-            if attr_type == 0x0020 && attr_len >= 8 {
+            if attr_type == ATTR_XOR_MAPPED_ADDRESS && attr_len >= 8 {
                 // XOR-MAPPED-ADDRESS
                 let _reserved = attrs.get_u8();
                 let family = attrs.get_u8();
@@ -533,6 +630,12 @@ impl IceAgent {
     /// Performs STUN connectivity checks on candidate pairs according to RFC 8445.
     /// Each check sends a STUN Binding Request to the remote candidate and waits
     /// for a response to validate the path.
+    ///
+    /// Known limitation: peer-reflexive (prflx) candidate discovery for
+    /// symmetric-NAT peers is not implemented (out of scope per the ICE
+    /// HLD — symmetric NAT requires a TURN relay, which this thin ICE
+    /// path doesn't wire in). The caller should plan to fall back to a
+    /// relay if both peers sit behind symmetric NATs.
     pub async fn start_checks(&self) -> Result<(), IceError> {
         *self.state.write().await = IceState::Checking;
         info!("Starting ICE connectivity checks");
@@ -591,6 +694,8 @@ impl IceAgent {
                     false
                 }
             };
+            // `sock` is an `Arc<UdpSocket>`, so the dispatcher's clone
+            // remains live regardless of this scope.
 
             // Update pair state
             let mut succeeded = false;
@@ -640,28 +745,33 @@ impl IceAgent {
     /// and validates the response.
     async fn perform_connectivity_check(
         &self,
-        socket: &UdpSocket,
+        socket: &Arc<UdpSocket>,
         pair: &CandidatePair,
         remote_ufrag: &str,
         remote_pwd: &str,
     ) -> bool {
-        use bytes::{Buf, BufMut, BytesMut};
+        use bytes::{BufMut, BytesMut};
         use hmac::{Hmac, Mac};
         use rand::RngCore;
         use sha1::Sha1;
         use std::time::Duration;
-        use tokio::time::timeout;
 
-        const MAGIC_COOKIE: u32 = 0x2112A442;
-        const BINDING_REQUEST: u16 = 0x0001;
-        const BINDING_RESPONSE: u16 = 0x0101;
-        const ATTR_USERNAME: u16 = 0x0006;
-        const ATTR_MESSAGE_INTEGRITY: u16 = 0x0008;
         const ATTR_PRIORITY: u16 = 0x0024;
         const ATTR_ICE_CONTROLLING: u16 = 0x802A;
         const ATTR_ICE_CONTROLLED: u16 = 0x8029;
 
         type HmacSha1 = Hmac<Sha1>;
+
+        // Make sure the dispatcher is running for this socket so we
+        // can receive responses (and answer the peer's checks too).
+        let local_addr = match socket.local_addr() {
+            Ok(a) => a,
+            Err(e) => {
+                warn!("Cannot resolve local addr for connectivity check: {}", e);
+                return false;
+            }
+        };
+        self.ensure_dispatcher(local_addr, socket.clone()).await;
 
         // Generate transaction ID
         let mut txn_id = [0u8; 12];
@@ -732,70 +842,55 @@ impl IceAgent {
             msg.put_slice(&integrity);
         }
 
-        // Send the request
+        // Send + await response via the dispatcher.
         let target_addr = pair.remote.address;
-        if let Err(e) = socket.send_to(&msg, target_addr).await {
-            warn!(
-                "Failed to send connectivity check to {}: {}",
-                target_addr, e
-            );
-            return false;
-        }
-
-        // Wait for response with timeout
         let check_timeout = Duration::from_millis(self.config.check_timeout_ms);
-        let mut buf = vec![0u8; 1024];
 
-        for _attempt in 0..3 {
-            match timeout(check_timeout, socket.recv_from(&mut buf)).await {
-                Ok(Ok((len, from))) => {
-                    // Validate response
-                    let data = &buf[..len];
-                    if data.len() < 20 {
-                        continue;
-                    }
-
-                    let mut rbuf = data;
-                    let msg_type = rbuf.get_u16();
-                    if msg_type != BINDING_RESPONSE {
-                        continue;
-                    }
-
-                    let _msg_len = rbuf.get_u16();
-                    let cookie = rbuf.get_u32();
-                    if cookie != MAGIC_COOKIE {
-                        continue;
-                    }
-
-                    // Verify transaction ID matches
-                    let mut resp_txn = [0u8; 12];
-                    rbuf.copy_to_slice(&mut resp_txn);
-                    if resp_txn != txn_id {
-                        continue;
-                    }
-
+        match self
+            .send_and_await_response(socket, target_addr, &msg, txn_id, check_timeout)
+            .await
+        {
+            Ok(response_bytes) => {
+                // Dispatcher matches by transaction ID and forwards
+                // any well-formed-length packet — re-validate the
+                // STUN-level fields here so a malformed reply doesn't
+                // count as a successful check.
+                if response_bytes.len() < 20 {
                     debug!(
-                        "Received valid STUN response from {} for check to {}",
-                        from, target_addr
+                        "Connectivity check response from {} too short ({} bytes)",
+                        target_addr,
+                        response_bytes.len()
                     );
-                    return true;
+                    return false;
                 }
-                Ok(Err(e)) => {
-                    warn!("Error receiving connectivity check response: {}", e);
-                }
-                Err(_) => {
-                    // Timeout, retry
+                let resp_type = u16::from_be_bytes([response_bytes[0], response_bytes[1]]);
+                let resp_cookie = u32::from_be_bytes([
+                    response_bytes[4],
+                    response_bytes[5],
+                    response_bytes[6],
+                    response_bytes[7],
+                ]);
+                if resp_type != BINDING_RESPONSE || resp_cookie != MAGIC_COOKIE {
                     debug!(
-                        "Connectivity check to {} timed out, retrying...",
-                        target_addr
+                        "Connectivity check response from {} malformed (type=0x{:04x} cookie=0x{:08x})",
+                        target_addr, resp_type, resp_cookie
                     );
-                    // Retransmit
-                    let _ = socket.send_to(&msg, target_addr).await;
+                    return false;
                 }
+                debug!(
+                    "Received valid STUN response for connectivity check to {}",
+                    target_addr
+                );
+                true
+            }
+            Err(e) => {
+                debug!(
+                    "Connectivity check to {} did not complete: {}",
+                    target_addr, e
+                );
+                false
             }
         }
-
-        false
     }
 
     /// Unfreeze candidate pairs with the same foundation after a successful check.
@@ -847,10 +942,39 @@ impl IceAgent {
         Err(IceError::NoCandidates)
     }
 
+    /// Stop the per-socket STUN responder dispatchers without
+    /// otherwise tearing down the agent.
+    ///
+    /// Sockets stay bound and remain in the agent's `sockets` map, so
+    /// `socket_for(...)` keeps returning the same `Arc<UdpSocket>` and
+    /// any clones the caller already obtained continue to receive
+    /// traffic. Cloned `rtp_socket()` handles held by callers (e.g.
+    /// the RTP loop) are unaffected by this call beyond the
+    /// dispatcher releasing its own clone.
+    ///
+    /// Use this once a validated pair has been selected: the caller
+    /// is taking the socket for RTP, and we no longer want the
+    /// dispatcher consuming inbound packets out from under them.
+    /// `close()` remains the full-shutdown path.
+    pub async fn stop_responders(&self) {
+        let mut tasks = self.responder_tasks.write().await;
+        for (_addr, handle) in tasks.drain() {
+            handle.abort();
+        }
+    }
+
     /// Close the ICE agent.
     pub async fn close(&self) {
         *self.state.write().await = IceState::Closed;
         self.sockets.write().await.clear();
+        // Abort all dispatcher tasks. Cloned `Arc<UdpSocket>` handles
+        // held by callers (e.g. RTP) remain alive — only our reference
+        // is dropped.
+        let mut tasks = self.responder_tasks.write().await;
+        for (_addr, handle) in tasks.drain() {
+            handle.abort();
+        }
+        self.pending_responses.lock().await.clear();
     }
 }
 
@@ -861,8 +985,6 @@ fn get_local_addresses() -> Vec<IpAddr> {
 
 #[cfg(test)]
 static FORCE_HOST_LOCAL_ADDR_ERROR: AtomicU64 = AtomicU64::new(0);
-#[cfg(test)]
-static FORCE_STUN_RECV_ERROR: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
 fn force_host_local_addr_error_once() {
@@ -880,23 +1002,6 @@ fn take_forced_host_local_addr_error() -> Option<std::io::Error> {
             Ordering::SeqCst,
         );
         Some(std::io::Error::other("forced local_addr error"))
-    } else {
-        None
-    }
-}
-
-#[cfg(test)]
-fn force_stun_recv_error_once() {
-    FORCE_STUN_RECV_ERROR.store(current_thread_id(), Ordering::SeqCst);
-}
-
-#[cfg(test)]
-fn take_forced_stun_recv_error() -> Option<std::io::Error> {
-    let current = current_thread_id();
-    if FORCE_STUN_RECV_ERROR.load(Ordering::SeqCst) == current {
-        let _ =
-            FORCE_STUN_RECV_ERROR.compare_exchange(current, 0, Ordering::SeqCst, Ordering::SeqCst);
-        Some(std::io::Error::other("forced recv_from error"))
     } else {
         None
     }
@@ -921,23 +1026,255 @@ fn normalize_thread_id(id: u64) -> u64 {
     }
 }
 
+/// Per-socket STUN dispatcher loop. Reads inbound packets and either
+/// answers binding requests (with `MESSAGE-INTEGRITY` validated against
+/// `local_pwd`) or forwards binding responses to whichever outgoing
+/// transaction is awaiting them.
+async fn stun_dispatcher_loop(
+    socket: Arc<UdpSocket>,
+    pending: PendingResponses,
+    local_ufrag: String,
+    local_pwd: String,
+) {
+    // 1500 covers a typical Ethernet MTU. Real STUN messages are far
+    // smaller (a few hundred bytes), and `recv_from` truncates rather
+    // than failing on oversize, so we log and drop oversized packets.
+    let mut buf = vec![0u8; 1500];
+    loop {
+        let (len, from) = match socket.recv_from(&mut buf).await {
+            Ok(t) => t,
+            Err(e) => {
+                debug!("STUN dispatcher recv error, exiting: {}", e);
+                return;
+            }
+        };
+        if len == buf.len() {
+            // Datagram filled the buffer exactly; UDP has no fragment
+            // signal here. Anything legitimate from a STUN peer fits
+            // well below 1500 bytes — log and drop rather than forward
+            // a possibly-truncated message.
+            debug!(
+                "STUN dispatcher dropped possibly-truncated {}-byte datagram from {}",
+                len, from
+            );
+            continue;
+        }
+        if len < 20 {
+            continue;
+        }
+        let data = &buf[..len];
+        let msg_type = u16::from_be_bytes([data[0], data[1]]);
+        let cookie = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+        let mut txn_id = [0u8; 12];
+        txn_id.copy_from_slice(&data[8..20]);
+
+        // Forward to a pending outgoing transaction first if the txn
+        // ID matches, regardless of msg_type/cookie. This lets the
+        // caller (`stun_binding_request`, `perform_connectivity_check`)
+        // re-validate and surface `StunError::InvalidResponse` for
+        // malformed replies — staying permissive here keeps the
+        // public API contract intact. Only if no transaction is
+        // waiting for this ID do we treat the packet as a peer
+        // binding request.
+        let pending_match = pending.lock().await.remove(&txn_id);
+        if let Some(tx) = pending_match {
+            let _ = tx.send(data.to_vec());
+            continue;
+        }
+
+        if cookie == MAGIC_COOKIE && msg_type == BINDING_REQUEST {
+            let owned: Vec<u8> = data.to_vec();
+            if let Some(resp) =
+                build_binding_response(&owned, txn_id, from, &local_ufrag, &local_pwd)
+            {
+                if let Err(e) = socket.send_to(&resp, from).await {
+                    debug!("Failed to send STUN binding response to {}: {}", from, e);
+                }
+            }
+        } else {
+            // Unmatched non-request (stray response, indication, or
+            // bad-cookie noise): drop silently.
+            debug!(
+                "STUN dispatcher dropped unmatched packet from {} (type=0x{:04x})",
+                from, msg_type
+            );
+        }
+    }
+}
+
+/// Validate an inbound STUN binding request and build the success
+/// response bytes. Returns `None` if validation fails (the dispatcher
+/// then drops the packet silently — RFC 5389 permits a STUN error
+/// response, but staying silent is simpler and safer).
+fn build_binding_response(
+    request: &[u8],
+    txn_id: [u8; 12],
+    from: SocketAddr,
+    local_ufrag: &str,
+    local_pwd: &str,
+) -> Option<Vec<u8>> {
+    use bytes::{BufMut, BytesMut};
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+
+    type HmacSha1 = Hmac<Sha1>;
+
+    if request.len() < 20 {
+        return None;
+    }
+    let total_attrs_len = u16::from_be_bytes([request[2], request[3]]) as usize;
+    if request.len() < 20 + total_attrs_len {
+        return None;
+    }
+
+    // Walk attributes, locate USERNAME and MESSAGE-INTEGRITY.
+    let mut username: Option<&[u8]> = None;
+    let mut mi_offset: Option<usize> = None;
+    let mut mi_value: Option<&[u8]> = None;
+
+    let mut off = 20;
+    let attrs_end = 20 + total_attrs_len;
+    while off + 4 <= attrs_end {
+        let attr_type = u16::from_be_bytes([request[off], request[off + 1]]);
+        let attr_len = u16::from_be_bytes([request[off + 2], request[off + 3]]) as usize;
+        let val_start = off + 4;
+        let val_end = val_start + attr_len;
+        if val_end > attrs_end {
+            return None;
+        }
+        match attr_type {
+            ATTR_USERNAME => {
+                username = Some(&request[val_start..val_end]);
+            }
+            ATTR_MESSAGE_INTEGRITY => {
+                if attr_len != 20 {
+                    return None;
+                }
+                mi_offset = Some(off);
+                mi_value = Some(&request[val_start..val_end]);
+                // RFC 5389 §15.4: attributes after MESSAGE-INTEGRITY
+                // are not covered by the HMAC, so trusting them would
+                // let an attacker append arbitrary unauthenticated
+                // attributes. Stop here.
+                break;
+            }
+            _ => {}
+        }
+        // Advance past padded attribute.
+        let padded = (attr_len + 3) & !3;
+        off = val_start + padded;
+    }
+
+    let username = username?;
+    let mi_offset = mi_offset?;
+    let mi_value = mi_value?;
+
+    // RFC 5389 §10.1.2: verify MESSAGE-INTEGRITY *before* USERNAME.
+    // An attacker who can guess our local ufrag must not learn whether
+    // their MI guess was right; we reject all unauthenticated traffic
+    // identically (silent drop). Validating MI first also avoids
+    // doing a string comparison on attacker-controlled input before
+    // the cryptographic check.
+    let mut signed = request[..mi_offset].to_vec();
+    let new_len = (mi_offset - 20 + 24) as u16;
+    signed[2] = (new_len >> 8) as u8;
+    signed[3] = (new_len & 0xff) as u8;
+
+    let mut mac =
+        HmacSha1::new_from_slice(local_pwd.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(&signed);
+    if mac.verify_slice(mi_value).is_err() {
+        debug!("STUN request rejected: MESSAGE-INTEGRITY mismatch");
+        return None;
+    }
+
+    // USERNAME must be of the form `local_ufrag:peer_ufrag`. We
+    // verify only the first component matches our local ufrag —
+    // peers send `<their_remote_ufrag>:<their_local_ufrag>` and our
+    // remote_ufrag (from peer's POV) is our local_ufrag.
+    let username_str = std::str::from_utf8(username).ok()?;
+    let mut split = username_str.splitn(2, ':');
+    let first = split.next()?;
+    if first != local_ufrag {
+        debug!(
+            "STUN request rejected: USERNAME prefix `{}` != local ufrag",
+            first
+        );
+        return None;
+    }
+
+    // Build success response: BINDING_RESPONSE + magic + txn_id +
+    // XOR-MAPPED-ADDRESS + MESSAGE-INTEGRITY (signed with local_pwd).
+    let mut attrs = BytesMut::new();
+    match from {
+        SocketAddr::V4(addr) => {
+            attrs.put_u16(ATTR_XOR_MAPPED_ADDRESS);
+            attrs.put_u16(8);
+            attrs.put_u8(0);
+            attrs.put_u8(0x01); // IPv4
+            let xor_port = addr.port() ^ (MAGIC_COOKIE >> 16) as u16;
+            attrs.put_u16(xor_port);
+            let ip = addr.ip().octets();
+            let cookie = MAGIC_COOKIE.to_be_bytes();
+            for i in 0..4 {
+                attrs.put_u8(ip[i] ^ cookie[i]);
+            }
+        }
+        SocketAddr::V6(addr) => {
+            // RFC 5389 §15.2: IPv6 XOR-MAPPED-ADDRESS is 24 bytes —
+            // family 0x02, port XORed with the high 16 bits of the
+            // magic cookie, address XORed with the magic cookie
+            // followed by the 12-byte transaction ID.
+            attrs.put_u16(ATTR_XOR_MAPPED_ADDRESS);
+            attrs.put_u16(20);
+            attrs.put_u8(0);
+            attrs.put_u8(0x02); // IPv6
+            let xor_port = addr.port() ^ (MAGIC_COOKIE >> 16) as u16;
+            attrs.put_u16(xor_port);
+            let ip = addr.ip().octets();
+            let cookie = MAGIC_COOKIE.to_be_bytes();
+            for i in 0..4 {
+                attrs.put_u8(ip[i] ^ cookie[i]);
+            }
+            for i in 0..12 {
+                attrs.put_u8(ip[4 + i] ^ txn_id[i]);
+            }
+        }
+    }
+
+    let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
+    msg.put_u16(BINDING_RESPONSE);
+    // Will be patched before HMAC.
+    msg.put_u16(attrs.len() as u16);
+    msg.put_u32(MAGIC_COOKIE);
+    msg.put_slice(&txn_id);
+    msg.put_slice(&attrs);
+
+    {
+        let current_len = msg.len();
+        let new_len = (current_len - 20 + 24) as u16;
+        msg[2] = (new_len >> 8) as u8;
+        msg[3] = (new_len & 0xff) as u8;
+
+        let mut mac =
+            HmacSha1::new_from_slice(local_pwd.as_bytes()).expect("HMAC accepts any key length");
+        mac.update(&msg);
+        let integrity = mac.finalize().into_bytes();
+
+        msg.put_u16(ATTR_MESSAGE_INTEGRITY);
+        msg.put_u16(20);
+        msg.put_slice(&integrity);
+    }
+
+    Some(msg.to_vec())
+}
+
 fn socket_local_addr(socket: &UdpSocket) -> Result<SocketAddr, IceError> {
     #[cfg(test)]
     if let Some(err) = take_forced_host_local_addr_error() {
         return Err(IceError::Io(err));
     }
     socket.local_addr().map_err(IceError::Io)
-}
-
-async fn socket_recv_from(
-    socket: &UdpSocket,
-    buf: &mut [u8],
-) -> Result<(usize, SocketAddr), std::io::Error> {
-    #[cfg(test)]
-    if let Some(err) = take_forced_stun_recv_error() {
-        return Err(err);
-    }
-    socket.recv_from(buf).await
 }
 
 fn bind_default() -> std::io::Result<std::net::UdpSocket> {
@@ -1498,7 +1835,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         let local = Candidate::host(local_addr, 1);
         agent.local_candidates.write().await.push(local.clone());
@@ -1506,7 +1843,7 @@ mod tests {
             .sockets
             .write()
             .await
-            .insert(local.address, Arc::new(local_socket));
+            .insert(local.address, local_socket.clone());
 
         let mock = MockStunServer::new().await;
         let remote = Candidate::host(mock.addr, 1);
@@ -1541,7 +1878,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         let local_cand = Candidate::host(local_addr, 1);
         let remote_cand = Candidate::host(
@@ -1873,7 +2210,7 @@ mod tests {
         let agent = IceAgent::new(config, IceRole::Controlling);
 
         // Create local socket
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         // Create mock remote server
@@ -1924,7 +2261,7 @@ mod tests {
         let agent = IceAgent::new(config, IceRole::Controlling);
 
         // Create local socket
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         // Use unreachable address for timeout
@@ -1959,7 +2296,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -2003,7 +2340,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -2053,7 +2390,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -2101,7 +2438,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -2399,7 +2736,7 @@ mod tests {
         let agent = IceAgent::new(config, IceRole::Controlling);
 
         // Create local socket
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
 
         // Create mock STUN server
         let mock = MockStunServer::new().await;
@@ -2438,7 +2775,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2467,7 +2804,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2490,7 +2827,12 @@ mod tests {
         });
 
         let result = agent.stun_binding_request(&local_socket, &server).await;
-        assert!(result.is_err());
+        let err = result.expect_err("expected InvalidResponse");
+        assert!(
+            matches!(err, crate::ice::stun::StunError::InvalidResponse(_)),
+            "expected InvalidResponse, got {:?}",
+            err
+        );
     }
 
     // Test: stun_binding_request with non-XOR attribute payload
@@ -2504,7 +2846,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2547,7 +2889,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2593,7 +2935,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2635,7 +2977,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let server_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let server_addr = server_socket.local_addr().unwrap();
 
@@ -2654,31 +2996,6 @@ mod tests {
         assert_eq!(err.to_string(), "Request timeout");
     }
 
-    // Test: stun_binding_request with recv error
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_stun_binding_request_recv_error() {
-        let config = IceConfig {
-            stun_servers: vec![],
-            check_timeout_ms: 10,
-            ..Default::default()
-        };
-        let agent = IceAgent::new(config, IceRole::Controlling);
-
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let server_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let server_addr = server_socket.local_addr().unwrap();
-
-        let server = StunServer {
-            name: "mock",
-            addr: server_addr,
-        };
-
-        force_stun_recv_error_once();
-        let result = agent.stun_binding_request(&local_socket, &server).await;
-        let err = result.unwrap_err();
-        assert_eq!(err.to_string(), "IO error: forced recv_from error");
-    }
-
     // Test: stun_binding_request with invalid response (bad magic cookie)
     #[tokio::test]
     async fn test_stun_binding_request_bad_magic_cookie() {
@@ -2690,7 +3007,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2710,8 +3027,15 @@ mod tests {
             let _ = mock_socket.send_to(&msg, peer).await;
         });
 
+        // R4: dispatcher forwards by txn-id, then `stun_binding_request`
+        // re-validates the cookie and surfaces `InvalidResponse`.
         let result = agent.stun_binding_request(&local_socket, &server).await;
-        assert!(result.is_err());
+        let err = result.expect_err("expected InvalidResponse");
+        assert!(
+            matches!(err, crate::ice::stun::StunError::InvalidResponse(_)),
+            "expected InvalidResponse, got {:?}",
+            err
+        );
     }
 
     // Test: stun_binding_request with missing XOR-MAPPED-ADDRESS
@@ -2725,7 +3049,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let mock = MockStunServer::new().await;
         let server = StunServer {
             name: "mock",
@@ -2808,13 +3132,13 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         agent
             .sockets
             .write()
             .await
-            .insert(local_addr, Arc::new(local_socket));
+            .insert(local_addr, local_socket.clone());
 
         let mock_socket = mock.socket.clone();
         tokio::spawn(async move {
@@ -2844,13 +3168,13 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         agent
             .sockets
             .write()
             .await
-            .insert(local_addr, Arc::new(local_socket));
+            .insert(local_addr, local_socket.clone());
 
         let mock_socket = mock.socket.clone();
         tokio::spawn(async move {
@@ -2984,7 +3308,7 @@ mod tests {
 
         agent.set_remote_credentials("remoteusr", "remotepwd").await;
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         // Use unreachable address so check fails
@@ -2997,7 +3321,7 @@ mod tests {
             .sockets
             .write()
             .await
-            .insert(local_addr, Arc::new(local_socket));
+            .insert(local_addr, local_socket.clone());
 
         let remote_cand = Candidate::host(unreachable_addr, 1);
         agent.add_remote_candidates(vec![remote_cand]).await;
@@ -3028,7 +3352,7 @@ mod tests {
 
         agent.set_remote_credentials("remoteusr", "remotepwd").await;
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         let local_cand = Candidate::host(local_addr, 1);
         agent.local_candidates.write().await.push(local_cand);
@@ -3036,7 +3360,7 @@ mod tests {
             .sockets
             .write()
             .await
-            .insert(local_addr, Arc::new(local_socket));
+            .insert(local_addr, local_socket.clone());
 
         let mock = MockStunServer::new().await;
         let remote_cand = Candidate::host(mock.addr, 1);
@@ -3072,7 +3396,7 @@ mod tests {
 
         agent.set_remote_credentials("remoteusr", "remotepwd").await;
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
         let local_cand = Candidate::host(local_addr, 1);
         agent.local_candidates.write().await.push(local_cand);
@@ -3080,7 +3404,7 @@ mod tests {
             .sockets
             .write()
             .await
-            .insert(local_addr, Arc::new(local_socket));
+            .insert(local_addr, local_socket.clone());
 
         let mock = MockStunServer::new().await;
         let remote_cand = Candidate::host(mock.addr, 1);
@@ -3114,7 +3438,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlled);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -3341,7 +3665,7 @@ mod tests {
         };
         let agent = IceAgent::new(config, IceRole::Controlling);
 
-        let local_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let local_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
         let local_addr = local_socket.local_addr().unwrap();
 
         let mock = MockStunServer::new().await;
@@ -3378,5 +3702,339 @@ mod tests {
 
         assert!(result);
         assert!(username_rx.await.unwrap_or(false));
+    }
+
+    // ========== Phase 2.5: STUN responder tests ==========
+
+    /// Build a STUN binding request mirroring `perform_connectivity_check`'s
+    /// wire layout, with USERNAME (`<receiver_ufrag>:<sender_ufrag>`) and
+    /// MESSAGE-INTEGRITY keyed on `mi_key`. Returns `(bytes, txn_id)`.
+    fn build_signed_binding_request(
+        receiver_ufrag: &str,
+        sender_ufrag: &str,
+        mi_key: &[u8],
+    ) -> (Vec<u8>, [u8; 12]) {
+        use bytes::{BufMut, BytesMut};
+        use hmac::{Hmac, Mac};
+        use rand::RngCore;
+        use sha1::Sha1;
+        type HmacSha1 = Hmac<Sha1>;
+
+        let mut txn_id = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut txn_id);
+
+        let username = format!("{}:{}", receiver_ufrag, sender_ufrag);
+        let username_bytes = username.as_bytes();
+
+        let mut attrs = BytesMut::new();
+        attrs.put_u16(ATTR_USERNAME);
+        attrs.put_u16(username_bytes.len() as u16);
+        attrs.put_slice(username_bytes);
+        let pad = (4 - (username_bytes.len() % 4)) % 4;
+        for _ in 0..pad {
+            attrs.put_u8(0);
+        }
+
+        let mut msg = BytesMut::with_capacity(20 + attrs.len() + 24);
+        msg.put_u16(BINDING_REQUEST);
+        msg.put_u16(attrs.len() as u16);
+        msg.put_u32(MAGIC_COOKIE);
+        msg.put_slice(&txn_id);
+        msg.put_slice(&attrs);
+
+        // MESSAGE-INTEGRITY using `mi_key`.
+        let current_len = msg.len();
+        let new_len = (current_len - 20 + 24) as u16;
+        msg[2] = (new_len >> 8) as u8;
+        msg[3] = (new_len & 0xff) as u8;
+
+        let mut mac = HmacSha1::new_from_slice(mi_key).expect("hmac key");
+        mac.update(&msg);
+        let integrity = mac.finalize().into_bytes();
+        msg.put_u16(ATTR_MESSAGE_INTEGRITY);
+        msg.put_u16(20);
+        msg.put_slice(&integrity);
+
+        (msg.to_vec(), txn_id)
+    }
+
+    /// Parse a STUN binding response and extract the XOR-MAPPED-ADDRESS,
+    /// returning `(xor_addr, txn_id)`.
+    fn parse_binding_response_xor(bytes: &[u8]) -> Option<(SocketAddr, [u8; 12])> {
+        if bytes.len() < 20 {
+            return None;
+        }
+        if u16::from_be_bytes([bytes[0], bytes[1]]) != BINDING_RESPONSE {
+            return None;
+        }
+        if u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) != MAGIC_COOKIE {
+            return None;
+        }
+        let mut txn_id = [0u8; 12];
+        txn_id.copy_from_slice(&bytes[8..20]);
+        let total_attrs_len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+        let end = 20 + total_attrs_len.min(bytes.len() - 20);
+
+        let mut off = 20;
+        while off + 4 <= end {
+            let attr_type = u16::from_be_bytes([bytes[off], bytes[off + 1]]);
+            let attr_len = u16::from_be_bytes([bytes[off + 2], bytes[off + 3]]) as usize;
+            let val_start = off + 4;
+            let val_end = val_start + attr_len;
+            if val_end > end {
+                return None;
+            }
+            if attr_type == ATTR_XOR_MAPPED_ADDRESS && attr_len >= 8 {
+                let family = bytes[val_start + 1];
+                let port = u16::from_be_bytes([bytes[val_start + 2], bytes[val_start + 3]])
+                    ^ (MAGIC_COOKIE >> 16) as u16;
+                if family == 0x01 {
+                    let cookie = MAGIC_COOKIE.to_be_bytes();
+                    let ip_bytes = [
+                        bytes[val_start + 4] ^ cookie[0],
+                        bytes[val_start + 5] ^ cookie[1],
+                        bytes[val_start + 6] ^ cookie[2],
+                        bytes[val_start + 7] ^ cookie[3],
+                    ];
+                    return Some((
+                        SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::from(ip_bytes)), port),
+                        txn_id,
+                    ));
+                }
+            }
+            let padded = (attr_len + 3) & !3;
+            off = val_start + padded;
+        }
+        None
+    }
+
+    /// Pick the loopback host candidate from a freshly-gathered agent.
+    async fn pick_loopback_host(agent: &IceAgent) -> Candidate {
+        let cands = agent.local_candidates().await;
+        cands
+            .into_iter()
+            .find(|c| c.candidate_type == CandidateType::Host && c.address.ip().is_loopback())
+            .expect("loopback host candidate")
+    }
+
+    #[tokio::test]
+    async fn responder_answers_valid_binding_request() {
+        init_tracing();
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "loctufrag".to_string(),
+            local_pwd: "locpwd1234567890123456".to_string(),
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlled);
+        let _ = agent.gather_candidates().await.expect("gather");
+
+        let host = pick_loopback_host(&agent).await;
+
+        // Side socket pretending to be a peer.
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let peer_addr = peer.local_addr().unwrap();
+
+        let (req, txn_id) =
+            build_signed_binding_request("loctufrag", "peerufrag", b"locpwd1234567890123456");
+        peer.send_to(&req, host.address).await.unwrap();
+
+        let mut buf = vec![0u8; 1500];
+        let (len, from) = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            peer.recv_from(&mut buf),
+        )
+        .await
+        .expect("response did not time out")
+        .expect("recv ok");
+        assert_eq!(from, host.address);
+
+        let (xor_addr, resp_txn) =
+            parse_binding_response_xor(&buf[..len]).expect("XOR-MAPPED-ADDRESS present");
+        assert_eq!(resp_txn, txn_id, "txn id round-trips");
+        assert_eq!(xor_addr, peer_addr, "XOR-MAPPED-ADDRESS reflects peer");
+    }
+
+    #[tokio::test]
+    async fn responder_drops_invalid_username() {
+        init_tracing();
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "loctufrag".to_string(),
+            local_pwd: "locpwd1234567890123456".to_string(),
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlled);
+        let _ = agent.gather_candidates().await.expect("gather");
+
+        let host = pick_loopback_host(&agent).await;
+
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        // USERNAME prefix doesn't match local ufrag → dispatcher drops.
+        let (req, _txn_id) =
+            build_signed_binding_request("wrongone", "peerufrag", b"locpwd1234567890123456");
+        peer.send_to(&req, host.address).await.unwrap();
+
+        let mut buf = vec![0u8; 1500];
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            peer.recv_from(&mut buf),
+        )
+        .await;
+        assert!(result.is_err(), "expected no response, got {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn responder_drops_invalid_message_integrity() {
+        init_tracing();
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "loctufrag".to_string(),
+            local_pwd: "locpwd1234567890123456".to_string(),
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlled);
+        let _ = agent.gather_candidates().await.expect("gather");
+
+        let host = pick_loopback_host(&agent).await;
+
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        // USERNAME ok, MI signed with the wrong key → dispatcher drops.
+        let (req, _txn_id) =
+            build_signed_binding_request("loctufrag", "peerufrag", b"WRONGKEY999999999999");
+        peer.send_to(&req, host.address).await.unwrap();
+
+        let mut buf = vec![0u8; 1500];
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            peer.recv_from(&mut buf),
+        )
+        .await;
+        assert!(result.is_err(), "expected no response, got {:?}", result);
+    }
+
+    #[tokio::test]
+    async fn responder_tasks_aborted_on_close() {
+        init_tracing();
+        let config = IceConfig {
+            stun_servers: vec![],
+            local_ufrag: "loctufrag".to_string(),
+            local_pwd: "locpwd1234567890123456".to_string(),
+            ..Default::default()
+        };
+        let agent = IceAgent::new(config, IceRole::Controlled);
+        let _ = agent.gather_candidates().await.expect("gather");
+        let host = pick_loopback_host(&agent).await;
+        // Keep the cloned Arc alive past close so the OS socket is not
+        // freed; we want to prove the dispatcher task no longer reads.
+        let _kept = agent.socket_for(host.address).await.expect("socket");
+
+        agent.close().await;
+
+        // Send a fresh binding request — no responder running, so no
+        // reply should come back.
+        let peer = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let (req, _txn_id) =
+            build_signed_binding_request("loctufrag", "peerufrag", b"locpwd1234567890123456");
+        peer.send_to(&req, host.address).await.unwrap();
+
+        let mut buf = vec![0u8; 1500];
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            peer.recv_from(&mut buf),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "expected silence after close, got {:?}",
+            result
+        );
+    }
+
+    /// Decode an IPv6 XOR-MAPPED-ADDRESS attribute the way RFC 5389
+    /// §15.2 specifies: family must be 0x02, port XORed with the high
+    /// 16 bits of the magic cookie, and the address XORed with the
+    /// magic cookie followed by the transaction ID.
+    fn parse_binding_response_xor_v6(bytes: &[u8]) -> Option<(std::net::Ipv6Addr, u16, [u8; 12])> {
+        if bytes.len() < 20 {
+            return None;
+        }
+        if u16::from_be_bytes([bytes[0], bytes[1]]) != BINDING_RESPONSE {
+            return None;
+        }
+        if u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) != MAGIC_COOKIE {
+            return None;
+        }
+        let mut txn_id = [0u8; 12];
+        txn_id.copy_from_slice(&bytes[8..20]);
+        let total_attrs_len = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+        let end = 20 + total_attrs_len.min(bytes.len() - 20);
+
+        let mut off = 20;
+        while off + 4 <= end {
+            let attr_type = u16::from_be_bytes([bytes[off], bytes[off + 1]]);
+            let attr_len = u16::from_be_bytes([bytes[off + 2], bytes[off + 3]]) as usize;
+            let val_start = off + 4;
+            let val_end = val_start + attr_len;
+            if val_end > end {
+                return None;
+            }
+            if attr_type == ATTR_XOR_MAPPED_ADDRESS && attr_len == 20 {
+                let family = bytes[val_start + 1];
+                if family != 0x02 {
+                    return None;
+                }
+                let port = u16::from_be_bytes([bytes[val_start + 2], bytes[val_start + 3]])
+                    ^ (MAGIC_COOKIE >> 16) as u16;
+                let cookie = MAGIC_COOKIE.to_be_bytes();
+                let mut ip = [0u8; 16];
+                for i in 0..4 {
+                    ip[i] = bytes[val_start + 4 + i] ^ cookie[i];
+                }
+                for i in 0..12 {
+                    ip[4 + i] = bytes[val_start + 8 + i] ^ txn_id[i];
+                }
+                return Some((std::net::Ipv6Addr::from(ip), port, txn_id));
+            }
+            let padded = (attr_len + 3) & !3;
+            off = val_start + padded;
+        }
+        None
+    }
+
+    #[test]
+    fn build_binding_response_emits_ipv6_xor_mapped_address() {
+        // Drive `build_binding_response` directly with an IPv6 source
+        // address and decode the XOR-MAPPED-ADDRESS to prove the
+        // RFC 5389 §15.2 layout round-trips.
+        let local_ufrag = "loctufrag";
+        let local_pwd = b"locpwd1234567890123456";
+        let (req, txn_id) = build_signed_binding_request(local_ufrag, "peerufrag", local_pwd);
+
+        let from = SocketAddr::new(
+            IpAddr::V6(std::net::Ipv6Addr::new(
+                0x2001, 0xdb8, 0, 0, 0, 0, 0, 0xabcd,
+            )),
+            54321,
+        );
+        let resp = build_binding_response(
+            &req,
+            txn_id,
+            from,
+            local_ufrag,
+            std::str::from_utf8(local_pwd).unwrap(),
+        )
+        .expect("v6 response built");
+
+        let (ip, port, resp_txn) =
+            parse_binding_response_xor_v6(&resp).expect("v6 XOR-MAPPED-ADDRESS round-trips");
+        assert_eq!(resp_txn, txn_id);
+        assert_eq!(port, 54321);
+        assert_eq!(
+            ip,
+            std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0xabcd)
+        );
     }
 }
