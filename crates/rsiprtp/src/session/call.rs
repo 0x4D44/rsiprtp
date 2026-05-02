@@ -623,6 +623,12 @@ impl Call {
     /// `MediaSession::for_negotiated`. Caller should surface the error
     /// rather than swallowing — reject the call if no media session can
     /// be built.
+    ///
+    /// Under ICE, the `MediaSession::remote_addr` (derived here from
+    /// the SDP `c=` line) is unused: the application sends RTP to the
+    /// `SocketAddr` returned by `IceSession::peer_addr()` instead, since
+    /// that is the validated peer rather than whatever the SDP
+    /// advertised.
     pub fn set_negotiated_media(
         &mut self,
         media: NegotiatedMedia,
