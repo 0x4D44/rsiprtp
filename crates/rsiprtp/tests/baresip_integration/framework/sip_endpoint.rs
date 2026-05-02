@@ -566,6 +566,22 @@ impl TestEndpoint {
         Ok(())
     }
 
+    /// Receive a raw SIP datagram on the SIP socket.
+    ///
+    /// Used by tests that exchange messages outside the canned INVITE/BYE
+    /// flows (e.g. REGISTER, OPTIONS).
+    pub async fn recv_raw(&self, timeout_duration: Duration) -> Result<(Vec<u8>, SocketAddr)> {
+        let mut buf = vec![0u8; 65535];
+        match timeout(timeout_duration, self.sip_socket.recv_from(&mut buf)).await {
+            Ok(Ok((len, source))) => {
+                buf.truncate(len);
+                Ok((buf, source))
+            }
+            Ok(Err(e)) => Err(EndpointError::Io(e)),
+            Err(_) => Err(EndpointError::Timeout),
+        }
+    }
+
     // Helper methods for parsing SIP messages
 
     fn extract_header(&self, msg: &str, name: &str) -> Option<String> {

@@ -81,6 +81,10 @@ rcgen = "0.13"
 rsa = "0.9"
 p256 = "0.13"
 serde_json.workspace = true
+# Used by the baresip_integration registration tests to verify digest
+# auth round-trips against rsiprtp's own helper.
+md5.workspace = true
+hex.workspace = true
 
 [[example]]
 name = "basic_call"
