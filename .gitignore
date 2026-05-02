@@ -40,5 +40,8 @@ desktop.ini
 # Logs
 *.log
 
-# full_test runner output (HTML reports under crates/rsiprtp/tests/results/)
+# full_test runner output under crates/rsiprtp/tests/results/
+# (HTML reports + run logs + transient start markers — keep .gitkeep)
 crates/rsiprtp/tests/results/*.html
+crates/rsiprtp/tests/results/*.log
+crates/rsiprtp/tests/results/*.txt
