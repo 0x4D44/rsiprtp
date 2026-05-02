@@ -16,6 +16,79 @@ fn cover_none_case() {
 #[inline(always)]
 fn cover_none_case() {}
 
+/// Look up the value of a non-standard header (carried as `Header::Other`)
+/// by name, case-insensitively. Returns the trimmed value if present.
+fn find_other_header(headers: &rsip::Headers, name: &str) -> Option<String> {
+    for header in headers.iter() {
+        if let rsip::Header::Other(key, value) = header {
+            if key.eq_ignore_ascii_case(name) {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Find and parse `Require` header(s). Handles both the native `rsip` form
+/// (`rsip::Header::Require`) and the generic `Header::Other` form.
+///
+/// Per RFC 3261 §7.3.1, multiple `Require` lines are equivalent to a single
+/// comma-separated value, so we concat option-tags from every matching
+/// header line in wire order. Duplicates are preserved — the consumer
+/// decides whether to deduplicate.
+fn find_require(headers: &rsip::Headers) -> Option<crate::sip::headers::Require> {
+    let mut tags: Vec<String> = Vec::new();
+    for header in headers.iter() {
+        match header {
+            rsip::Header::Require(r) => {
+                if let Ok(parsed) = crate::sip::headers::Require::parse(r.value()) {
+                    tags.extend(parsed.0);
+                }
+            }
+            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Require") => {
+                if let Ok(parsed) = crate::sip::headers::Require::parse(value) {
+                    tags.extend(parsed.0);
+                }
+            }
+            _ => {}
+        }
+    }
+    if tags.is_empty() {
+        None
+    } else {
+        Some(crate::sip::headers::Require(tags))
+    }
+}
+
+/// Find and parse `Supported` header(s).
+///
+/// Per RFC 3261 §7.3.1, multiple `Supported` lines are equivalent to a
+/// single comma-separated value; tags from every matching line are
+/// concatenated in wire order. Duplicates are preserved.
+fn find_supported(headers: &rsip::Headers) -> Option<crate::sip::headers::Supported> {
+    let mut tags: Vec<String> = Vec::new();
+    for header in headers.iter() {
+        match header {
+            rsip::Header::Supported(s) => {
+                if let Ok(parsed) = crate::sip::headers::Supported::parse(s.value()) {
+                    tags.extend(parsed.0);
+                }
+            }
+            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Supported") => {
+                if let Ok(parsed) = crate::sip::headers::Supported::parse(value) {
+                    tags.extend(parsed.0);
+                }
+            }
+            _ => {}
+        }
+    }
+    if tags.is_empty() {
+        None
+    } else {
+        Some(crate::sip::headers::Supported(tags))
+    }
+}
+
 /// SIP message (either request or response).
 #[derive(Debug, Clone)]
 pub enum SipMessage {
@@ -245,6 +318,40 @@ impl SipRequest {
         vias
     }
 
+    /// Get the `Require` header (RFC 3261 §20.32) if present.
+    pub fn require(&self) -> Option<crate::sip::headers::Require> {
+        find_require(&self.inner.headers)
+    }
+
+    /// Get the `Supported` header (RFC 3261 §20.37) if present.
+    pub fn supported(&self) -> Option<crate::sip::headers::Supported> {
+        find_supported(&self.inner.headers)
+    }
+
+    /// Get the `Session-Expires` header (RFC 4028 §4) if present.
+    ///
+    /// Per RFC 4028 §4 ABNF, the long form `Session-Expires` and compact
+    /// form `x` are equivalent; we accept either on read.
+    pub fn session_expires(&self) -> Option<crate::sip::headers::SessionExpires> {
+        find_other_header(&self.inner.headers, "Session-Expires")
+            .or_else(|| find_other_header(&self.inner.headers, "x"))
+            .and_then(|v| crate::sip::headers::SessionExpires::parse(&v).ok())
+    }
+
+    /// Get the `Min-SE` header (RFC 4028 §5) if present.
+    pub fn min_se(&self) -> Option<crate::sip::headers::MinSe> {
+        find_other_header(&self.inner.headers, "Min-SE")
+            .and_then(|v| crate::sip::headers::MinSe::parse(&v).ok())
+    }
+
+    /// Get the `RAck` header (RFC 3262 §7.2) if present.
+    ///
+    /// Only meaningful on PRACK requests.
+    pub fn rack(&self) -> Option<crate::sip::headers::RAck> {
+        find_other_header(&self.inner.headers, "RAck")
+            .and_then(|v| crate::sip::headers::RAck::parse(&v).ok())
+    }
+
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
         Bytes::from(self.inner.to_string())
@@ -441,6 +548,40 @@ impl SipResponse {
         None
     }
 
+    /// Get the `Require` header (RFC 3261 §20.32) if present.
+    pub fn require(&self) -> Option<crate::sip::headers::Require> {
+        find_require(&self.inner.headers)
+    }
+
+    /// Get the `Supported` header (RFC 3261 §20.37) if present.
+    pub fn supported(&self) -> Option<crate::sip::headers::Supported> {
+        find_supported(&self.inner.headers)
+    }
+
+    /// Get the `Session-Expires` header (RFC 4028 §4) if present.
+    ///
+    /// Per RFC 4028 §4 ABNF, the long form `Session-Expires` and compact
+    /// form `x` are equivalent; we accept either on read.
+    pub fn session_expires(&self) -> Option<crate::sip::headers::SessionExpires> {
+        find_other_header(&self.inner.headers, "Session-Expires")
+            .or_else(|| find_other_header(&self.inner.headers, "x"))
+            .and_then(|v| crate::sip::headers::SessionExpires::parse(&v).ok())
+    }
+
+    /// Get the `Min-SE` header (RFC 4028 §5) if present.
+    pub fn min_se(&self) -> Option<crate::sip::headers::MinSe> {
+        find_other_header(&self.inner.headers, "Min-SE")
+            .and_then(|v| crate::sip::headers::MinSe::parse(&v).ok())
+    }
+
+    /// Get the `RSeq` header (RFC 3262 §7.1) if present.
+    ///
+    /// Only meaningful on reliable provisional responses.
+    pub fn rseq(&self) -> Option<crate::sip::headers::RSeq> {
+        find_other_header(&self.inner.headers, "RSeq")
+            .and_then(|v| crate::sip::headers::RSeq::parse(&v).ok())
+    }
+
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
         Bytes::from(self.inner.to_string())
@@ -591,6 +732,11 @@ pub struct SipRequestBuilder {
     authorization: Option<String>,
     proxy_authorization: Option<String>,
     expires: Option<u32>,
+    require: Option<crate::sip::headers::Require>,
+    supported: Option<crate::sip::headers::Supported>,
+    session_expires: Option<crate::sip::headers::SessionExpires>,
+    min_se: Option<crate::sip::headers::MinSe>,
+    rack: Option<crate::sip::headers::RAck>,
 }
 
 impl SipRequestBuilder {
@@ -727,6 +873,69 @@ impl SipRequestBuilder {
         self
     }
 
+    /// Set the `Require` header (RFC 3261 §20.32) to the given option-tags.
+    ///
+    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
+    /// so case is normalized on the receive side only. Empty slice clears
+    /// the header. Calling again replaces the previous value.
+    pub fn require(mut self, tags: &[&str]) -> Self {
+        if tags.is_empty() {
+            self.require = None;
+        } else {
+            self.require = Some(crate::sip::headers::Require(
+                tags.iter().map(|t| t.to_string()).collect(),
+            ));
+        }
+        self
+    }
+
+    /// Set the `Supported` header (RFC 3261 §20.37).
+    ///
+    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
+    /// so case is normalized on the receive side only. Empty slice clears
+    /// the header. Calling again replaces the previous value.
+    pub fn supported(mut self, tags: &[&str]) -> Self {
+        if tags.is_empty() {
+            self.supported = None;
+        } else {
+            self.supported = Some(crate::sip::headers::Supported(
+                tags.iter().map(|t| t.to_string()).collect(),
+            ));
+        }
+        self
+    }
+
+    /// Set the `Session-Expires` header (RFC 4028 §4).
+    ///
+    /// Calling again replaces the previous value.
+    pub fn session_expires(
+        mut self,
+        secs: u32,
+        refresher: Option<crate::sip::headers::Refresher>,
+    ) -> Self {
+        self.session_expires = Some(crate::sip::headers::SessionExpires {
+            delta_seconds: secs,
+            refresher,
+        });
+        self
+    }
+
+    /// Set the `Min-SE` header (RFC 4028 §5).
+    ///
+    /// Calling again replaces the previous value.
+    pub fn min_se(mut self, secs: u32) -> Self {
+        self.min_se = Some(crate::sip::headers::MinSe(secs));
+        self
+    }
+
+    /// Set the `RAck` header (RFC 3262 §7.2). Used on PRACK requests.
+    ///
+    /// Calling again replaces the previous value.
+    pub fn rack(mut self, rseq: u32, cseq: u32, method: Method) -> Self {
+        self.rack = Some(crate::sip::headers::RAck { rseq, cseq, method });
+        self
+    }
+
     /// Build the request.
     pub fn build(self) -> Result<SipRequest> {
         // Check for URI parsing errors first (more informative than "Missing URI")
@@ -837,6 +1046,44 @@ impl SipRequestBuilder {
             )));
         }
 
+        // Require header (RFC 3261 §20.32)
+        if let Some(require) = self.require {
+            headers.push(rsip::Header::Require(rsip::headers::Require::new(
+                require.to_header_value(),
+            )));
+        }
+
+        // Supported header (RFC 3261 §20.37)
+        if let Some(supported) = self.supported {
+            headers.push(rsip::Header::Supported(rsip::headers::Supported::new(
+                supported.to_header_value(),
+            )));
+        }
+
+        // Session-Expires header (RFC 4028 §4)
+        if let Some(se) = self.session_expires {
+            headers.push(rsip::Header::Other(
+                "Session-Expires".to_string(),
+                se.to_header_value(),
+            ));
+        }
+
+        // Min-SE header (RFC 4028 §5)
+        if let Some(m) = self.min_se {
+            headers.push(rsip::Header::Other(
+                "Min-SE".to_string(),
+                m.to_header_value(),
+            ));
+        }
+
+        // RAck header (RFC 3262 §7.2)
+        if let Some(rack) = self.rack {
+            headers.push(rsip::Header::Other(
+                "RAck".to_string(),
+                rack.to_header_value(),
+            ));
+        }
+
         // Content-Type and Content-Length
         let body = self.body.unwrap_or_default();
         if !body.is_empty() {
@@ -877,6 +1124,11 @@ pub struct SipResponseBuilder {
     contact_uri: Option<rsip::Uri>,
     body: Option<Vec<u8>>,
     content_type: Option<String>,
+    require: Option<crate::sip::headers::Require>,
+    supported: Option<crate::sip::headers::Supported>,
+    session_expires: Option<crate::sip::headers::SessionExpires>,
+    min_se: Option<crate::sip::headers::MinSe>,
+    rseq: Option<crate::sip::headers::RSeq>,
 }
 
 impl SipResponseBuilder {
@@ -971,6 +1223,69 @@ impl SipResponseBuilder {
         self
     }
 
+    /// Set the `Require` header (RFC 3261 §20.32).
+    ///
+    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
+    /// so case is normalized on the receive side only. Empty slice clears
+    /// the header. Calling again replaces the previous value.
+    pub fn require(mut self, tags: &[&str]) -> Self {
+        if tags.is_empty() {
+            self.require = None;
+        } else {
+            self.require = Some(crate::sip::headers::Require(
+                tags.iter().map(|t| t.to_string()).collect(),
+            ));
+        }
+        self
+    }
+
+    /// Set the `Supported` header (RFC 3261 §20.37).
+    ///
+    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
+    /// so case is normalized on the receive side only. Empty slice clears
+    /// the header. Calling again replaces the previous value.
+    pub fn supported(mut self, tags: &[&str]) -> Self {
+        if tags.is_empty() {
+            self.supported = None;
+        } else {
+            self.supported = Some(crate::sip::headers::Supported(
+                tags.iter().map(|t| t.to_string()).collect(),
+            ));
+        }
+        self
+    }
+
+    /// Set the `Session-Expires` header (RFC 4028 §4).
+    ///
+    /// Calling again replaces the previous value.
+    pub fn session_expires(
+        mut self,
+        secs: u32,
+        refresher: Option<crate::sip::headers::Refresher>,
+    ) -> Self {
+        self.session_expires = Some(crate::sip::headers::SessionExpires {
+            delta_seconds: secs,
+            refresher,
+        });
+        self
+    }
+
+    /// Set the `Min-SE` header (RFC 4028 §5).
+    ///
+    /// Calling again replaces the previous value.
+    pub fn min_se(mut self, secs: u32) -> Self {
+        self.min_se = Some(crate::sip::headers::MinSe(secs));
+        self
+    }
+
+    /// Set the `RSeq` header (RFC 3262 §7.1). Used on reliable provisionals.
+    ///
+    /// Calling again replaces the previous value.
+    pub fn rseq(mut self, rseq: u32) -> Self {
+        self.rseq = Some(crate::sip::headers::RSeq(rseq));
+        self
+    }
+
     /// Build the response.
     pub fn build(self) -> Result<SipResponse> {
         let status_code = self
@@ -1010,6 +1325,44 @@ impl SipResponseBuilder {
             headers.push(rsip::Header::Contact(rsip::headers::Contact::new(
                 contact_str,
             )));
+        }
+
+        // Require header (RFC 3261 §20.32)
+        if let Some(require) = self.require {
+            headers.push(rsip::Header::Require(rsip::headers::Require::new(
+                require.to_header_value(),
+            )));
+        }
+
+        // Supported header (RFC 3261 §20.37)
+        if let Some(supported) = self.supported {
+            headers.push(rsip::Header::Supported(rsip::headers::Supported::new(
+                supported.to_header_value(),
+            )));
+        }
+
+        // Session-Expires header (RFC 4028 §4)
+        if let Some(se) = self.session_expires {
+            headers.push(rsip::Header::Other(
+                "Session-Expires".to_string(),
+                se.to_header_value(),
+            ));
+        }
+
+        // Min-SE header (RFC 4028 §5)
+        if let Some(m) = self.min_se {
+            headers.push(rsip::Header::Other(
+                "Min-SE".to_string(),
+                m.to_header_value(),
+            ));
+        }
+
+        // RSeq header (RFC 3262 §7.1)
+        if let Some(rseq) = self.rseq {
+            headers.push(rsip::Header::Other(
+                "RSeq".to_string(),
+                rseq.to_header_value(),
+            ));
         }
 
         // Content-Type and Content-Length
@@ -3093,5 +3446,482 @@ Content-Length: 0\r\n\
         let msg = SipMessage::parse(ack).unwrap();
         let req = msg.as_request().unwrap();
         assert_eq!(req.method(), Method::Ack);
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 1 header accessors / builders (Require, Supported,
+    // Session-Expires, Min-SE, RSeq, RAck).
+    // -------------------------------------------------------------------
+
+    use crate::sip::headers::{MinSe, RSeq, Refresher};
+
+    /// Build a minimal valid INVITE with the listed extra headers and
+    /// round-trip it through wire-format to exercise the parser path on
+    /// the reader side. Returns the parsed `SipRequest`.
+    fn invite_with_headers(extra_headers: &str) -> SipRequest {
+        let msg = format!(
+            "INVITE sip:bob@biloxi.com SIP/2.0\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+Max-Forwards: 70\r\n\
+To: Bob <sip:bob@biloxi.com>\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+{}\
+Content-Length: 0\r\n\
+\r\n",
+            extra_headers
+        );
+        let parsed = SipMessage::parse(msg.as_bytes()).unwrap();
+        match parsed {
+            SipMessage::Request(r) => r,
+            _ => panic!("expected request"),
+        }
+    }
+
+    fn response_with_headers(extra_headers: &str) -> SipResponse {
+        let msg = format!(
+            "SIP/2.0 200 OK\r\n\
+Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
+To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
+From: Alice <sip:alice@atlanta.com>;tag=1928301774\r\n\
+Call-ID: a84b4c76e66710@pc33.atlanta.com\r\n\
+CSeq: 314159 INVITE\r\n\
+{}\
+Content-Length: 0\r\n\
+\r\n",
+            extra_headers
+        );
+        let parsed = SipMessage::parse(msg.as_bytes()).unwrap();
+        match parsed {
+            SipMessage::Response(r) => r,
+            _ => panic!("expected response"),
+        }
+    }
+
+    #[test]
+    fn test_request_require_accessor() {
+        let req = invite_with_headers("Require: 100rel\r\n");
+        let r = req.require().expect("require should be present");
+        assert_eq!(r.0, vec!["100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_request_supported_accessor() {
+        let req = invite_with_headers("Supported: timer, 100rel\r\n");
+        let s = req.supported().expect("supported should be present");
+        assert_eq!(s.0, vec!["timer".to_string(), "100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_request_session_expires_accessor() {
+        let req = invite_with_headers("Session-Expires: 1800;refresher=uac\r\n");
+        let se = req.session_expires().expect("session-expires");
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uac));
+    }
+
+    #[test]
+    fn test_request_min_se_accessor() {
+        let req = invite_with_headers("Min-SE: 90\r\n");
+        assert_eq!(req.min_se(), Some(MinSe(90)));
+    }
+
+    #[test]
+    fn test_request_rack_accessor() {
+        let req = invite_with_headers("RAck: 1 314159 INVITE\r\n");
+        let rack = req.rack().expect("rack");
+        assert_eq!(rack.rseq, 1);
+        assert_eq!(rack.cseq, 314159);
+        assert_eq!(rack.method, Method::Invite);
+    }
+
+    #[test]
+    fn test_request_accessors_absent_returns_none() {
+        let req = invite_with_headers("");
+        assert!(req.require().is_none());
+        assert!(req.supported().is_none());
+        assert!(req.session_expires().is_none());
+        assert!(req.min_se().is_none());
+        assert!(req.rack().is_none());
+    }
+
+    #[test]
+    fn test_request_session_expires_malformed_is_none() {
+        let req = invite_with_headers("Session-Expires: notanumber\r\n");
+        assert!(req.session_expires().is_none());
+    }
+
+    #[test]
+    fn test_request_min_se_malformed_is_none() {
+        let req = invite_with_headers("Min-SE: bogus\r\n");
+        assert!(req.min_se().is_none());
+    }
+
+    #[test]
+    fn test_request_rack_malformed_is_none() {
+        let req = invite_with_headers("RAck: 1 INVITE\r\n");
+        assert!(req.rack().is_none());
+    }
+
+    #[test]
+    fn test_response_require_accessor() {
+        let resp = response_with_headers("Require: 100rel\r\n");
+        let r = resp.require().expect("require");
+        assert_eq!(r.0, vec!["100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_response_supported_accessor() {
+        let resp = response_with_headers("Supported: timer\r\n");
+        let s = resp.supported().expect("supported");
+        assert_eq!(s.0, vec!["timer".to_string()]);
+    }
+
+    #[test]
+    fn test_response_session_expires_accessor() {
+        let resp = response_with_headers("Session-Expires: 600;refresher=uas\r\n");
+        let se = resp.session_expires().expect("session-expires");
+        assert_eq!(se.delta_seconds, 600);
+        assert_eq!(se.refresher, Some(Refresher::Uas));
+    }
+
+    #[test]
+    fn test_response_min_se_accessor() {
+        let resp = response_with_headers("Min-SE: 1800\r\n");
+        assert_eq!(resp.min_se(), Some(MinSe(1800)));
+    }
+
+    #[test]
+    fn test_response_rseq_accessor() {
+        let resp = response_with_headers("RSeq: 42\r\n");
+        assert_eq!(resp.rseq(), Some(RSeq(42)));
+    }
+
+    #[test]
+    fn test_response_accessors_absent_returns_none() {
+        let resp = response_with_headers("");
+        assert!(resp.require().is_none());
+        assert!(resp.supported().is_none());
+        assert!(resp.session_expires().is_none());
+        assert!(resp.min_se().is_none());
+        assert!(resp.rseq().is_none());
+    }
+
+    #[test]
+    fn test_response_rseq_malformed_is_none() {
+        let resp = response_with_headers("RSeq: NaN\r\n");
+        assert!(resp.rseq().is_none());
+    }
+
+    #[test]
+    fn test_request_builder_emits_require() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(1)
+            .require(&["100rel"])
+            .build()
+            .unwrap();
+
+        // Round-trip through wire format and read back.
+        let bytes = req.to_bytes();
+        let reparsed = SipMessage::parse(&bytes).unwrap();
+        let req2 = reparsed.as_request().unwrap();
+        assert_eq!(req2.require().unwrap().0, vec!["100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_request_builder_emits_supported_session_expires_min_se() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(1)
+            .supported(&["timer", "100rel"])
+            .session_expires(1800, Some(Refresher::Uac))
+            .min_se(90)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        let wire = String::from_utf8_lossy(&bytes);
+        assert!(wire.contains("Supported: timer, 100rel"));
+        assert!(wire.contains("Session-Expires: 1800;refresher=uac"));
+        assert!(wire.contains("Min-SE: 90"));
+
+        let reparsed = SipMessage::parse(&bytes).unwrap();
+        let req2 = reparsed.as_request().unwrap();
+        let sup = req2.supported().unwrap();
+        assert_eq!(sup.0, vec!["timer".to_string(), "100rel".to_string()]);
+        let se = req2.session_expires().unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uac));
+        assert_eq!(req2.min_se().unwrap(), MinSe(90));
+    }
+
+    #[test]
+    fn test_request_builder_emits_rack() {
+        let req = SipRequest::builder()
+            .method(Method::Prack)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(2)
+            .rack(1, 314159, Method::Invite)
+            .build()
+            .unwrap();
+
+        let bytes = req.to_bytes();
+        let wire = String::from_utf8_lossy(&bytes);
+        assert!(wire.contains("RAck: 1 314159 INVITE"));
+
+        let reparsed = SipMessage::parse(&bytes).unwrap();
+        let req2 = reparsed.as_request().unwrap();
+        let rack = req2.rack().unwrap();
+        assert_eq!(rack.rseq, 1);
+        assert_eq!(rack.cseq, 314159);
+        assert_eq!(rack.method, Method::Invite);
+    }
+
+    #[test]
+    fn test_request_builder_empty_tag_lists_clear_headers() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(1)
+            .require(&["100rel"])
+            .require(&[])
+            .supported(&["timer"])
+            .supported(&[])
+            .build()
+            .unwrap();
+        assert!(req.require().is_none());
+        assert!(req.supported().is_none());
+    }
+
+    #[test]
+    fn test_response_builder_round_trip() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let resp = SipResponse::builder()
+            .status(180, "Ringing")
+            .from_request(&req)
+            .require(&["100rel"])
+            .supported(&["timer"])
+            .session_expires(1800, Some(Refresher::Uas))
+            .min_se(90)
+            .rseq(1)
+            .build()
+            .unwrap();
+
+        let bytes = resp.to_bytes();
+        let wire = String::from_utf8_lossy(&bytes);
+        assert!(wire.contains("Require: 100rel"));
+        assert!(wire.contains("Supported: timer"));
+        assert!(wire.contains("Session-Expires: 1800;refresher=uas"));
+        assert!(wire.contains("Min-SE: 90"));
+        assert!(wire.contains("RSeq: 1"));
+
+        let reparsed = SipMessage::parse(&bytes).unwrap();
+        let resp2 = reparsed.as_response().unwrap();
+        assert_eq!(resp2.require().unwrap().0, vec!["100rel".to_string()]);
+        assert_eq!(resp2.supported().unwrap().0, vec!["timer".to_string()]);
+        let se = resp2.session_expires().unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uas));
+        assert_eq!(resp2.min_se().unwrap(), MinSe(90));
+        assert_eq!(resp2.rseq().unwrap(), RSeq(1));
+    }
+
+    #[test]
+    fn test_response_builder_session_expires_no_refresher() {
+        let req = SipRequest::builder()
+            .method(Method::Invite)
+            .uri("sip:bob@biloxi.com")
+            .via("pc33.atlanta.com", 5060, "UDP", "z9hG4bKxyz")
+            .from("sip:alice@atlanta.com", "1928301774")
+            .to("sip:bob@biloxi.com")
+            .call_id("a84b4c76e66710@pc33.atlanta.com")
+            .cseq(1)
+            .build()
+            .unwrap();
+
+        let resp = SipResponse::builder()
+            .status(200, "OK")
+            .from_request(&req)
+            .session_expires(600, None)
+            .build()
+            .unwrap();
+
+        let bytes = resp.to_bytes();
+        let wire = String::from_utf8_lossy(&bytes);
+        assert!(wire.contains("Session-Expires: 600\r\n"));
+
+        let reparsed = SipMessage::parse(&bytes).unwrap();
+        let resp2 = reparsed.as_response().unwrap();
+        let se = resp2.session_expires().unwrap();
+        assert_eq!(se.delta_seconds, 600);
+        assert!(se.refresher.is_none());
+    }
+
+    #[test]
+    fn test_request_require_via_header_other() {
+        // rsip's parser produces Header::Require for native, but we should
+        // also tolerate Header::Other for case-insensitive name matches.
+        // Construct a request manually with Header::Other and verify the
+        // accessor still reads it.
+        let mut headers = rsip::Headers::default();
+        headers.push(rsip::Header::Via(rsip::headers::Via::new(
+            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
+        )));
+        headers.push(rsip::Header::From(rsip::headers::From::new(
+            "<sip:alice@atlanta.com>;tag=1",
+        )));
+        headers.push(rsip::Header::To(rsip::headers::To::new(
+            "<sip:bob@biloxi.com>",
+        )));
+        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
+        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
+        headers.push(rsip::Header::Other(
+            "require".to_string(),
+            "100rel".to_string(),
+        ));
+        headers.push(rsip::Header::ContentLength(
+            rsip::headers::ContentLength::new("0"),
+        ));
+        let req = SipRequest {
+            inner: rsip::Request {
+                method: rsip::Method::Invite,
+                uri: rsip::Uri::try_from("sip:bob@biloxi.com").unwrap(),
+                version: rsip::Version::V2,
+                headers,
+                body: vec![],
+            },
+        };
+        let r = req.require().expect("should still find via Header::Other");
+        assert_eq!(r.0, vec!["100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_request_require_merges_multiple_lines() {
+        // Per RFC 3261 §7.3.1, multiple Require lines are equivalent to a
+        // single comma-separated value. The accessor must concat option-tags
+        // from every matching line, in wire order.
+        let req = invite_with_headers("Require: 100rel\r\nRequire: timer\r\n");
+        let r = req.require().expect("require should be present");
+        assert_eq!(r.0, vec!["100rel".to_string(), "timer".to_string()]);
+    }
+
+    #[test]
+    fn test_request_supported_merges_multiple_lines() {
+        let req = invite_with_headers("Supported: timer\r\nSupported: 100rel\r\n");
+        let s = req.supported().expect("supported should be present");
+        assert_eq!(s.0, vec!["timer".to_string(), "100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_request_session_expires_compact_form_x() {
+        // RFC 4028 §4 ABNF defines `x` as the compact form of
+        // `Session-Expires`. Some Cisco/Sonus stacks emit this. Accessor
+        // must fall back to `x` when `Session-Expires` is absent.
+        let mut headers = rsip::Headers::default();
+        headers.push(rsip::Header::Via(rsip::headers::Via::new(
+            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
+        )));
+        headers.push(rsip::Header::From(rsip::headers::From::new(
+            "<sip:alice@atlanta.com>;tag=1",
+        )));
+        headers.push(rsip::Header::To(rsip::headers::To::new(
+            "<sip:bob@biloxi.com>",
+        )));
+        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
+        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
+        headers.push(rsip::Header::Other(
+            "x".to_string(),
+            "1800;refresher=uac".to_string(),
+        ));
+        headers.push(rsip::Header::ContentLength(
+            rsip::headers::ContentLength::new("0"),
+        ));
+        let req = SipRequest {
+            inner: rsip::Request {
+                method: rsip::Method::Invite,
+                uri: rsip::Uri::try_from("sip:bob@biloxi.com").unwrap(),
+                version: rsip::Version::V2,
+                headers,
+                body: vec![],
+            },
+        };
+        let se = req
+            .session_expires()
+            .expect("compact form `x` should be recognized");
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(
+            se.refresher,
+            Some(crate::sip::headers::Refresher::Uac)
+        );
+    }
+
+    #[test]
+    fn test_response_session_expires_compact_form_x() {
+        // Mirror of the request-side test for SipResponse.
+        let mut headers = rsip::Headers::default();
+        headers.push(rsip::Header::Via(rsip::headers::Via::new(
+            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
+        )));
+        headers.push(rsip::Header::From(rsip::headers::From::new(
+            "<sip:alice@atlanta.com>;tag=1",
+        )));
+        headers.push(rsip::Header::To(rsip::headers::To::new(
+            "<sip:bob@biloxi.com>;tag=2",
+        )));
+        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
+        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
+        headers.push(rsip::Header::Other(
+            "x".to_string(),
+            "600;refresher=uas".to_string(),
+        ));
+        headers.push(rsip::Header::ContentLength(
+            rsip::headers::ContentLength::new("0"),
+        ));
+        let resp = SipResponse {
+            inner: rsip::Response {
+                status_code: rsip::StatusCode::OK,
+                version: rsip::Version::V2,
+                headers,
+                body: vec![],
+            },
+        };
+        let se = resp
+            .session_expires()
+            .expect("compact form `x` should be recognized");
+        assert_eq!(se.delta_seconds, 600);
+        assert_eq!(
+            se.refresher,
+            Some(crate::sip::headers::Refresher::Uas)
+        );
     }
 }

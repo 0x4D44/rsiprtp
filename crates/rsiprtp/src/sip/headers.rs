@@ -4,6 +4,7 @@
 //! making it easier to extract and manipulate header values.
 
 use crate::core::SipError;
+use crate::sip::message::Method;
 use crate::sip::uri::SipUri;
 use std::fmt;
 
@@ -451,6 +452,299 @@ impl RouteSet {
     /// Add a route to the set.
     pub fn push(&mut self, route: Route) {
         self.routes.push(route);
+    }
+}
+
+/// Refresher role for `Session-Expires` (RFC 4028 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refresher {
+    /// The UAC will refresh the session before each interval expires.
+    Uac,
+    /// The UAS will refresh the session before each interval expires.
+    Uas,
+}
+
+impl fmt::Display for Refresher {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Refresher::Uac => write!(f, "uac"),
+            Refresher::Uas => write!(f, "uas"),
+        }
+    }
+}
+
+impl Refresher {
+    /// Parse a refresher token (case-insensitive).
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "uac" => Ok(Refresher::Uac),
+            "uas" => Ok(Refresher::Uas),
+            other => Err(SipError::Parse(format!(
+                "Invalid refresher value '{}'",
+                other
+            ))),
+        }
+    }
+}
+
+/// Typed wrapper for `Require` header (RFC 3261 §20.32).
+///
+/// Comma-separated list of option-tags. Empty lists are rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Require(pub Vec<String>);
+
+impl Require {
+    /// Parse a `Require` header value.
+    ///
+    /// Accepts extra whitespace and lowercases option-tags. Rejects empty
+    /// lists (a `Require` header with no tags is malformed).
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let tags = parse_option_tags(value)?;
+        Ok(Require(tags))
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        self.0.join(", ")
+    }
+}
+
+impl fmt::Display for Require {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for `Supported` header (RFC 3261 §20.37).
+///
+/// Comma-separated list of option-tags. Empty lists are rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Supported(pub Vec<String>);
+
+impl Supported {
+    /// Parse a `Supported` header value.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let tags = parse_option_tags(value)?;
+        Ok(Supported(tags))
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        self.0.join(", ")
+    }
+}
+
+impl fmt::Display for Supported {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Shared parser for comma-separated option-tag lists (Require/Supported).
+fn parse_option_tags(value: &str) -> Result<Vec<String>, SipError> {
+    let tags: Vec<String> = value
+        .split(',')
+        .map(|t| t.trim().to_ascii_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    if tags.is_empty() {
+        return Err(SipError::Parse(
+            "Option-tag list must not be empty".to_string(),
+        ));
+    }
+    Ok(tags)
+}
+
+/// Typed wrapper for `Session-Expires` header (RFC 4028 §4).
+///
+/// Format: `Session-Expires: <delta-seconds>[;refresher=uac|uas]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionExpires {
+    /// Session refresh interval in seconds.
+    pub delta_seconds: u32,
+    /// Which side refreshes; absent if not specified by the offerer.
+    pub refresher: Option<Refresher>,
+}
+
+impl SessionExpires {
+    /// Parse a `Session-Expires` header value.
+    ///
+    /// Accepts extra whitespace and ignores parameters other than
+    /// `refresher`. If `refresher` is absent the field is left `None`.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let value = value.trim();
+        let (head, params) = match value.find(';') {
+            Some(idx) => (&value[..idx], Some(&value[idx + 1..])),
+            None => (value, None),
+        };
+
+        let delta_seconds: u32 = head.trim().parse().map_err(|_| {
+            SipError::Parse(format!(
+                "Invalid Session-Expires delta-seconds '{}'",
+                head.trim()
+            ))
+        })?;
+
+        let mut refresher = None;
+        if let Some(params_str) = params {
+            for param in params_str.split(';') {
+                let param = param.trim();
+                if param.is_empty() {
+                    continue;
+                }
+                // RFC 3261 ABNF: EQUAL = SWS "=" SWS — whitespace allowed
+                // around `=`. Split once, trim both sides.
+                if let Some((key, value)) = param.split_once('=') {
+                    if key.trim().eq_ignore_ascii_case("refresher") {
+                        refresher = Some(Refresher::parse(value.trim())?);
+                    }
+                    // Other params are tolerated and ignored.
+                }
+            }
+        }
+
+        Ok(SessionExpires {
+            delta_seconds,
+            refresher,
+        })
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        match self.refresher {
+            Some(r) => format!("{};refresher={}", self.delta_seconds, r),
+            None => self.delta_seconds.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SessionExpires {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for `Min-SE` header (RFC 4028 §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MinSe(pub u32);
+
+impl MinSe {
+    /// Parse a `Min-SE` header value.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        // Min-SE is `delta-seconds *(;generic-param)`. Strip params, parse.
+        let head = match value.find(';') {
+            Some(idx) => &value[..idx],
+            None => value,
+        };
+        let secs: u32 = head
+            .trim()
+            .parse()
+            .map_err(|_| SipError::Parse(format!("Invalid Min-SE value '{}'", head.trim())))?;
+        Ok(MinSe(secs))
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl fmt::Display for MinSe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for `RSeq` header (RFC 3262 §7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RSeq(pub u32);
+
+impl RSeq {
+    /// Parse an `RSeq` header value.
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let n: u32 = value
+            .trim()
+            .parse()
+            .map_err(|_| SipError::Parse(format!("Invalid RSeq value '{}'", value.trim())))?;
+        Ok(RSeq(n))
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+impl fmt::Display for RSeq {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Typed wrapper for `RAck` header (RFC 3262 §7.2).
+///
+/// Format: `RAck: <rseq> <cseq> <method>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RAck {
+    /// The `RSeq` value from the provisional being acknowledged.
+    pub rseq: u32,
+    /// The CSeq number of the request that prompted the provisional.
+    pub cseq: u32,
+    /// The method of the request that prompted the provisional.
+    pub method: Method,
+}
+
+impl RAck {
+    /// Parse an `RAck` header value (`<rseq> <cseq> <method>`).
+    pub fn parse(value: &str) -> Result<Self, SipError> {
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        if parts.len() != 3 {
+            return Err(SipError::Parse(format!(
+                "RAck must be '<rseq> <cseq> <method>', got '{}'",
+                value
+            )));
+        }
+        let rseq: u32 = parts[0]
+            .parse()
+            .map_err(|_| SipError::Parse(format!("Invalid RAck rseq '{}'", parts[0])))?;
+        let cseq: u32 = parts[1]
+            .parse()
+            .map_err(|_| SipError::Parse(format!("Invalid RAck cseq '{}'", parts[1])))?;
+        let method = parse_method(parts[2])?;
+        Ok(RAck { rseq, cseq, method })
+    }
+
+    /// Convert to header value string.
+    pub fn to_header_value(&self) -> String {
+        format!("{} {} {}", self.rseq, self.cseq, self.method)
+    }
+}
+
+impl fmt::Display for RAck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_header_value())
+    }
+}
+
+/// Parse a method token (case-insensitive) into the local `Method` enum.
+fn parse_method(value: &str) -> Result<Method, SipError> {
+    match value.to_ascii_uppercase().as_str() {
+        "INVITE" => Ok(Method::Invite),
+        "ACK" => Ok(Method::Ack),
+        "BYE" => Ok(Method::Bye),
+        "CANCEL" => Ok(Method::Cancel),
+        "REGISTER" => Ok(Method::Register),
+        "OPTIONS" => Ok(Method::Options),
+        "PRACK" => Ok(Method::Prack),
+        "SUBSCRIBE" => Ok(Method::Subscribe),
+        "NOTIFY" => Ok(Method::Notify),
+        "PUBLISH" => Ok(Method::Publish),
+        "INFO" => Ok(Method::Info),
+        "REFER" => Ok(Method::Refer),
+        "MESSAGE" => Ok(Method::Message),
+        "UPDATE" => Ok(Method::Update),
+        other => Err(SipError::Parse(format!("Unknown SIP method '{}'", other))),
     }
 }
 
@@ -973,5 +1267,284 @@ mod tests {
         let route_set = RouteSet::new();
         let debug = format!("{:?}", route_set);
         assert!(debug.contains("RouteSet"));
+    }
+
+    // Refresher tests
+    #[test]
+    fn test_refresher_parse_uac() {
+        assert_eq!(Refresher::parse("uac").unwrap(), Refresher::Uac);
+    }
+
+    #[test]
+    fn test_refresher_parse_uas() {
+        assert_eq!(Refresher::parse("uas").unwrap(), Refresher::Uas);
+    }
+
+    #[test]
+    fn test_refresher_parse_case_insensitive() {
+        assert_eq!(Refresher::parse(" UAC ").unwrap(), Refresher::Uac);
+        assert_eq!(Refresher::parse("Uas").unwrap(), Refresher::Uas);
+    }
+
+    #[test]
+    fn test_refresher_parse_invalid() {
+        assert!(Refresher::parse("proxy").is_err());
+    }
+
+    #[test]
+    fn test_refresher_display() {
+        assert_eq!(Refresher::Uac.to_string(), "uac");
+        assert_eq!(Refresher::Uas.to_string(), "uas");
+    }
+
+    // Require tests
+    #[test]
+    fn test_require_parse_single_tag() {
+        let r = Require::parse("100rel").unwrap();
+        assert_eq!(r.0, vec!["100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_require_parse_multiple_tags() {
+        let r = Require::parse("100rel, timer").unwrap();
+        assert_eq!(r.0, vec!["100rel".to_string(), "timer".to_string()]);
+    }
+
+    #[test]
+    fn test_require_parse_extra_whitespace() {
+        let r = Require::parse("  100rel ,    timer  ").unwrap();
+        assert_eq!(r.0, vec!["100rel".to_string(), "timer".to_string()]);
+    }
+
+    #[test]
+    fn test_require_parse_lowercases() {
+        let r = Require::parse("100REL, Timer").unwrap();
+        assert_eq!(r.0, vec!["100rel".to_string(), "timer".to_string()]);
+    }
+
+    #[test]
+    fn test_require_parse_empty_rejected() {
+        assert!(Require::parse("").is_err());
+        assert!(Require::parse(" , ").is_err());
+    }
+
+    #[test]
+    fn test_require_round_trip() {
+        let r = Require(vec!["100rel".to_string(), "timer".to_string()]);
+        let s = r.to_string();
+        assert_eq!(s, "100rel, timer");
+        let parsed = Require::parse(&s).unwrap();
+        assert_eq!(parsed, r);
+    }
+
+    // Supported tests
+    #[test]
+    fn test_supported_parse_single_tag() {
+        let s = Supported::parse("timer").unwrap();
+        assert_eq!(s.0, vec!["timer".to_string()]);
+    }
+
+    #[test]
+    fn test_supported_parse_multiple_tags() {
+        let s = Supported::parse("timer, 100rel").unwrap();
+        assert_eq!(s.0, vec!["timer".to_string(), "100rel".to_string()]);
+    }
+
+    #[test]
+    fn test_supported_parse_empty_rejected() {
+        assert!(Supported::parse("").is_err());
+    }
+
+    #[test]
+    fn test_supported_round_trip() {
+        let s = Supported(vec!["timer".to_string(), "100rel".to_string()]);
+        let display = s.to_string();
+        assert_eq!(display, "timer, 100rel");
+        let parsed = Supported::parse(&display).unwrap();
+        assert_eq!(parsed, s);
+    }
+
+    // SessionExpires tests
+    #[test]
+    fn test_session_expires_parse_value_only() {
+        let se = SessionExpires::parse("1800").unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert!(se.refresher.is_none());
+    }
+
+    #[test]
+    fn test_session_expires_parse_with_refresher_uac() {
+        let se = SessionExpires::parse("1800;refresher=uac").unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uac));
+    }
+
+    #[test]
+    fn test_session_expires_parse_with_refresher_uas() {
+        let se = SessionExpires::parse("90 ; refresher=uas").unwrap();
+        assert_eq!(se.delta_seconds, 90);
+        assert_eq!(se.refresher, Some(Refresher::Uas));
+    }
+
+    #[test]
+    fn test_session_expires_parse_whitespace_around_equal() {
+        // RFC 3261 ABNF EQUAL = SWS "=" SWS. Pre/post-fix had this returning
+        // refresher: None, silently losing the choice.
+        let se = SessionExpires::parse("1800;refresher = uac").unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uac));
+
+        // Mixed-case key should also work (token is case-insensitive).
+        let se = SessionExpires::parse("1800; Refresher =uas").unwrap();
+        assert_eq!(se.refresher, Some(Refresher::Uas));
+    }
+
+    #[test]
+    fn test_session_expires_parse_ignores_unknown_param() {
+        let se = SessionExpires::parse("1800;foo=bar;refresher=uac").unwrap();
+        assert_eq!(se.delta_seconds, 1800);
+        assert_eq!(se.refresher, Some(Refresher::Uac));
+    }
+
+    #[test]
+    fn test_session_expires_parse_invalid_seconds() {
+        assert!(SessionExpires::parse("abc").is_err());
+        assert!(SessionExpires::parse("abc;refresher=uac").is_err());
+    }
+
+    #[test]
+    fn test_session_expires_parse_invalid_refresher() {
+        assert!(SessionExpires::parse("1800;refresher=proxy").is_err());
+    }
+
+    #[test]
+    fn test_session_expires_round_trip_no_refresher() {
+        let se = SessionExpires {
+            delta_seconds: 600,
+            refresher: None,
+        };
+        let s = se.to_string();
+        assert_eq!(s, "600");
+        assert_eq!(SessionExpires::parse(&s).unwrap(), se);
+    }
+
+    #[test]
+    fn test_session_expires_round_trip_with_refresher() {
+        let se = SessionExpires {
+            delta_seconds: 1800,
+            refresher: Some(Refresher::Uac),
+        };
+        let s = se.to_string();
+        assert_eq!(s, "1800;refresher=uac");
+        assert_eq!(SessionExpires::parse(&s).unwrap(), se);
+    }
+
+    // MinSe tests
+    #[test]
+    fn test_min_se_parse() {
+        assert_eq!(MinSe::parse("90").unwrap(), MinSe(90));
+        assert_eq!(MinSe::parse("  120  ").unwrap(), MinSe(120));
+    }
+
+    #[test]
+    fn test_min_se_parse_with_param() {
+        // RFC 4028 allows generic-param after the value; we tolerate.
+        assert_eq!(MinSe::parse("90;foo=bar").unwrap(), MinSe(90));
+    }
+
+    #[test]
+    fn test_min_se_parse_invalid() {
+        assert!(MinSe::parse("abc").is_err());
+        assert!(MinSe::parse("").is_err());
+    }
+
+    #[test]
+    fn test_min_se_round_trip() {
+        let m = MinSe(90);
+        let s = m.to_string();
+        assert_eq!(s, "90");
+        assert_eq!(MinSe::parse(&s).unwrap(), m);
+    }
+
+    // RSeq tests
+    #[test]
+    fn test_rseq_parse() {
+        assert_eq!(RSeq::parse("1").unwrap(), RSeq(1));
+        assert_eq!(RSeq::parse(" 4242 ").unwrap(), RSeq(4242));
+    }
+
+    #[test]
+    fn test_rseq_parse_invalid() {
+        assert!(RSeq::parse("abc").is_err());
+        assert!(RSeq::parse("").is_err());
+        assert!(RSeq::parse("-1").is_err());
+    }
+
+    #[test]
+    fn test_rseq_round_trip() {
+        let r = RSeq(1);
+        let s = r.to_string();
+        assert_eq!(s, "1");
+        assert_eq!(RSeq::parse(&s).unwrap(), r);
+    }
+
+    // RAck tests
+    #[test]
+    fn test_rack_parse() {
+        let rack = RAck::parse("1 314159 INVITE").unwrap();
+        assert_eq!(rack.rseq, 1);
+        assert_eq!(rack.cseq, 314159);
+        assert_eq!(rack.method, Method::Invite);
+    }
+
+    #[test]
+    fn test_rack_parse_method_case_insensitive() {
+        let rack = RAck::parse("1 1 invite").unwrap();
+        assert_eq!(rack.method, Method::Invite);
+    }
+
+    #[test]
+    fn test_rack_parse_extra_whitespace() {
+        let rack = RAck::parse("  1   2   UPDATE  ").unwrap();
+        assert_eq!(rack.rseq, 1);
+        assert_eq!(rack.cseq, 2);
+        assert_eq!(rack.method, Method::Update);
+    }
+
+    #[test]
+    fn test_rack_parse_too_few_tokens() {
+        assert!(RAck::parse("1 INVITE").is_err());
+    }
+
+    #[test]
+    fn test_rack_parse_too_many_tokens() {
+        assert!(RAck::parse("1 2 INVITE extra").is_err());
+    }
+
+    #[test]
+    fn test_rack_parse_invalid_rseq() {
+        assert!(RAck::parse("abc 1 INVITE").is_err());
+    }
+
+    #[test]
+    fn test_rack_parse_invalid_cseq() {
+        assert!(RAck::parse("1 abc INVITE").is_err());
+    }
+
+    #[test]
+    fn test_rack_parse_unknown_method() {
+        assert!(RAck::parse("1 1 BOGUS").is_err());
+    }
+
+    #[test]
+    fn test_rack_round_trip() {
+        let rack = RAck {
+            rseq: 1,
+            cseq: 314159,
+            method: Method::Invite,
+        };
+        let s = rack.to_string();
+        assert_eq!(s, "1 314159 INVITE");
+        assert_eq!(RAck::parse(&s).unwrap(), rack);
     }
 }

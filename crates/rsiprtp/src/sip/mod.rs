@@ -23,7 +23,10 @@ pub use auth::{
 };
 
 // Re-export header types
-pub use headers::{Contact, RecordRoute, Route, RouteSet, Via};
+pub use headers::{
+    Contact, MinSe, RAck, RSeq, RecordRoute, Refresher, Require, Route, RouteSet, SessionExpires,
+    Supported, Via,
+};
 
 // Re-export URI types
 pub use uri::{SipUri, SipUriBuilder};
