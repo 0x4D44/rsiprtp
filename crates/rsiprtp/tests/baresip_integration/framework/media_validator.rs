@@ -6,9 +6,7 @@
 //! - SSRC consistency
 //! - Packet loss calculation
 //! - Jitter measurement
-//! - Audio tone detection
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 /// RTP packet parser and validator
@@ -149,8 +147,6 @@ impl Default for ValidationResult {
 pub struct StreamStats {
     pub total_packets: usize,
     pub lost_packets: usize,
-    pub out_of_order: usize,
-    pub duplicate: usize,
     pub jitter_ms: f64,
     pub start_timestamp: u32,
     pub end_timestamp: u32,
@@ -161,8 +157,6 @@ pub struct RtpValidator {
     expected_codec: Codec,
     expected_ptime: u32,
     packets: Vec<RtpPacket>,
-    sequence_map: HashMap<u16, bool>, // Track seen sequences
-    last_sequence: Option<u16>,
     last_timestamp: Option<u32>,
     ssrc: Option<u32>,
     jitter_sum: f64,
@@ -176,8 +170,6 @@ impl RtpValidator {
             expected_codec: codec,
             expected_ptime: codec.ptime_ms(),
             packets: Vec::new(),
-            sequence_map: HashMap::new(),
-            last_sequence: None,
             last_timestamp: None,
             ssrc: None,
             jitter_sum: 0.0,
@@ -189,17 +181,12 @@ impl RtpValidator {
     pub fn record_packet(&mut self, data: &[u8]) -> Option<()> {
         let packet = RtpPacket::parse(data)?;
 
-        // Track SSRC
-        if let Some(ssrc) = self.ssrc {
-            if ssrc != packet.ssrc {
-                // SSRC changed - this is unusual but can happen
-            }
-        } else {
+        if self.ssrc.is_none() {
             self.ssrc = Some(packet.ssrc);
         }
 
         // Calculate jitter if we have previous packet
-        if let (Some(last_ts), Some(_last_seq)) = (self.last_timestamp, self.last_sequence) {
+        if let Some(last_ts) = self.last_timestamp {
             let ts_diff = packet.timestamp.wrapping_sub(last_ts) as i64;
             let expected_diff = self.expected_codec.samples_per_packet() as i64;
             let jitter = (ts_diff - expected_diff).abs() as f64;
@@ -207,14 +194,7 @@ impl RtpValidator {
             self.jitter_count += 1;
         }
 
-        self.last_sequence = Some(packet.sequence);
         self.last_timestamp = Some(packet.timestamp);
-
-        // Track sequence
-        if self.sequence_map.contains_key(&packet.sequence) {
-            // Duplicate packet
-        }
-        self.sequence_map.insert(packet.sequence, true);
 
         self.packets.push(packet);
         Some(())
@@ -325,19 +305,10 @@ impl RtpValidator {
         StreamStats {
             total_packets: self.packets.len(),
             lost_packets: self.calculate_packet_loss(),
-            out_of_order: 0, // TODO: implement
-            duplicate: 0,    // TODO: implement
             jitter_ms: self.jitter().as_millis() as f64,
             start_timestamp,
             end_timestamp,
         }
-    }
-
-    /// Simple tone detection (checks if payload looks like consistent waveform)
-    pub fn verify_audio_tone(&self, _frequency: u32) -> bool {
-        // TODO: Implement actual tone detection using FFT or similar
-        // For now, just check that we have audio data
-        !self.packets.is_empty() && self.packets.iter().all(|p| !p.payload.is_empty())
     }
 
     /// Check if stream appears to have valid audio
