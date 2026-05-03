@@ -16,6 +16,7 @@ path = ".."
 # Standalone workspace so the fuzz crate isn't pulled into the main one.
 [workspace]
 members = ["."]
+resolver = "2"
 
 [profile.release]
 debug = 1

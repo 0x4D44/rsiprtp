@@ -5,7 +5,8 @@ coverage/
 Cargo.lock
 
 # Runtime artifacts from local fuzz launches
-run.pid
-run.log
+run*.pid
+run*.log
 fuzz-*.log
-run_launcher.ps1
+run_launcher*.ps1
+*.marker
