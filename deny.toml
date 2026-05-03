@@ -29,6 +29,16 @@
 #   * RUSTSEC-2025-0134 (rustls-pemfile unmaintained): archived crate;
 #     migration to rustls-pki-types' PemObject is pending. No security
 #     impact.
+#   * RUSTSEC-2026-0119 (hickory-proto BinEncoder O(n²)): pulled in
+#     transitively via `hickory-resolver = "0.24"`. The vulnerability is
+#     in the *encoder* path — exploitable when an authoritative server (or
+#     attacker-controlled message source) crafts many-record messages that
+#     are then re-encoded. rsiprtp is a SIP stub resolver: we send small
+#     outbound queries (1-3 records) and only *decode* responses; we never
+#     re-encode large responses, so the O(n²) hot path is not exercised.
+#     Fix requires bumping to hickory-resolver 0.26+, which is a breaking
+#     API change (TokioAsyncResolver renamed, error module restructured)
+#     and tracked separately. Re-evaluate once the migration lands.
 #
 # Bans:
 #   * `wildcards = "warn"` (instead of "deny") as a conservative fallback.
@@ -130,6 +140,12 @@ ignore = [
     # archived and users are asked to migrate to rustls-pki-types' PemObject
     # trait. Tracked for migration; no security impact, just unmaintained.
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile archived; pending migration to rustls-pki-types PemObject" },
+    # RUSTSEC-2026-0119 (hickory-proto BinEncoder O(n²)): vulnerability is in
+    # the encoder path; rsiprtp is a stub resolver that only encodes small
+    # outbound queries and decodes responses, so the amplification surface is
+    # not reachable. Fix requires hickory-resolver 0.26+ (breaking API);
+    # migration tracked separately.
+    { id = "RUSTSEC-2026-0119", reason = "stub resolver path does not exercise hickory-proto BinEncoder amplification surface; hickory-resolver 0.26 bump pending" },
 ]
 
 # ---------------------------------------------------------------------------
