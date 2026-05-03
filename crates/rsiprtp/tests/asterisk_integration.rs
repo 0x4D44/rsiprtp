@@ -70,6 +70,7 @@ async fn check_asterisk_available() -> bool {
 
 /// Test SIP registration with Asterisk
 #[tokio::test]
+#[ignore = "requires Asterisk (docker compose -f docker/docker-compose.yml up -d)"]
 async fn test_register_with_asterisk() {
     // Skip if Asterisk is not available
     if !check_asterisk_available().await {
@@ -100,9 +101,14 @@ async fn test_register_with_asterisk() {
     let dest: SocketAddr = ASTERISK_ADDR.parse().unwrap();
 
     // Drive REGISTER + 401 + retry with auth via the high-level driver.
-    reg.register(&transport, dest, Duration::from_secs(5), Duration::from_secs(15))
-        .await
-        .expect("REGISTER failed");
+    reg.register(
+        &transport,
+        dest,
+        Duration::from_secs(5),
+        Duration::from_secs(15),
+    )
+    .await
+    .expect("REGISTER failed");
 
     assert_eq!(reg.state(), RegistrationState::Registered);
     assert!(reg.is_registered());
@@ -110,9 +116,14 @@ async fn test_register_with_asterisk() {
 
     // Now unregister via the same driver. Asterisk will accept the stashed
     // digest credential, so this is a single round-trip.
-    reg.unregister(&transport, dest, Duration::from_secs(5), Duration::from_secs(15))
-        .await
-        .expect("unREGISTER failed");
+    reg.unregister(
+        &transport,
+        dest,
+        Duration::from_secs(5),
+        Duration::from_secs(15),
+    )
+    .await
+    .expect("unREGISTER failed");
 
     assert_eq!(reg.state(), RegistrationState::Unregistered);
     println!("Unregistration successful!");
@@ -120,6 +131,7 @@ async fn test_register_with_asterisk() {
 
 /// Test making an outbound INVITE call to Asterisk echo service
 #[tokio::test]
+#[ignore = "requires Asterisk (docker compose -f docker/docker-compose.yml up -d)"]
 async fn test_outbound_call_to_echo() {
     use rsiprtp::sip::DigestChallenge;
 
@@ -315,6 +327,7 @@ async fn test_outbound_call_to_echo() {
                     "INVITE",
                     &format!("sip:*43@{}", TEST_DOMAIN),
                     None,
+                    None,
                 )
                 .expect("Failed to create digest response");
 
@@ -388,6 +401,7 @@ async fn test_outbound_call_to_echo() {
 
 /// Test making an OPTIONS request to Asterisk
 #[tokio::test]
+#[ignore = "requires Asterisk (docker compose -f docker/docker-compose.yml up -d)"]
 async fn test_options_request() {
     // Skip if Asterisk is not available
     if !check_asterisk_available().await {
