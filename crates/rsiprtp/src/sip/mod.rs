@@ -6,7 +6,13 @@
 pub(crate) mod auth;
 pub(crate) mod headers;
 pub(crate) mod message;
-pub(crate) mod parser;
+// Exposed `pub` (with `#[doc(hidden)]`) so the in-tree integration test
+// `tests/parser_diff.rs` can reach the in-progress parser. Public-API
+// stability is not a concern: nothing inside `parser/` is part of our
+// committed public surface yet (M7 owns that). The hide marker keeps
+// it out of rustdoc.
+#[doc(hidden)]
+pub mod parser;
 pub(crate) mod uri;
 
 #[cfg(test)]

@@ -23,5 +23,9 @@ pub(crate) mod message;
 pub(crate) mod method;
 pub(crate) mod status;
 
-pub(crate) use header::{Header, Headers};
-pub(crate) use message::{Message, Request, Response};
+// Re-exported `pub` (not `pub(crate)`) so the in-tree integration
+// test `tests/parser_diff.rs` can reach them — see comment in
+// `crate::sip::mod` on why the parent module itself is `#[doc(hidden)]
+// pub`. Stability is not a concern; M7 owns the public-API redesign.
+pub use header::{Header, Headers};
+pub use message::{Message, Request, Response};
