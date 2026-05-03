@@ -52,12 +52,7 @@ fn expected_response_md5_qop_auth(
 ) -> String {
     let ha1 = hex::encode(md5::compute(format!("{username}:{realm}:{password}")).0);
     let ha2 = hex::encode(md5::compute(format!("{method}:{uri}")).0);
-    hex::encode(
-        md5::compute(format!(
-            "{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}"
-        ))
-        .0,
-    )
+    hex::encode(md5::compute(format!("{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")).0)
 }
 
 /// Parse an `Authorization: Digest ...` header value into a (key → value) map.
@@ -66,7 +61,10 @@ fn expected_response_md5_qop_auth(
 fn parse_digest_params(header: &str) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
     let s = header.trim();
-    let s = s.strip_prefix("Digest ").or_else(|| s.strip_prefix("digest ")).unwrap_or(s);
+    let s = s
+        .strip_prefix("Digest ")
+        .or_else(|| s.strip_prefix("digest "))
+        .unwrap_or(s);
 
     let mut rest = s;
     while !rest.is_empty() {
@@ -125,13 +123,7 @@ fn extract_request_uri(raw: &[u8]) -> Option<String> {
 /// Build a `SIP/2.0 401 Unauthorized` response by echoing the request's
 /// Via / From / To / Call-ID / CSeq lines and adding `WWW-Authenticate`.
 /// `to_tag` lets the test fix the To-tag so the response is deterministic.
-fn build_401(
-    request: &[u8],
-    realm: &str,
-    nonce: &str,
-    qop: Option<&str>,
-    to_tag: &str,
-) -> Vec<u8> {
+fn build_401(request: &[u8], realm: &str, nonce: &str, qop: Option<&str>, to_tag: &str) -> Vec<u8> {
     build_response(request, 401, "Unauthorized", to_tag, &{
         let mut extras = vec![format!(
             "WWW-Authenticate: Digest realm=\"{realm}\", nonce=\"{nonce}\", algorithm=MD5{}",
@@ -148,12 +140,21 @@ fn build_200_ok(request: &[u8], to_tag: &str, expires: u32) -> Vec<u8> {
         200,
         "OK",
         to_tag,
-        &[format!("Expires: {expires}"), "Content-Length: 0".to_string()],
+        &[
+            format!("Expires: {expires}"),
+            "Content-Length: 0".to_string(),
+        ],
     )
 }
 
 fn build_403(request: &[u8], to_tag: &str) -> Vec<u8> {
-    build_response(request, 403, "Forbidden", to_tag, &["Content-Length: 0".to_string()])
+    build_response(
+        request,
+        403,
+        "Forbidden",
+        to_tag,
+        &["Content-Length: 0".to_string()],
+    )
 }
 
 fn build_response(
@@ -240,9 +241,9 @@ fn verify_digest(
     }
 
     let expected = match (qop.as_deref(), nc.as_deref(), cnonce.as_deref()) {
-        (Some("auth"), Some(nc), Some(cnonce)) => {
-            expected_response_md5_qop_auth(&username, password, &realm, &nonce, nc, cnonce, method, &uri)
-        }
+        (Some("auth"), Some(nc), Some(cnonce)) => expected_response_md5_qop_auth(
+            &username, password, &realm, &nonce, nc, cnonce, method, &uri,
+        ),
         (None, _, _) | (Some(""), _, _) => {
             expected_response_md5(&username, password, &realm, &nonce, method, &uri)
         }
@@ -303,18 +304,21 @@ async fn run_mock_registrar(
     // *something* sensible there (not blank).
     let params = parse_digest_params(&auth);
     let header_uri = params.get("uri").cloned().unwrap_or_default();
-    assert!(!header_uri.is_empty(), "Authorization uri= must be non-empty");
+    assert!(
+        !header_uri.is_empty(),
+        "Authorization uri= must be non-empty"
+    );
 
-    let final_response = match verify_digest(&auth, expected_user, realm, nonce, password, "REGISTER")
-    {
-        Verdict::Ok => build_200_ok(&second.data, "mockregistrar", 60),
-        Verdict::Reject(reason) => {
-            eprintln!(
+    let final_response =
+        match verify_digest(&auth, expected_user, realm, nonce, password, "REGISTER") {
+            Verdict::Ok => build_200_ok(&second.data, "mockregistrar", 60),
+            Verdict::Reject(reason) => {
+                eprintln!(
                 "mock: rejecting (Request-URI={request_uri}, header_uri={header_uri}): {reason}"
             );
-            build_403(&second.data, "mockregistrar")
-        }
-    };
+                build_403(&second.data, "mockregistrar")
+            }
+        };
     transport
         .send_to(&final_response, second.source)
         .await
@@ -359,8 +363,12 @@ async fn register_with_digest_md5_no_qop() {
     });
 
     let client = bind_loopback().await;
-    let mut reg =
-        RegistrationManager::new(config_for(server_addr, client.local_addr(), "alice", "s3cret"));
+    let mut reg = RegistrationManager::new(config_for(
+        server_addr,
+        client.local_addr(),
+        "alice",
+        "s3cret",
+    ));
 
     reg.register(&client, server_addr, RECV_TIMEOUT, TOTAL_TIMEOUT)
         .await
@@ -391,8 +399,12 @@ async fn register_with_digest_md5_qop_auth() {
     });
 
     let client = bind_loopback().await;
-    let mut reg =
-        RegistrationManager::new(config_for(server_addr, client.local_addr(), "bob", "passw0rd"));
+    let mut reg = RegistrationManager::new(config_for(
+        server_addr,
+        client.local_addr(),
+        "bob",
+        "passw0rd",
+    ));
 
     reg.register(&client, server_addr, RECV_TIMEOUT, TOTAL_TIMEOUT)
         .await
@@ -443,20 +455,16 @@ async fn register_wrong_password_is_rejected() {
 /// No registrar listening → driver times out cleanly without blocking forever.
 #[tokio::test]
 async fn register_times_out_when_registrar_silent() {
-    // Bind a server socket but never read from it: the OS will buffer the
-    // datagram until the buffer fills; from the client's POV no responses
-    // come back. With `recv_timeout = 200ms` and `total_timeout = 400ms`
-    // the driver must surface `Timeout`, not hang.
+    // Bind a server socket but never read from it: the registrar task
+    // never reads from the socket and never sends a response, so the
+    // client's recv hits its timeout. With `recv_timeout = 200ms` and
+    // `total_timeout = 400ms` the driver must surface `Timeout`, not hang.
     let _server = bind_loopback().await;
     let server_addr = _server.local_addr();
 
     let client = bind_loopback().await;
-    let mut reg = RegistrationManager::new(config_for(
-        server_addr,
-        client.local_addr(),
-        "dave",
-        "x",
-    ));
+    let mut reg =
+        RegistrationManager::new(config_for(server_addr, client.local_addr(), "dave", "x"));
 
     let err = reg
         .register(
@@ -472,26 +480,25 @@ async fn register_times_out_when_registrar_silent() {
 
 /// Register, then unregister using the same driver. Verifies `unregister`
 /// works post-success and that the unREGISTER carries the previously-stashed
-/// digest (no second 401 round-trip needed).
+/// digest (no second 401 round-trip needed). Uses `qop=auth` so the wire
+/// carries an `nc` value — we assert the unREGISTER bumps it to
+/// `00000002` (RFC 2617 §3.2.2 requires `nc` to be monotonically
+/// increasing per nonce; reusing `00000001` is a replay-detection bug).
 #[tokio::test]
 async fn register_then_unregister() {
     let server = bind_loopback().await;
     let server_addr = server.local_addr();
+    let realm = "rsiprtp-mock";
+    let nonce = "nonce-cycle-004";
+    let user = "erin";
+    let password = "hunter2";
 
     // The mock handles BOTH the REGISTER round-trip and a subsequent
     // unREGISTER (which arrives pre-authenticated thanks to the stashed
     // challenge).
     let mock = tokio::spawn(async move {
-        // First: REGISTER → 401 → 200
-        run_mock_registrar(
-            &server,
-            "rsiprtp-mock",
-            "nonce-cycle-004",
-            None,
-            "erin",
-            "hunter2",
-        )
-        .await;
+        // First: REGISTER → 401 → 200 with qop=auth.
+        run_mock_registrar(&server, realm, nonce, Some("auth"), user, password).await;
 
         // Second: unREGISTER arrives already with Authorization (from the
         // stashed challenge). The mock just sees a request with auth and
@@ -500,11 +507,39 @@ async fn register_then_unregister() {
         let auth = extract_auth_header(&req.data).expect("unREGISTER carries auth");
         let parsed = SipMessage::parse(&req.data).expect("parse unREGISTER");
         let _request = parsed.as_request().expect("expected request");
-        // Sanity: it's REGISTER with Expires: 0
+        // Sanity: it's REGISTER with Expires: 0.
         let text = std::str::from_utf8(&req.data).unwrap();
         assert!(text.starts_with("REGISTER "), "expected REGISTER");
-        assert!(text.contains("Expires: 0"), "unREGISTER must have Expires: 0");
+        assert!(
+            text.contains("Expires: 0"),
+            "unREGISTER must have Expires: 0"
+        );
         assert!(auth.contains("Digest"));
+
+        // Crypto: recompute the expected digest from the same realm and
+        // nonce that issued the challenge. The unREGISTER reuses the
+        // stashed challenge, so realm/nonce are unchanged from the
+        // initial REGISTER.
+        match verify_digest(&auth, user, realm, nonce, password, "REGISTER") {
+            Verdict::Ok => {}
+            Verdict::Reject(reason) => panic!("unREGISTER digest invalid: {reason}"),
+        }
+
+        // RFC 2617 §3.2.2: nc MUST be monotonically increasing per
+        // nonce. The initial authenticated REGISTER sent nc=00000001;
+        // the unREGISTER reuses the same nonce, so it must send
+        // nc=00000002.
+        let params = parse_digest_params(&auth);
+        let wire_nc = params
+            .get("nc")
+            .cloned()
+            .expect("unREGISTER must include nc with qop=auth");
+        assert_eq!(
+            wire_nc, "00000002",
+            "unREGISTER reusing the cached nonce must bump nc; \
+             RFC 2617 forbids reusing the same (nonce, nc) pair"
+        );
+
         let response = build_200_ok(&req.data, "mockregistrar", 0);
         server
             .send_to(&response, req.source)
@@ -514,7 +549,7 @@ async fn register_then_unregister() {
 
     let client = bind_loopback().await;
     let mut reg =
-        RegistrationManager::new(config_for(server_addr, client.local_addr(), "erin", "hunter2"));
+        RegistrationManager::new(config_for(server_addr, client.local_addr(), user, password));
 
     reg.register(&client, server_addr, RECV_TIMEOUT, TOTAL_TIMEOUT)
         .await

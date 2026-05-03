@@ -190,7 +190,10 @@ async fn test_register_message_format() {
         assert_eq!(expires.as_deref(), Some("3600"));
 
         let resp = build_200_ok(&msg);
-        registrar_socket.send_to(resp.as_bytes(), src).await.unwrap();
+        registrar_socket
+            .send_to(resp.as_bytes(), src)
+            .await
+            .unwrap();
     });
 
     endpoint.send_raw(&register, registrar_addr).await.unwrap();
@@ -208,8 +211,7 @@ async fn test_register_message_format() {
         "response Call-ID must match request"
     );
     assert!(
-        find_header(&resp_str, "Contact")
-            .is_some_and(|c| c.contains("expires=")),
+        find_header(&resp_str, "Contact").is_some_and(|c| c.contains("expires=")),
         "registrar must echo expires in Contact"
     );
 
@@ -322,18 +324,13 @@ async fn test_register_with_authentication() {
     );
 
     // Parse challenge, build authenticated REGISTER
-    let challenge_value = find_header(&resp1_str, "WWW-Authenticate")
-        .expect("401 must carry WWW-Authenticate");
+    let challenge_value =
+        find_header(&resp1_str, "WWW-Authenticate").expect("401 must carry WWW-Authenticate");
     let challenge = DigestChallenge::parse(&challenge_value).unwrap();
     let creds = DigestCredentials::new(username, password);
-    let response = DigestResponse::from_challenge(
-        &challenge,
-        &creds,
-        "REGISTER",
-        &to_uri,
-        None,
-    )
-    .unwrap();
+    let response =
+        DigestResponse::from_challenge(&challenge, &creds, "REGISTER", &to_uri, None, None)
+            .unwrap();
 
     // Round 2: send authenticated REGISTER (CSeq must increment)
     let branch2 = format!("z9hG4bK-{}", uuid::Uuid::new_v4().simple());
@@ -540,7 +537,9 @@ fn extract_unquoted(header: &str, key: &str) -> Option<String> {
     let needle = format!("{key}=");
     let start = header.find(&needle)? + needle.len();
     let rest = &header[start..];
-    let end = rest.find(|c: char| c == ',' || c.is_whitespace()).unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| c == ',' || c.is_whitespace())
+        .unwrap_or(rest.len());
     Some(rest[..end].to_string())
 }
 
@@ -563,9 +562,7 @@ fn recompute_digest(
     }
     let ha1 = md5(&format!("{username}:{realm}:{password}"));
     let ha2 = md5(&format!("{method}:{uri}"));
-    md5(&format!(
-        "{ha1}:{nonce}:{nc:08x}:{cnonce}:auth:{ha2}",
-    ))
+    md5(&format!("{ha1}:{nonce}:{nc:08x}:{cnonce}:auth:{ha2}",))
 }
 
 #[cfg(test)]

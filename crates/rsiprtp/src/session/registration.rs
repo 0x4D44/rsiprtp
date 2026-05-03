@@ -226,6 +226,7 @@ impl RegistrationManager {
             "REGISTER",
             &self.config.registrar,
             None,
+            Some(self.nc),
         )
         .map_err(|e| RegistrationError::AuthError(e.to_string()))?;
 
@@ -286,6 +287,7 @@ impl RegistrationManager {
                 "REGISTER",
                 &self.config.registrar,
                 None,
+                Some(self.nc),
             )
             .map_err(|e| RegistrationError::AuthError(e.to_string()))?;
 
@@ -378,6 +380,7 @@ impl RegistrationManager {
                     "REGISTER",
                     &self.config.registrar,
                     None,
+                    Some(self.nc),
                 )
                 .map_err(|e| RegistrationError::AuthError(e.to_string()))?;
 
@@ -455,7 +458,15 @@ impl RegistrationManager {
         total_timeout: Duration,
     ) -> Result<(), RegistrationError> {
         let request = self.create_register()?;
-        run_request(self, transport, registrar_addr, request, recv_timeout, total_timeout).await
+        run_request(
+            self,
+            transport,
+            registrar_addr,
+            request,
+            recv_timeout,
+            total_timeout,
+        )
+        .await
     }
 
     /// Symmetric of [`Self::register`] — drives an unREGISTER (`Expires: 0`)
@@ -471,7 +482,15 @@ impl RegistrationManager {
         total_timeout: Duration,
     ) -> Result<(), RegistrationError> {
         let request = self.create_unregister()?;
-        run_request(self, transport, registrar_addr, request, recv_timeout, total_timeout).await
+        run_request(
+            self,
+            transport,
+            registrar_addr,
+            request,
+            recv_timeout,
+            total_timeout,
+        )
+        .await
     }
 }
 

@@ -207,12 +207,19 @@ pub struct DigestResponse {
 
 impl DigestResponse {
     /// Create a digest response from a challenge.
+    ///
+    /// `nc` is the nonce-count for this request (RFC 2617 §3.2.2 — must be
+    /// monotonically increasing per nonce). When `qop` is set, the value
+    /// is rendered as 8-digit hex on the wire; defaults to 1 if `None` is
+    /// passed. When `qop` is absent, `nc` is ignored (it is not part of
+    /// the no-qop wire format).
     pub fn from_challenge(
         challenge: &DigestChallenge,
         credentials: &DigestCredentials,
         method: &str,
         uri: &str,
         body: Option<&[u8]>,
+        nc: Option<u32>,
     ) -> Result<Self, DigestAuthError> {
         if challenge.realm.is_empty() {
             return Err(DigestAuthError::MissingField("realm"));
@@ -223,7 +230,7 @@ impl DigestResponse {
 
         let qop = challenge.qop;
         let (cnonce, nc) = if qop.is_some() {
-            (Some(generate_cnonce()), Some(1u32))
+            (Some(generate_cnonce()), Some(nc.unwrap_or(1)))
         } else {
             (None, None)
         };
@@ -533,6 +540,7 @@ mod tests {
             "REGISTER",
             "sip:asterisk@192.168.1.1",
             None,
+            None,
         )
         .unwrap();
 
@@ -561,6 +569,7 @@ mod tests {
             &creds,
             "REGISTER",
             "sip:asterisk@192.168.1.1",
+            None,
             None,
         )
         .unwrap();
@@ -711,6 +720,7 @@ mod tests {
             "REGISTER",
             "sip:sip.example.com",
             None,
+            None,
         )
         .unwrap();
 
@@ -778,6 +788,7 @@ mod tests {
             "REGISTER",
             "sip:example.com",
             None,
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("missing required field: realm"));
@@ -800,6 +811,7 @@ mod tests {
             &credentials,
             "REGISTER",
             "sip:example.com",
+            None,
             None,
         )
         .unwrap_err();
@@ -975,6 +987,7 @@ mod tests {
             "INVITE",
             "sip:bob@example.com",
             Some(body),
+            None,
         )
         .unwrap();
 
@@ -1000,6 +1013,7 @@ mod tests {
             &creds,
             "REGISTER",
             "sip:asterisk@192.168.1.1",
+            None,
             None,
         )
         .unwrap();

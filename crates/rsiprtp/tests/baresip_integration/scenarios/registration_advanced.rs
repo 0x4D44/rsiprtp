@@ -160,11 +160,11 @@ async fn authenticated_register(
     let challenge_value = find_header(&resp1_str, "WWW-Authenticate")
         .or_else(|| find_header(&resp1_str, "Proxy-Authenticate"))
         .ok_or_else(|| "401/407 missing challenge header".to_string())?;
-    let challenge = DigestChallenge::parse(&challenge_value)
-        .map_err(|e| format!("parse challenge: {e}"))?;
+    let challenge =
+        DigestChallenge::parse(&challenge_value).map_err(|e| format!("parse challenge: {e}"))?;
     let creds = DigestCredentials::new(user, password);
     let response =
-        DigestResponse::from_challenge(&challenge, &creds, "REGISTER", &to_uri, None)
+        DigestResponse::from_challenge(&challenge, &creds, "REGISTER", &to_uri, None, None)
             .map_err(|e| format!("compute digest: {e}"))?;
 
     // Round 2: authenticated REGISTER
@@ -284,12 +284,11 @@ async fn test_register_with_expiry() {
         .and_then(|s| s.parse::<u32>().ok())
         .or_else(|| {
             // Some servers return only Contact;expires=N
-            find_header(&resp, "Contact")
-                .and_then(|c| {
-                    c.split(';')
-                        .find_map(|p| p.trim().strip_prefix("expires="))
-                        .and_then(|v| v.parse::<u32>().ok())
-                })
+            find_header(&resp, "Contact").and_then(|c| {
+                c.split(';')
+                    .find_map(|p| p.trim().strip_prefix("expires="))
+                    .and_then(|v| v.parse::<u32>().ok())
+            })
         })
         .expect("200 OK must report granted lifetime");
 
@@ -395,9 +394,7 @@ async fn test_unregister_expires_zero() {
     // (either no Contact, or Contact with expires=0).
     let contact = find_header(&resp2, "Contact").unwrap_or_default();
     let expires = find_header(&resp2, "Expires").unwrap_or_default();
-    let removed = contact.is_empty()
-        || contact.contains("expires=0")
-        || expires.trim() == "0";
+    let removed = contact.is_empty() || contact.contains("expires=0") || expires.trim() == "0";
     assert!(
         removed,
         "200 OK to unregister should signal removal: contact={contact:?} expires={expires:?}"
