@@ -401,7 +401,12 @@ fn run_coverage() -> CoverageResult {
     if use_branch {
         args.push("--branch");
     }
-    args.extend_from_slice(&["--json", "--no-cfg-coverage"]);
+    // Match stage 5 (`cargo test`): force single-threaded test execution.
+    // Without this, llvm-cov runs tests in parallel under coverage
+    // instrumentation, where slowdowns and port reuse can deadlock UDP-based
+    // integration tests that work fine serially. Stage 5 already enforces
+    // serial execution and passes; mirroring it here removes the divergence.
+    args.extend_from_slice(&["--no-cfg-coverage", "--json", "--", "--test-threads=1"]);
 
     let output = match Command::new("cargo")
         .args(&args)
