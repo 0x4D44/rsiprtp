@@ -45,3 +45,4 @@ desktop.ini
 crates/rsiprtp/tests/results/*.html
 crates/rsiprtp/tests/results/*.log
 crates/rsiprtp/tests/results/*.txt
+crates/rsiprtp/tests/results/*.json
