@@ -6,6 +6,7 @@
 pub(crate) mod auth;
 pub(crate) mod headers;
 pub(crate) mod message;
+pub(crate) mod parser;
 pub(crate) mod uri;
 
 #[cfg(test)]
