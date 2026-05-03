@@ -139,6 +139,28 @@ impl Header {
         }
     }
 
+    /// If this is a `From:` header, parse its value into the typed
+    /// form. Returns `None` for any other variant. The inner
+    /// `Result` surfaces parse errors on the value.
+    ///
+    /// This is the Tier-2 entry point for `From` — the raw string
+    /// is held in the variant, parsed only when the consumer asks.
+    pub fn typed_from(&self) -> Option<Result<super::typed::From, SipError>> {
+        match self {
+            Header::From(value) => Some(super::typed::From::parse(value)),
+            _ => None,
+        }
+    }
+
+    /// If this is a `To:` header, parse its value into the typed
+    /// form. Returns `None` for any other variant.
+    pub fn typed_to(&self) -> Option<Result<super::typed::To, SipError>> {
+        match self {
+            Header::To(value) => Some(super::typed::To::parse(value)),
+            _ => None,
+        }
+    }
+
     /// Parse one wire-format header line of the form `"Name: value"`.
     ///
     /// The line must NOT contain CRLF (framing strips that). Folding

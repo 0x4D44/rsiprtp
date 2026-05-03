@@ -21,7 +21,9 @@ pub(crate) mod framing;
 pub(crate) mod header;
 pub(crate) mod message;
 pub(crate) mod method;
+pub mod name_addr;
 pub(crate) mod status;
+pub mod typed;
 
 // Re-exported `pub` (not `pub(crate)`) so the in-tree integration
 // test `tests/parser_diff.rs` can reach them — see comment in
@@ -29,3 +31,4 @@ pub(crate) mod status;
 // pub`. Stability is not a concern; M7 owns the public-API redesign.
 pub use header::{Header, Headers};
 pub use message::{Message, Request, Response};
+pub use name_addr::NameAddr;

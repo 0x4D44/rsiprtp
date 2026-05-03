@@ -18,6 +18,10 @@
 use rsiprtp::sip::parser::{Header as OurHeader, Message as OurMessage};
 use rsiprtp::sip::SipUri;
 
+// M4: typed-form imports for the From/To Tier-2 axis. Our typed
+// forms wrap NameAddr; rsip's live under `rsip::typed::*`.
+use rsiprtp::sip::parser::typed::{From as OurFrom, To as OurTo};
+
 // ---------------------------------------------------------------
 // Neutral representation
 // ---------------------------------------------------------------
@@ -388,6 +392,269 @@ fn collect_our_headers(hs: &rsiprtp::sip::parser::Headers) -> Vec<(String, Strin
 }
 
 // ---------------------------------------------------------------
+// Tier-2: typed `From` / `To` diff (M4)
+// ---------------------------------------------------------------
+
+/// Neutral Tier-2 representation of a `From` or `To` header value.
+///
+/// Built from either the rsip or our typed form, then compared
+/// field-by-field. Per HLD M4 entry, the goal is "Diff-test green
+/// for From/To on golden corpus".
+///
+/// Normalization choices:
+/// - `display_name`: surrounding `"..."` stripped and `\\X`
+///   quoted-pair escapes resolved on both sides. rsip stores the
+///   display name verbatim (quotes kept); our parser strips quotes
+///   at parse time. We normalize the rsip side to match — the data
+///   they encode is identical.
+/// - `uri`: routed through [`NormalizedUri`] (the same
+///   case-insensitive scheme/host + sorted-params normalizer used
+///   by Tier-1). Compared structurally.
+/// - `parameters`: sorted by lowercased key. Per RFC 3261 §25.1
+///   `gen-value = token / host / quoted-string`; multiple params
+///   with the same name are theoretically possible but in
+///   practice not observed for `From`/`To`. Sort is stable per the
+///   wire-order tiebreak, so order-preserving wire fixtures with
+///   `;tag=x;foo=y` and `;foo=y;tag=x` compare equal — that is
+///   the RFC 3261 §19.1.4 view (URI param order doesn't matter
+///   for equality, and §25.1 inherits that for header params).
+#[derive(Debug, PartialEq, Eq)]
+struct DiffNameAddr {
+    display_name: Option<String>,
+    uri: NormalizedUri,
+    parameters: Vec<(String, Option<String>)>,
+}
+
+/// Strip an outer pair of double quotes from a display-name and
+/// resolve `\X` quoted-pair escapes inside. If the input is not
+/// quoted, returned unchanged. Used to normalize the rsip side to
+/// our parser's already-unquoted representation.
+fn unquote_display_name(s: &str) -> String {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"' {
+        // Resolve \X escapes inside.
+        let inner = &s[1..s.len() - 1];
+        let mut out = String::with_capacity(inner.len());
+        let inb = inner.as_bytes();
+        let mut i = 0;
+        while i < inb.len() {
+            if inb[i] == b'\\' && i + 1 < inb.len() {
+                out.push(inb[i + 1] as char);
+                i += 2;
+            } else {
+                out.push(inb[i] as char);
+                i += 1;
+            }
+        }
+        out
+    } else {
+        s.to_string()
+    }
+}
+
+/// Normalize a parameter list: sort by lowercased key (stable),
+/// keep value verbatim. The key is lowercased in the output for
+/// case-insensitive comparison.
+fn normalize_params(params: Vec<(String, Option<String>)>) -> Vec<(String, Option<String>)> {
+    let mut out: Vec<(String, Option<String>)> = params
+        .into_iter()
+        .map(|(k, v)| (k.to_ascii_lowercase(), v))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn rsip_from_to_diff(value: &str) -> Result<DiffNameAddr, String> {
+    use rsip::headers::untyped::{ToTypedHeader, UntypedHeader};
+    let untyped = rsip::headers::From::new(value);
+    let typed = untyped.typed().map_err(|e| format!("rsip From: {e}"))?;
+    let params = typed
+        .params
+        .iter()
+        .map(rsip_param_to_pair)
+        .collect::<Vec<_>>();
+    Ok(DiffNameAddr {
+        display_name: typed.display_name.as_deref().map(unquote_display_name),
+        uri: NormalizedUri::from_str(&typed.uri.to_string()),
+        parameters: normalize_params(params),
+    })
+}
+
+fn rsip_to_to_diff(value: &str) -> Result<DiffNameAddr, String> {
+    use rsip::headers::untyped::{ToTypedHeader, UntypedHeader};
+    let untyped = rsip::headers::To::new(value);
+    let typed = untyped.typed().map_err(|e| format!("rsip To: {e}"))?;
+    let params = typed
+        .params
+        .iter()
+        .map(rsip_param_to_pair)
+        .collect::<Vec<_>>();
+    Ok(DiffNameAddr {
+        display_name: typed.display_name.as_deref().map(unquote_display_name),
+        uri: NormalizedUri::from_str(&typed.uri.to_string()),
+        parameters: normalize_params(params),
+    })
+}
+
+/// Project a single `rsip::common::uri::Param` to the harness
+/// `(name, Option<value>)` pair. We use Display to render the
+/// value because rsip's typed param newtypes (`Tag(String)`,
+/// `Branch(String)`, etc.) all emit just the raw string via
+/// Display. For `Lr` (a flag param) we emit `("lr", None)`. For
+/// `Other(name, value)` we keep the name verbatim.
+fn rsip_param_to_pair(p: &rsip::common::uri::Param) -> (String, Option<String>) {
+    use rsip::common::uri::Param;
+    match p {
+        Param::Lr => ("lr".to_string(), None),
+        Param::Tag(t) => ("tag".to_string(), Some(t.value().to_string())),
+        Param::Branch(b) => ("branch".to_string(), Some(b.value().to_string())),
+        Param::Received(r) => ("received".to_string(), Some(r.value().to_string())),
+        Param::Expires(e) => ("expires".to_string(), Some(e.value().to_string())),
+        Param::Q(q) => ("q".to_string(), Some(q.value().to_string())),
+        Param::Ttl(t) => ("ttl".to_string(), Some(t.value().to_string())),
+        Param::Maddr(m) => ("maddr".to_string(), Some(m.value().to_string())),
+        Param::User(u) => ("user".to_string(), Some(u.value().to_string())),
+        Param::Method(m) => ("method".to_string(), Some(m.to_string())),
+        Param::Transport(t) => ("transport".to_string(), Some(t.to_string())),
+        Param::Other(name, Some(v)) => (name.value().to_string(), Some(v.value().to_string())),
+        Param::Other(name, None) => (name.value().to_string(), None),
+    }
+}
+
+fn ours_from_to_diff(value: &str) -> Result<DiffNameAddr, String> {
+    let f = OurFrom::parse(value).map_err(|e| format!("ours From: {e}"))?;
+    Ok(DiffNameAddr {
+        display_name: f.display_name.clone(),
+        uri: NormalizedUri::from_str(&f.uri.to_string()),
+        parameters: normalize_params(f.params.clone()),
+    })
+}
+
+fn ours_to_to_diff(value: &str) -> Result<DiffNameAddr, String> {
+    let t = OurTo::parse(value).map_err(|e| format!("ours To: {e}"))?;
+    Ok(DiffNameAddr {
+        display_name: t.display_name.clone(),
+        uri: NormalizedUri::from_str(&t.uri.to_string()),
+        parameters: normalize_params(t.params.clone()),
+    })
+}
+
+/// Run the Tier-2 typed-form diff for every `From` and `To` header
+/// in `bytes`. Pulls the raw value from each parser's own header
+/// list (so each parser sees its own input), then compares.
+///
+/// If one side accepts the typed-form parse and the other rejects,
+/// that is a divergence — panic with both sides for triage. If
+/// both reject, accept (mirror Tier-1 policy).
+fn assert_typed_from_to_equivalent(bytes: &[u8]) {
+    use rsip::SipMessage as RsipMsg;
+
+    // Both parsers need to have already accepted the message at
+    // Tier-1; if they didn't, Tier-2 is moot.
+    let rs_msg = match RsipMsg::try_from(bytes) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+    let our_msg = match OurMessage::parse(bytes) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    let rs_headers: &rsip::Headers = match &rs_msg {
+        RsipMsg::Request(r) => &r.headers,
+        RsipMsg::Response(r) => &r.headers,
+    };
+    let our_headers = match &our_msg {
+        OurMessage::Request(r) => &r.headers,
+        OurMessage::Response(r) => &r.headers,
+    };
+
+    // From — find the first occurrence on each side. RFC 3261
+    // requires exactly one From per message; if either side has
+    // more than one we still only diff the first.
+    //
+    // We use `UntypedHeader::value()` (NOT Display) — Display on
+    // an rsip Header emits the full `Name: value` form, while
+    // `value()` returns just the value portion, matching what our
+    // parser stores in `Header::From(value)`.
+    use rsip::headers::untyped::UntypedHeader as _;
+    let rsip_from_value = rs_headers.iter().find_map(|h| match h {
+        rsip::Header::From(v) => Some(v.value().to_string()),
+        _ => None,
+    });
+    let our_from_value = our_headers.iter().find_map(|h| match h {
+        OurHeader::From(v) => Some(v.clone()),
+        _ => None,
+    });
+    if let (Some(rs_v), Some(our_v)) = (rsip_from_value.as_deref(), our_from_value.as_deref()) {
+        let rs = rsip_from_to_diff(rs_v);
+        let ours = ours_from_to_diff(our_v);
+        match (rs, ours) {
+            (Ok(a), Ok(b)) => {
+                if a != b {
+                    panic!(
+                        "TYPED-FROM DIVERGENCE.\n\
+                         rsip-value: {rs_v:?}\n\
+                         our-value:  {our_v:?}\n\
+                         rsip:\n{a:#?}\n\
+                         ours:\n{b:#?}",
+                    );
+                }
+            }
+            (Err(_), Err(_)) => {}
+            (Ok(_), Err(e)) => panic!(
+                "rsip accepted typed From but ours rejected.\n\
+                 value: {our_v:?}\n\
+                 ours error: {e}",
+            ),
+            (Err(e), Ok(_)) => panic!(
+                "ours accepted typed From but rsip rejected.\n\
+                 value: {rs_v:?}\n\
+                 rsip error: {e}",
+            ),
+        }
+    }
+
+    // To — same shape.
+    let rsip_to_value = rs_headers.iter().find_map(|h| match h {
+        rsip::Header::To(v) => Some(v.value().to_string()),
+        _ => None,
+    });
+    let our_to_value = our_headers.iter().find_map(|h| match h {
+        OurHeader::To(v) => Some(v.clone()),
+        _ => None,
+    });
+    if let (Some(rs_v), Some(our_v)) = (rsip_to_value.as_deref(), our_to_value.as_deref()) {
+        let rs = rsip_to_to_diff(rs_v);
+        let ours = ours_to_to_diff(our_v);
+        match (rs, ours) {
+            (Ok(a), Ok(b)) => {
+                if a != b {
+                    panic!(
+                        "TYPED-TO DIVERGENCE.\n\
+                         rsip-value: {rs_v:?}\n\
+                         our-value:  {our_v:?}\n\
+                         rsip:\n{a:#?}\n\
+                         ours:\n{b:#?}",
+                    );
+                }
+            }
+            (Err(_), Err(_)) => {}
+            (Ok(_), Err(e)) => panic!(
+                "rsip accepted typed To but ours rejected.\n\
+                 value: {our_v:?}\n\
+                 ours error: {e}",
+            ),
+            (Err(e), Ok(_)) => panic!(
+                "ours accepted typed To but rsip rejected.\n\
+                 value: {rs_v:?}\n\
+                 rsip error: {e}",
+            ),
+        }
+    }
+}
+
+// ---------------------------------------------------------------
 // Equivalence assertion
 // ---------------------------------------------------------------
 
@@ -416,6 +683,10 @@ fn assert_equivalent(bytes: &[u8]) {
              rsip error: {e}",
         ),
     }
+    // Tier-2: typed From/To check (M4). Independent of Tier-1
+    // result handling because we want to surface typed-form
+    // divergences even where Tier-1 was clean.
+    assert_typed_from_to_equivalent(bytes);
 }
 
 // ---------------------------------------------------------------
@@ -574,6 +845,107 @@ fn normalize_preserves_quoted_strings() {
 fn normalize_handles_quoted_pair_escapes() {
     // \" inside a quoted string is literal; doesn't end the string.
     assert_eq!(normalize_value(r#""a\"b" trailing"#), r#""a\"b" trailing"#,);
+}
+
+// ---------------------------------------------------------------
+// Sanity tests for the typed-form (M4) normalization
+// ---------------------------------------------------------------
+//
+// These exercise the DiffNameAddr normalization without needing a
+// full SIP message — they construct the value strings inline. Two
+// shapes are checked:
+//
+// 1. Parameter-order independence: `;tag=x;foo=y` should normalize
+//    identically to `;foo=y;tag=x`. RFC 3261 §19.1.4 (URI params)
+//    and §25.1's `*( SEMI generic-param )` production make this
+//    legitimate at equality. Both rsip and our parser should
+//    agree.
+//
+// 2. Quoted vs unquoted display name with a token-only inner: per
+//    RFC 3261 §20.10/25.1, `"Alice" <sip:a@b>` and `Alice <sip:a@b>`
+//    encode the same display-name "Alice". Our normalizer
+//    (`unquote_display_name`) strips the quotes on the rsip side
+//    so the two compare equal — this is the right call when the
+//    inner content is a bare token (no characters that would
+//    require quoting). For inner content that DOES require quoting
+//    (e.g. spaces) the two are NOT equivalent — the unquoted form
+//    is malformed under §25.1 and rsip and our parser would both
+//    reject or interpret differently.
+
+#[test]
+fn typed_from_param_order_is_normalized() {
+    let v1 = "Alice <sip:alice@example.com>;tag=x;foo=y";
+    let v2 = "Alice <sip:alice@example.com>;foo=y;tag=x";
+    let d1 = ours_from_to_diff(v1).unwrap();
+    let d2 = ours_from_to_diff(v2).unwrap();
+    assert_eq!(d1, d2, "param-order normalization failed: {d1:?} vs {d2:?}");
+    let r1 = rsip_from_to_diff(v1).unwrap();
+    let r2 = rsip_from_to_diff(v2).unwrap();
+    assert_eq!(r1, r2);
+    assert_eq!(d1, r1);
+}
+
+#[test]
+fn typed_from_quoted_token_display_normalizes_to_unquoted() {
+    // For a *token* inner (no chars requiring quotation) RFC 3261
+    // §25.1's `display-name = *(token LWS) / quoted-string` lets
+    // either form encode the same name.
+    let v_quoted = r#""Alice" <sip:alice@example.com>;tag=t"#;
+    let v_token = "Alice <sip:alice@example.com>;tag=t";
+    let d_quoted = ours_from_to_diff(v_quoted).unwrap();
+    let d_token = ours_from_to_diff(v_token).unwrap();
+    assert_eq!(d_quoted, d_token);
+    let r_quoted = rsip_from_to_diff(v_quoted).unwrap();
+    let r_token = rsip_from_to_diff(v_token).unwrap();
+    assert_eq!(r_quoted, r_token);
+    assert_eq!(d_quoted, r_quoted);
+}
+
+#[test]
+fn typed_from_quoted_with_space_preserves_inner() {
+    // Inner has a space → MUST be quoted on the wire. The
+    // normalized display name is the unquoted "Alice Smith".
+    let v = r#""Alice Smith" <sip:a@b>;tag=t"#;
+    let d = ours_from_to_diff(v).unwrap();
+    let r = rsip_from_to_diff(v).unwrap();
+    assert_eq!(d.display_name.as_deref(), Some("Alice Smith"));
+    assert_eq!(d, r);
+}
+
+#[test]
+fn typed_to_no_tag_is_normalized_consistently() {
+    // To on initial INVITE has no tag — both parsers should accept.
+    let v = "Bob <sip:bob@example.com>";
+    let d = ours_to_to_diff(v).unwrap();
+    let r = rsip_to_to_diff(v).unwrap();
+    assert_eq!(d, r);
+    assert_eq!(d.display_name.as_deref(), Some("Bob"));
+    assert!(d.parameters.is_empty());
+}
+
+#[test]
+fn typed_from_bare_addr_spec_normalizes() {
+    // No angle brackets, `;tag=` is a header param.
+    let v = "sip:bob@example.com;tag=xyz";
+    let d = ours_from_to_diff(v).unwrap();
+    let r = rsip_from_to_diff(v).unwrap();
+    assert_eq!(d, r);
+    assert_eq!(d.display_name, None);
+    assert_eq!(
+        d.parameters,
+        vec![("tag".to_string(), Some("xyz".to_string()))]
+    );
+}
+
+#[test]
+fn unquote_display_name_handles_escapes() {
+    assert_eq!(unquote_display_name(r#""Alice""#), "Alice");
+    assert_eq!(unquote_display_name(r#""Alice Smith""#), "Alice Smith");
+    assert_eq!(
+        unquote_display_name(r#""He said \"hi\"""#),
+        r#"He said "hi""#
+    );
+    assert_eq!(unquote_display_name("Alice"), "Alice"); // no quotes, pass-through
 }
 
 #[test]
