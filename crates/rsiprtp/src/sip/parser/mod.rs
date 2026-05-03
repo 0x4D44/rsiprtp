@@ -15,7 +15,13 @@
 //! The `#[cfg(test)]` blocks inside each submodule still exercise every
 //! item — this is not a coverage hole.
 
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
+pub(crate) mod framing;
+pub(crate) mod header;
+pub(crate) mod message;
 pub(crate) mod method;
 pub(crate) mod status;
+
+pub(crate) use header::{Header, Headers};
+pub(crate) use message::{Message, Request, Response};
