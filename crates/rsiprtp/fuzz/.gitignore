@@ -9,4 +9,5 @@ run*.pid
 run*.log
 fuzz-*.log
 run_launcher*.ps1
+fuzz_supervisor*.ps1
 *.marker
