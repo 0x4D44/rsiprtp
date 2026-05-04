@@ -201,8 +201,15 @@ pub fn parse_request_line(line: &str) -> Result<(Method, String, String), SipErr
 
 /// Parse a status line: `SIP-Version Status-Code Reason-Phrase`.
 ///
-/// Splits on the first two single spaces (the reason phrase may
-/// contain spaces, e.g. "Busy Here").
+/// RFC 3261 §7.2 BNF:
+/// `Status-Line = SIP-Version SP Status-Code SP Reason-Phrase CRLF`
+/// — *both* SPs are mandatory. The Reason-Phrase itself can be empty
+/// (the BNF `Reason-Phrase = *(...)` permits zero-length), but the SP
+/// between Status-Code and Reason-Phrase must be present on the wire.
+/// Minimum valid status line: `SIP/2.0 200 ` (trailing SP, empty
+/// reason). M11 fuzz finding #12 surfaced our previous lenient
+/// behavior (silently accepting `SIP/2.0 200`); we now reject to
+/// match the BNF strictly.
 pub fn parse_status_line(line: &str) -> Result<(String, StatusCode, String), SipError> {
     if line.len() > MAX_START_LINE_LEN {
         return Err(SipError::Parse(format!(
@@ -216,7 +223,14 @@ pub fn parse_status_line(line: &str) -> Result<(String, StatusCode, String), Sip
     let code_str = parts
         .next()
         .ok_or_else(|| SipError::Parse(format!("status line missing code: {line:?}")))?;
-    let reason = parts.next().unwrap_or("");
+    // Per RFC 3261 §7.2 BNF the SP between Status-Code and
+    // Reason-Phrase is mandatory. If `splitn(3, ' ')` yields no third
+    // element the input had fewer than 2 SPs — reject. (Empty
+    // reason-phrase is fine; a trailing SP after the code produces
+    // `Some("")` here.)
+    let reason = parts
+        .next()
+        .ok_or_else(|| SipError::Parse("status line missing SP after status code".to_string()))?;
 
     // RFC 3261 §7.1: version must be exactly "SIP/2.0".
     if version != "SIP/2.0" {
@@ -434,9 +448,25 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_status_line_no_reason() {
-        let (_, code, reason) = parse_status_line("SIP/2.0 100").unwrap();
-        assert_eq!(code, StatusCode::TRYING);
+    fn test_status_line_missing_sp_after_code_rejects() {
+        // RFC 3261 §7.2: SP between Status-Code and Reason-Phrase is
+        // mandatory. M11 fuzz finding #12 — closed at the framing
+        // layer.
+        let line = "SIP/2.0 200"; // no second SP, no reason phrase
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_status_line_empty_reason_phrase_accepts() {
+        // RFC 3261 §7.2: `Reason-Phrase = *(...)` — empty is permitted.
+        // The SP between Status-Code and Reason-Phrase must still be
+        // on the wire. Replaces the old `test_parse_status_line_no_reason`
+        // pin which asserted lenient acceptance of the missing-SP form.
+        let line = "SIP/2.0 200 "; // trailing SP, empty reason
+        let result = parse_status_line(line);
+        assert!(result.is_ok(), "empty reason phrase is RFC-legal");
+        let (_, code, reason) = result.unwrap();
+        assert_eq!(code, StatusCode::OK);
         assert_eq!(reason, "");
     }
 

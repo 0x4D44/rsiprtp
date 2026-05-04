@@ -1099,30 +1099,18 @@ pub fn assert_equivalent(bytes: &[u8]) {
             );
         }
         (Err(e), Ok(b)) => {
-            // Known-asymmetry skip (M11 fuzz finding #12): rsip 0.4's
-            // status-line tokenizer requires a literal SP between
-            // Status-Code and Reason-Phrase, even when the reason is
-            // empty (`take(3) + tag(" ")`). RFC 3261 §7.2 BNF
-            // technically requires the SP, but real-world stacks emit
-            // `"SIP/2.0 200\r\n"` with no trailing SP and our parser
-            // stays lenient via `splitn(3, ' ')`. The rsip rejection
-            // surfaces as a `(Tag)` "Tokenizer error". Conservative
-            // heuristic: only skip when rsip produced a Tokenizer
-            // error AND there is at least one high-bit (≥0x80) byte
-            // early in the input (first 80 bytes — wide enough to
-            // cover the start-line and the first header value,
-            // narrow enough not to mask body-byte issues). The
-            // narrower no-high-bit shape is unlikely to surface in
-            // fuzz mutations of well-formed corpus inputs and would
-            // be a useful rediscovery. Pin:
-            // `status_line_no_reason_sp_rsip_rejects_we_accept`.
-            // When rsip is dropped at M10, this skip can be retired
-            // with that pin.
-            let rsip_err = e.to_string();
-            let has_high_byte_early = bytes.iter().take(80).any(|&x| x >= 0x80);
-            if rsip_err.contains("Tokenizer error") && has_high_byte_early {
-                return;
-            }
+            // Previously this arm carried a known-asymmetry skip for
+            // M11 fuzz finding #12 (rsip rejected status lines without
+            // SP after the status code; we accepted them via
+            // `splitn(3, ' ')`). The skip used a heuristic — rsip
+            // "Tokenizer error" + a high-bit (≥0x80) byte in the first
+            // 80 bytes — which always carried a risk of masking
+            // unrelated tokenizer divergences with high-byte mutations
+            // near the front. M11 finding #12 is now closed at the
+            // framing layer (`parse_status_line` requires the SP per
+            // RFC 3261 §7.2 BNF), so the skip is retired. Future
+            // (Err, Ok) divergences with high-byte payloads will
+            // surface as real findings to triage.
             panic!(
                 "ours accepted but rsip rejected:\n\
                  {b:#?}\n\
