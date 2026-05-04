@@ -61,6 +61,37 @@ fn find_header_separator(bytes: &[u8]) -> Option<usize> {
         .or_else(|| bytes.windows(2).position(|w| w == b"\n\n"))
 }
 
+/// Returns true if `bytes` contains a bare LF (an LF not immediately
+/// preceded by CR) anywhere before the first `\r\n`. This is the
+/// region rsip 0.4's status-line / request-line tokenizer reads as
+/// part of the start line (its `take_until("\r\n")` reason/version
+/// parser stops only at the first `\r\n`, so any bare LF in this
+/// region is silently absorbed into the reason-phrase or
+/// request-uri). RFC 3261 §7.1 / §7.2 mandate CRLF as the line
+/// terminator; bare LF in the start line is malformed under the BNF.
+///
+/// Used by the `(Ok, Ok)` arm of [`assert_equivalent`] to recognise
+/// the fuzz-discovered shape where a bare LF in the start-line
+/// region causes rsip to absorb the following bytes (up to the next
+/// CRLF) into the reason phrase, while our parser's `find_separator`
+/// LFLF fallback splits at the bare LFLF and surfaces the same bytes
+/// as body. Both behaviors are non-RFC-strict; rsip's is the more
+/// egregious deviation. Documented in
+/// `body_starts_with_header_like_line_rsip_misinterprets`.
+fn has_bare_lf_in_start_line(bytes: &[u8]) -> bool {
+    let crlf_pos = bytes
+        .windows(2)
+        .position(|w| w == b"\r\n")
+        .unwrap_or(bytes.len());
+    let start_region = &bytes[..crlf_pos];
+    for (i, &b) in start_region.iter().enumerate() {
+        if b == b'\n' && (i == 0 || start_region[i - 1] != b'\r') {
+            return true;
+        }
+    }
+    false
+}
+
 // ---------------------------------------------------------------
 // Neutral representation
 // ---------------------------------------------------------------
@@ -1071,6 +1102,36 @@ pub fn assert_equivalent(bytes: &[u8]) {
                 // `body_leading_crlf_rsip_strips_we_preserve` in
                 // `parser_diff.rs`. When rsip is dropped at M10, this
                 // skip can be retired with that pin.
+            } else if a.kind == b.kind && has_bare_lf_in_start_line(bytes) {
+                // Known-asymmetry skip (M11 fuzz finding #6): a bare LF
+                // in the start-line region (LF not immediately preceded
+                // by CR, before the first `\r\n`) trips two mutually
+                // amplifying non-RFC behaviors:
+                //
+                // - rsip 0.4's status / request-line tokenizer uses
+                //   `take_until("\r\n")` for the reason / request-uri
+                //   tail, so it silently absorbs bare LFs into the
+                //   reason phrase. RFC 3261 §7.2 BNF excludes LF from
+                //   `Reason-Phrase`; only CRLF terminates the line.
+                //   This is the same family as M11 finding #13
+                //   (already pinned via
+                //   `header_missing_colon_rsip_accepts_we_reject`).
+                // - Our parser's `find_separator` accepts `\n\n` as a
+                //   header/body separator fallback (deliberate
+                //   compatibility leniency, pinned by
+                //   `framing::test_split_message_lf_only_fallback`).
+                //   When the wire contains an LFLF in this region, we
+                //   split there and surface the bytes that follow as
+                //   body — including bytes that, viewed as ASCII, look
+                //   like header lines.
+                //
+                // Net effect: same status code, but rsip parses some
+                // bytes as headers that we treat as body (or vice
+                // versa). Both are non-RFC-strict but the kind / status
+                // agree. Pin:
+                // `body_starts_with_header_like_line_rsip_misinterprets`
+                // in `parser_diff.rs`. When rsip is dropped at M10,
+                // this skip can be retired with that pin.
             } else {
                 panic!(
                     "DIVERGENCE on parse-success.\n\

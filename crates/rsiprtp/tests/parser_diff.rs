@@ -579,6 +579,86 @@ fn status_line_missing_sp_after_code_both_reject() {
     assert_both_reject("status_line_missing_sp_after_code", bytes);
 }
 
+/// M11 fuzz finding #6: a bare LF in the start-line region (LF not
+/// immediately preceded by CR, appearing before the first `\r\n`)
+/// trips two mutually amplifying non-RFC behaviors and produces a
+/// `(Ok, Ok)` divergence where both parsers accept the same status
+/// code but disagree on framing.
+///
+/// The wire shape is:
+/// `SIP/2.0 202 \n\n6.55554\r\n4:::::::::::*\r\n[13 body bytes]`.
+/// Note there is **no** `\r\n\r\n` anywhere — only an LFLF after the
+/// status line and single CRLFs separating the two header-like lines.
+///
+/// **rsip 0.4**: its status-line tokenizer (`response::Tokenizer`) is
+/// `version SP status_code <reason via take_until("\r\n")> tag("\r\n")`.
+/// `take_until("\r\n")` silently absorbs bare LFs — so the reason is
+/// `"\n\n6.55554"` and the first `\r\n` after `6.55554` terminates
+/// the status line. The header section is then `4:::::::::::*`
+/// followed by a single CRLF, which the alt-fallback
+/// `take_until("\r\n") + tag("\r\n")` consumes. rsip ends up with
+/// one header `("4", "::::::::::*")` and a 13-byte body. RFC 3261
+/// §7.2 BNF excludes LF from `Reason-Phrase`; rsip is non-strict.
+/// Same family as M11 finding #13 (pinned via
+/// `header_missing_colon_rsip_accepts_we_reject`).
+///
+/// **Our parser**: `framing::find_separator` prefers `\r\n\r\n` but
+/// falls back to `\n\n` (deliberate compatibility leniency, pinned
+/// by `framing::test_split_message_lf_only_fallback`). With no
+/// `\r\n\r\n` in the input, we split at the LFLF immediately after
+/// the status line. Header block is empty; body is the remaining 37
+/// bytes — including `6.55554\r\n4:::::::::::*\r\n` which, viewed
+/// as ASCII, looks like header lines. RFC 3261 §7.5 says the body
+/// is what follows CRLFCRLF; our LFLF fallback is non-strict.
+///
+/// **Divergence pinned**: both accept; same status (202); different
+/// framing (rsip 1 hdr / 13 body, ours 0 hdr / 37 body). The fuzz
+/// oracle's `(Ok, Ok)` arm carries a `has_bare_lf_in_start_line`
+/// skip that catches this whole family without enumerating wire
+/// shapes (any bare LF before the first `\r\n` is the trigger).
+/// When rsip is dropped at M10, this skip can be retired together
+/// with the pin and the framing-side LFLF fallback can be
+/// reconsidered (closing the divergence on our side too).
+///
+/// Update this test if rsip stops absorbing bare LFs in the
+/// start-line region or if we tighten `find_separator` to reject
+/// the LFLF fallback.
+#[test]
+fn body_starts_with_header_like_line_rsip_misinterprets() {
+    // The trigger: a bare LF in the start-line region. Here the LFLF
+    // immediately after `SIP/2.0 202 ` is what flips the framing on
+    // our side; the SAME bytes are what rsip silently absorbs into
+    // its reason phrase. M11 fuzz finding #6.
+    let bytes: &[u8] = b"SIP/2.0 202 \n\n6.55554\r\n4:::::::::::*\r\n\x00\x00\x00z*4(\r\n@\nTT";
+    let rs = oracle::rsip_to_diff(bytes).expect("rsip should accept");
+    let ours = oracle::ours_to_diff(bytes).expect("ours should accept");
+    // Same status, different framing.
+    assert_eq!(rs.kind, ours.kind, "both parsers see Response 202");
+    assert_eq!(
+        rs.headers.len(),
+        1,
+        "rsip absorbs bare-LF prefix into reason and parses one header",
+    );
+    assert_eq!(rs.headers[0].0, "4", "rsip's single header is name=\"4\"",);
+    assert_eq!(rs.body.len(), 13, "rsip's body is 13 bytes after CRLFCRLF");
+    assert!(
+        ours.headers.is_empty(),
+        "ours splits at the LFLF after the status line, no headers",
+    );
+    assert_eq!(
+        ours.body.len(),
+        37,
+        "ours's body is the prefix + the 13 trailing bytes (24 + 13)",
+    );
+    // Sanity: ours's body END must equal rsip's body (the same 13
+    // trailing bytes). The 24-byte prefix is what rsip absorbed.
+    assert_eq!(
+        &ours.body[ours.body.len() - rs.body.len()..],
+        &rs.body[..],
+        "ours's body trails with the same 13 bytes rsip sees as body",
+    );
+}
+
 // ---------------------------------------------------------------
 // Tests against the rsiprtp fuzz corpus (populated by M11)
 // ---------------------------------------------------------------

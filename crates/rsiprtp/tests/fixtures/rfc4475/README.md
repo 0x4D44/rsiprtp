@@ -83,15 +83,27 @@ absorbs a bare LF, without preceding CR, into the status-line
 Reason-Phrase, consuming the next line's bytes; RFC 3261 §7.2 BNF
 mandates CRLF as the line terminator and excludes LF from the
 Reason-Phrase character set. The "missing ':'" error from our parser
-is the visible proxy for this rsip-side issue.), and the M11 fuzz
+is the visible proxy for this rsip-side issue.), the M11 fuzz
 finding #14
 (`header_section_contains_nul_rsip_rejects_we_accept` — rsip 0.4's
 nom-based tokenizer rejects a NUL byte (`0x00`) in a header value
 with a `Tokenizer error`; RFC 3261 §7.3 does not strictly forbid NUL
 in header values and §25.1 OCTET grammar admits any byte. Our parser
 accepts per the M2-A pinned permissive policy
-(`test_header_with_embedded_nul_pinned_accepted`)), the running rsip 0.4
-spec-deficiency count is **13 active distinct types**. All are retargeted
+(`test_header_with_embedded_nul_pinned_accepted`)), and the M11 fuzz
+finding #6
+(`body_starts_with_header_like_line_rsip_misinterprets` — a bare LF
+in the start-line region (before the first `\r\n`) trips two mutually
+amplifying non-RFC behaviors: rsip 0.4 absorbs the bare LF into the
+reason phrase via `take_until("\r\n")` (same family as #13), while our
+`find_separator` LFLF fallback splits at the bare LFLF. Both parsers
+accept the same status code but disagree on framing — rsip parses
+some bytes as headers that we surface as body. RFC 3261 §7.1/§7.2
+mandate CRLF as the line terminator; both parsers are non-strict but
+the kind / status agree. The oracle's `(Ok, Ok)` arm carries a
+`has_bare_lf_in_start_line` predicate that catches this whole class
+without enumerating wire shapes), the running rsip 0.4
+spec-deficiency count is **14 active distinct types**. All are retargeted
 to direct on-our-parser assertions when rsip is dropped from runtime
 deps at M10.
 
