@@ -64,14 +64,18 @@ cover.
 Combined with the pre-M6 pins (`diff_handcrafted_invite_folded_subject`,
 `typed_from_quoted_param_value_rsip_rejects_broadly`,
 `typed_from_quoted_param_value_with_semicolon_rsip_rejects`,
-`typed_via_ipv6_rsip_rejects`) and the pre-fuzz hardening pin
+`typed_via_ipv6_rsip_rejects`), the pre-fuzz hardening pin
 (`typed_contact_wildcard_with_params_rsip_misclassifies` — RFC 3261
 §10.2.2 `Contact: *;expires=0` is the canonical REGISTER unbinding
 shape; our parser produces a typed `Wildcard { params }`, rsip 0.4
-misclassifies the `*` as a `Domain` host of an addr-spec), the
-running rsip 0.4 spec-deficiency count is **9 distinct types**. All
-are retargeted to direct on-our-parser assertions when rsip is
-dropped from runtime deps at M10.
+misclassifies the `*` as a `Domain` host of an addr-spec), and the
+M11 fuzz finding #10
+(`typed_status_line_sip1_x_version_rsip_accepts_we_reject` — rsip
+accepts `SIP/1.x` and other arbitrary `SIP/N.M` versions; RFC 3261
+§7.1 mandates exactly `SIP/2.0`), the running rsip 0.4
+spec-deficiency count is **10 distinct types**. All are retargeted
+to direct on-our-parser assertions when rsip is dropped from runtime
+deps at M10.
 
 ## Parser bug fixed in this milestone
 

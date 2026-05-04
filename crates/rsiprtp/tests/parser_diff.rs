@@ -367,6 +367,41 @@ fn diff_request_line_with_non_sip_uri_rsip_accepts_we_reject() {
     );
 }
 
+/// M11 fuzz finding #10: rsip 0.4 accepts `SIP/x.y` for arbitrary
+/// `x.y` in the status line (`SIP/1.0`, `SIP/1.25`, etc.). RFC 3261
+/// §7.1 mandates *exactly* `SIP/2.0` ("The current SIP version is
+/// 'SIP/2.0'. The version is case-sensitive."). Our parser was
+/// tightened in M11 to enforce that, so we correctly reject these.
+///
+/// Note rsip is *internally inconsistent* — an earlier M11 finding
+/// showed it rejects `SIP/0` while still accepting `SIP/1.x`,
+/// suggesting a numeric-range check that allows some forms. The
+/// fuzz oracle's known-asymmetry skip (see
+/// `parser_diff_oracle::assert_equivalent`) prevents libfuzzer from
+/// rediscovering variants of this each run.
+///
+/// **Divergence pinned:** rsip accepts, ours rejects. When rsip is
+/// dropped at M10 this test should be retargeted to a direct
+/// on-our-parser rejection assertion.
+#[test]
+fn typed_status_line_sip1_x_version_rsip_accepts_we_reject() {
+    let bytes = b"SIP/1.0 200 OK\r\nCall-ID: x\r\nCSeq: 1 INVITE\r\n\
+                  From: <sip:a>\r\nTo: <sip:b>\r\nVia: SIP/2.0/UDP h\r\n\
+                  Content-Length: 0\r\n\r\n";
+    let rs = rsip::SipMessage::try_from(&bytes[..]);
+    assert!(
+        rs.is_ok(),
+        "rsip 0.4 accepts SIP/1.0 status lines; got Err({rs:?}) — \
+         update this test if rsip stops accepting non-2.0 versions",
+    );
+    let ours = OurMessage::parse(bytes);
+    assert!(
+        ours.is_err(),
+        "our parser must reject non-SIP/2.0 per RFC 3261 §7.1; \
+         got Ok({ours:?})",
+    );
+}
+
 // ---------------------------------------------------------------
 // Tests against the rsiprtp fuzz corpus (populated by M11)
 // ---------------------------------------------------------------

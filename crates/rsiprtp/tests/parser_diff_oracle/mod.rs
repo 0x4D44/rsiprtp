@@ -1046,11 +1046,41 @@ pub fn assert_equivalent(bytes: &[u8]) {
             }
         }
         (Err(_), Err(_)) => { /* both rejected — fine, errors may differ */ }
-        (Ok(a), Err(e)) => panic!(
-            "rsip accepted but ours rejected:\n\
-             {a:#?}\n\
-             ours error: {e}",
-        ),
+        (Ok(a), Err(e)) => {
+            // Known-asymmetry skip: rsip 0.4 is more permissive than
+            // RFC 3261 in three documented places. Each is pinned by a
+            // dedicated unit test in `parser_diff.rs`; here we keep the
+            // fuzz harness from rediscovering these as "divergences"
+            // every time the corpus mutates near the relevant byte.
+            //
+            // 1. SIP-Version: RFC 3261 §7.1 mandates exactly `SIP/2.0`.
+            //    rsip accepts arbitrary `SIP/N.M`. Pin:
+            //    `typed_status_line_sip1_x_version_rsip_accepts_we_reject`
+            //    (M11 fuzz finding #10).
+            // 2. Status code range: RFC 3261 §7.2 mandates [100, 699].
+            //    rsip accepts any 3-digit code. Pinned at framing
+            //    (M11 finding) — see `parse_status_line` range check.
+            // 3. Request-URI scheme: our M8 framing-time check rejects
+            //    non-SIP/SIPS/TEL Request-URIs to keep
+            //    `SipRequest::uri()` panic-free. Pin:
+            //    `diff_request_line_with_non_sip_uri_rsip_accepts_we_reject`.
+            //
+            // None of these are genuine divergences for fuzz purposes.
+            // When rsip is dropped from runtime deps at M10, this skip
+            // can be retired with the pinning tests.
+            let msg = e.to_string();
+            if msg.contains("invalid SIP version")
+                || msg.contains("status code out of range")
+                || msg.contains("invalid Request-URI")
+            {
+                return;
+            }
+            panic!(
+                "rsip accepted but ours rejected:\n\
+                 {a:#?}\n\
+                 ours error: {e}",
+            );
+        }
         (Err(e), Ok(b)) => panic!(
             "ours accepted but rsip rejected:\n\
              {b:#?}\n\
