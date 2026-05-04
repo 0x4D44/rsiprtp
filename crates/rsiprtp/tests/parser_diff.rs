@@ -1377,6 +1377,42 @@ fn diff_rfc4475_invalid_garbage_start() {
     assert_both_reject("badaspec_garbage_start", bytes);
 }
 
+/// M8 reviewer scenario: a structurally-complete request whose
+/// Request-URI is not a SIP/SIPS/TEL URI (here: `http://x`). RFC
+/// 3261 §25 production for Request-URI is `SIP-URI / SIPS-URI /
+/// absoluteURI`, but absoluteURI does not include arbitrary
+/// non-SIP schemes by default in the message router — and more
+/// importantly, our `SipRequest::uri()` accessor calls
+/// `SipUri::parse` which only knows `sip` / `sips` / `tel`. Before
+/// the M8 framing-time validation this fixture would survive
+/// framing on our side and then panic in `SipRequest::uri()` —
+/// attacker-controlled DoS. Our framer must now reject.
+///
+/// **Divergence pinned:** rsip 0.4 accepts `http://x` and stores
+/// the scheme as `Scheme::Other("http")`. We deliberately tighten
+/// here: the fixture is rejected by us at framing time so the
+/// downstream wrapper accessors are infallible. When rsip is
+/// dropped from runtime deps at M10, this test should be
+/// retargeted to a direct on-our-parser rejection assertion.
+#[test]
+fn diff_request_line_with_non_sip_uri_rsip_accepts_we_reject() {
+    let bytes: &[u8] = b"INVITE http://x SIP/2.0\r\nCall-ID: x\r\nCSeq: 1 INVITE\r\n\
+                         From: <sip:a>\r\nTo: <sip:b>\r\nVia: SIP/2.0/UDP h\r\n\
+                         Max-Forwards: 70\r\nContent-Length: 0\r\n\r\n";
+    let rs = rsip::SipMessage::try_from(bytes);
+    assert!(
+        rs.is_ok(),
+        "rsip 0.4 accepts non-SIP Request-URIs as Scheme::Other; \
+         got Err({rs:?}) — update this test if rsip tightened",
+    );
+    let ours = OurMessage::parse(bytes);
+    assert!(
+        ours.is_err(),
+        "our framer must reject non-SIP Request-URI to keep \
+         SipRequest::uri() panic-free; got Ok({ours:?})",
+    );
+}
+
 // ---------------------------------------------------------------
 // Tests against the rsiprtp fuzz corpus (populated by M11)
 // ---------------------------------------------------------------

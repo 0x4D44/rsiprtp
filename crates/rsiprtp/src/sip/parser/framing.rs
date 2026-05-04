@@ -8,6 +8,7 @@ use super::header::{Header, Headers, MAX_HEADERS, MAX_HEADER_VALUE_LEN, MAX_STAR
 use super::method::Method;
 use super::status::StatusCode;
 use crate::core::SipError;
+use crate::sip::uri::SipUri;
 use std::str::FromStr;
 
 /// Split a SIP message into start line, header block, and body.
@@ -141,7 +142,14 @@ fn split_lines(s: &str) -> impl Iterator<Item = &str> {
 /// Parse a request line: `METHOD Request-URI SIP-Version`.
 ///
 /// Returns `(method, uri_raw, version)`. The URI is held as a raw
-/// `String` for now; M3 owns URI parsing.
+/// `String` for the Tier-1 contract, but is *validated* here by
+/// running it through [`SipUri::parse`] and discarding the result.
+/// This means any message that survives framing is guaranteed to
+/// have a Request-URI that re-parses cleanly downstream — eliminating
+/// the attacker-controlled DoS where `SipRequest::uri()` (which calls
+/// `SipUri::parse` on the stored string) would panic on a non-SIP
+/// URI such as `http://x` that whitespace-only validation would let
+/// through.
 pub fn parse_request_line(line: &str) -> Result<(Method, String, String), SipError> {
     if line.len() > MAX_START_LINE_LEN {
         return Err(SipError::Parse(format!(
@@ -155,14 +163,19 @@ pub fn parse_request_line(line: &str) -> Result<(Method, String, String), SipErr
         )));
     }
     let method = Method::from_str(parts[0])?;
-    let uri = parts[1].to_string();
+    let uri_str = parts[1];
     let version = parts[2].to_string();
     if !version.starts_with("SIP/") {
         return Err(SipError::Parse(format!(
             "invalid SIP version in request line: {version}",
         )));
     }
-    Ok((method, uri, version))
+    // Validate the Request-URI shape now so SipRequest::uri() — which
+    // re-parses this string via SipUri::parse — cannot be made to
+    // panic by a malformed peer. We discard the parsed value: storage
+    // remains String per the Tier-1 contract.
+    SipUri::parse(uri_str).map_err(|e| SipError::Parse(format!("invalid Request-URI: {e}")))?;
+    Ok((method, uri_str.to_string(), version))
 }
 
 /// Parse a status line: `SIP-Version Status-Code Reason-Phrase`.
@@ -353,6 +366,29 @@ mod tests {
         let line = "INVITE ".to_string() + &"x".repeat(MAX_START_LINE_LEN) + " SIP/2.0";
         let err = parse_request_line(&line).unwrap_err();
         assert!(matches!(err, SipError::Parse(_)));
+    }
+
+    #[test]
+    fn test_request_line_rejects_non_sip_uri() {
+        // Per M8 reviewer: INVITE with http:// URI must reject at framing time
+        // so SipRequest::uri() never panics.
+        let line = "INVITE http://example.com SIP/2.0";
+        let result = parse_request_line(line);
+        assert!(result.is_err(), "non-sip URI should be rejected");
+    }
+
+    #[test]
+    fn test_request_line_accepts_tel_uri() {
+        let line = "INVITE tel:+12025551234 SIP/2.0";
+        let result = parse_request_line(line);
+        assert!(result.is_ok(), "tel: URI should be accepted");
+    }
+
+    #[test]
+    fn test_request_line_accepts_sips_uri() {
+        let line = "INVITE sips:bob@example.com SIP/2.0";
+        let result = parse_request_line(line);
+        assert!(result.is_ok());
     }
 
     #[test]

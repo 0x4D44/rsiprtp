@@ -14,12 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callers inside `rsiprtp` and were the last public rsip-typed
   accessors.
 - **`Method::to_rsip()`** and the **`impl From<&rsip::Method> for Method`**
-  bridge. The internal request builder still needs an rsip method
-  while rsip remains the underlying parser (M7-M9 transition); a
-  private `method_to_rsip` helper covers that. Callers that previously
-  bridged from rsip to ours via `Method::from(&rsip_method)` now
-  round-trip via the canonical method-name string with the new
-  `Method::FromStr` impl, which is lossless for all 14 variants.
+  bridge. With M8's cutover to parser-native storage these no longer
+  have any in-tree caller; the previous `method_to_rsip` shim is also
+  gone. Callers that previously bridged from rsip to ours via
+  `Method::from(&rsip_method)` now round-trip via the canonical
+  method-name string with the new `Method::FromStr` impl, which is
+  lossless for all 14 variants.
 
 ### Added
 
@@ -36,6 +36,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Display` impl is identical, so call sites that did `.to_string()` on
   the old return value need no change. Test sites that asserted on
   `rsip::Uri`'s structural fields move to `SipUri`'s accessors.
+- **Internal storage of `SipRequest` / `SipResponse` is now the in-tree
+  parser type** (`parser::Request` / `parser::Response`). The wrapper
+  layer no longer holds rsip types — accessors project from
+  parser-native data. Public API contract from M7 is preserved.
+
+### Security
+
+- **Request-URI validated at framing time.** `parse_request_line` now
+  runs the Request-URI through `SipUri::parse` and rejects any URI
+  the owned-form decoder cannot accept (e.g. `http://`, malformed
+  schemes). Previously the framer accepted any whitespace-bounded
+  token, and `SipRequest::uri()` would panic downstream — an
+  attacker-controlled DoS on the inbound path. Inputs that survive
+  framing are now guaranteed to round-trip through `SipUri::parse`.
 
 ## [0.3.0] — 2026-05-02
 

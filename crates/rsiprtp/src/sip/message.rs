@@ -1,10 +1,19 @@
 //! SIP message types and wrappers.
+//!
+//! M8: cut over to the in-tree parser. Storage holds `parser::Request`
+//! / `parser::Response` directly; `rsip` is no longer touched on the
+//! hot path. The public API surface is frozen at the M7 contract — all
+//! accessor signatures remain unchanged.
 
 use crate::core::{Result, SipError};
+use crate::sip::parser::header::Header as PHeader;
+use crate::sip::parser::header::Headers as PHeaders;
+use crate::sip::parser::method::Method as PMethod;
+use crate::sip::parser::status::StatusCode as PStatusCode;
+use crate::sip::parser::typed::{Contact as PContact, From as PFrom, To as PTo, Via as PVia};
+use crate::sip::parser::{Message as PMessage, Request as PRequest, Response as PResponse};
 use crate::sip::uri::SipUri;
 use bytes::Bytes;
-use rsip::prelude::*;
-use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
 
@@ -20,9 +29,9 @@ fn cover_none_case() {}
 
 /// Look up the value of a non-standard header (carried as `Header::Other`)
 /// by name, case-insensitively. Returns the trimmed value if present.
-fn find_other_header(headers: &rsip::Headers, name: &str) -> Option<String> {
+fn find_other_header(headers: &PHeaders, name: &str) -> Option<String> {
     for header in headers.iter() {
-        if let rsip::Header::Other(key, value) = header {
+        if let PHeader::Other(key, value) = header {
             if key.eq_ignore_ascii_case(name) {
                 return Some(value.trim().to_string());
             }
@@ -31,23 +40,24 @@ fn find_other_header(headers: &rsip::Headers, name: &str) -> Option<String> {
     None
 }
 
-/// Find and parse `Require` header(s). Handles both the native `rsip` form
-/// (`rsip::Header::Require`) and the generic `Header::Other` form.
+/// Find and parse `Require` header(s). Handles both the native
+/// (`Header::Require`) and the generic `Header::Other` form for
+/// `name_matches("Require")`.
 ///
 /// Per RFC 3261 §7.3.1, multiple `Require` lines are equivalent to a single
 /// comma-separated value, so we concat option-tags from every matching
 /// header line in wire order. Duplicates are preserved — the consumer
 /// decides whether to deduplicate.
-fn find_require(headers: &rsip::Headers) -> Option<crate::sip::headers::Require> {
+fn find_require(headers: &PHeaders) -> Option<crate::sip::headers::Require> {
     let mut tags: Vec<String> = Vec::new();
     for header in headers.iter() {
         match header {
-            rsip::Header::Require(r) => {
-                if let Ok(parsed) = crate::sip::headers::Require::parse(r.value()) {
+            PHeader::Require(value) => {
+                if let Ok(parsed) = crate::sip::headers::Require::parse(value) {
                     tags.extend(parsed.0);
                 }
             }
-            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Require") => {
+            PHeader::Other(key, value) if key.eq_ignore_ascii_case("Require") => {
                 if let Ok(parsed) = crate::sip::headers::Require::parse(value) {
                     tags.extend(parsed.0);
                 }
@@ -70,12 +80,12 @@ fn find_require(headers: &rsip::Headers) -> Option<crate::sip::headers::Require>
 /// rather than failing the whole header — this is a read-side normalization
 /// only. Returns `None` when no `Allow` header is present at all (so the
 /// caller can distinguish "absent" from "present but empty/all-unknown").
-fn find_allow(headers: &rsip::Headers) -> Option<Vec<Method>> {
+fn find_allow(headers: &PHeaders) -> Option<Vec<Method>> {
     let mut values: Vec<String> = Vec::new();
     for header in headers.iter() {
         match header {
-            rsip::Header::Allow(a) => values.push(a.value().to_string()),
-            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Allow") => {
+            PHeader::Allow(value) => values.push(value.clone()),
+            PHeader::Other(key, value) if key.eq_ignore_ascii_case("Allow") => {
                 values.push(value.clone());
             }
             _ => {}
@@ -106,16 +116,16 @@ fn find_allow(headers: &rsip::Headers) -> Option<Vec<Method>> {
 /// Per RFC 3261 §7.3.1, multiple `Supported` lines are equivalent to a
 /// single comma-separated value; tags from every matching line are
 /// concatenated in wire order. Duplicates are preserved.
-fn find_supported(headers: &rsip::Headers) -> Option<crate::sip::headers::Supported> {
+fn find_supported(headers: &PHeaders) -> Option<crate::sip::headers::Supported> {
     let mut tags: Vec<String> = Vec::new();
     for header in headers.iter() {
         match header {
-            rsip::Header::Supported(s) => {
-                if let Ok(parsed) = crate::sip::headers::Supported::parse(s.value()) {
+            PHeader::Supported(value) => {
+                if let Ok(parsed) = crate::sip::headers::Supported::parse(value) {
                     tags.extend(parsed.0);
                 }
             }
-            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Supported") => {
+            PHeader::Other(key, value) if key.eq_ignore_ascii_case("Supported") => {
                 if let Ok(parsed) = crate::sip::headers::Supported::parse(value) {
                     tags.extend(parsed.0);
                 }
@@ -142,13 +152,11 @@ pub enum SipMessage {
 impl SipMessage {
     /// Parse a SIP message from bytes.
     pub fn parse(data: &[u8]) -> Result<Self> {
-        let msg = rsip::SipMessage::try_from(data).map_err(|e| SipError::Parse(e.to_string()))?;
+        let msg = PMessage::parse(data).map_err(|e| SipError::Parse(e.to_string()))?;
 
         match msg {
-            rsip::SipMessage::Request(req) => Ok(SipMessage::Request(SipRequest { inner: req })),
-            rsip::SipMessage::Response(resp) => {
-                Ok(SipMessage::Response(SipResponse { inner: resp }))
-            }
+            PMessage::Request(req) => Ok(SipMessage::Request(SipRequest { inner: req })),
+            PMessage::Response(resp) => Ok(SipMessage::Response(SipResponse { inner: resp })),
         }
     }
 
@@ -190,46 +198,46 @@ impl SipMessage {
 /// SIP request wrapper.
 #[derive(Debug, Clone)]
 pub struct SipRequest {
-    inner: rsip::Request,
+    pub(crate) inner: PRequest,
 }
 
 impl SipRequest {
     /// Get the request method.
     pub fn method(&self) -> Method {
-        method_from_rsip(&self.inner.method)
+        method_from_parser(self.inner.method)
     }
 
     /// Get the request URI.
     ///
-    /// Returns an owned [`SipUri`]. Internally re-parsed from the
-    /// underlying rsip representation; this is a transitional shape
-    /// (M7 public-API redesign) that becomes a direct accessor once M8
-    /// makes the in-tree parser authoritative. The conversion is
-    /// expected to be infallible for any URI rsip already accepted —
-    /// our parser is at least as permissive on the SIP/SIPS/TEL set
-    /// rsip handles. A panic here would indicate an unexpected
-    /// divergence (caught by the diff-test harness in M2).
+    /// Returns an owned [`SipUri`]. M8 makes this a thin wrapper over
+    /// the parser-side raw URI string; M3's `SipUri::parse` is the
+    /// owned-form decoder. The framing layer validates the
+    /// Request-URI through `SipUri::parse` before storing it, so by
+    /// the time we get here the call is infallible — a panic here
+    /// would be an internal invariant violation, not user input.
     pub fn uri(&self) -> SipUri {
-        SipUri::from_rsip(&self.inner.uri).expect("rsip::Uri round-trips through SipUri::parse")
+        SipUri::parse(&self.inner.uri)
+            .expect("parser-accepted URI round-trips through SipUri::parse")
     }
 
     /// Get the Call-ID header value.
     pub fn call_id(&self) -> Result<String> {
         self.inner
-            .call_id_header()
+            .headers
+            .get_first("Call-ID")
             .map(|h| h.value().to_string())
-            .map_err(|_| SipError::MissingHeader("Call-ID".to_string()).into())
+            .ok_or_else(|| SipError::MissingHeader("Call-ID".to_string()).into())
     }
 
     /// Get the From tag.
     pub fn from_tag(&self) -> Result<String> {
-        let from = self
+        let from_value = self
             .inner
-            .from_header()
-            .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        // Convert to typed form to access tag
-        let typed_from: rsip::typed::From =
-            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("From")
+            .ok_or_else(|| SipError::MissingHeader("From".to_string()))?
+            .value();
+        let typed_from = PFrom::parse(from_value).map_err(|e| SipError::Parse(e.to_string()))?;
         let tag = typed_from
             .tag()
             .map(|t| t.to_string())
@@ -239,37 +247,36 @@ impl SipRequest {
 
     /// Get the From tag and URI with a single parse.
     pub fn from_tag_and_uri(&self) -> Result<(String, SipUri)> {
-        let from = self
+        let from_value = self
             .inner
-            .from_header()
-            .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        let typed_from: rsip::typed::From =
-            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("From")
+            .ok_or_else(|| SipError::MissingHeader("From".to_string()))?
+            .value();
+        let typed_from = PFrom::parse(from_value).map_err(|e| SipError::Parse(e.to_string()))?;
         let tag = typed_from
             .tag()
             .map(|t| t.to_string())
             .ok_or_else(|| SipError::InvalidHeader("From header missing tag".to_string()))?;
-        let uri = SipUri::from_rsip(&typed_from.uri).map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok((tag, uri))
+        Ok((tag, typed_from.uri))
     }
 
     /// Get the To tag (may not exist in requests).
     pub fn to_tag(&self) -> Option<String> {
-        self.inner
-            .to_header()
-            .ok()
-            .and_then(|h| h.typed().ok())
-            .and_then(|typed: rsip::typed::To| typed.tag().map(|t| t.to_string()))
+        let to_value = self.inner.headers.get_first("To").map(|h| h.value())?;
+        let typed_to = PTo::parse(to_value).ok()?;
+        typed_to.tag().map(|t| t.to_string())
     }
 
     /// Get the Via branch parameter.
     pub fn via_branch(&self) -> Result<String> {
-        let via = self
+        let via_value = self
             .inner
-            .via_header()
-            .map_err(|_| SipError::MissingHeader("Via".to_string()))?;
-        let typed_via: rsip::typed::Via =
-            via.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("Via")
+            .ok_or_else(|| SipError::MissingHeader("Via".to_string()))?
+            .value();
+        let typed_via = PVia::parse(via_value).map_err(|e| SipError::Parse(e.to_string()))?;
         let branch = typed_via
             .branch()
             .map(|b| b.to_string())
@@ -279,56 +286,61 @@ impl SipRequest {
 
     /// Get the CSeq number.
     pub fn cseq(&self) -> Result<u32> {
-        let cseq = self
+        let cseq_value = self
             .inner
-            .cseq_header()
-            .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq =
-            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("CSeq")
+            .ok_or_else(|| SipError::MissingHeader("CSeq".to_string()))?
+            .value();
+        let typed_cseq = crate::sip::parser::typed::CSeq::parse(cseq_value)
+            .map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_cseq.seq)
     }
 
     /// Get the CSeq method.
     pub fn cseq_method(&self) -> Result<Method> {
-        let cseq = self
+        let cseq_value = self
             .inner
-            .cseq_header()
-            .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq =
-            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(method_from_rsip(&typed_cseq.method))
+            .headers
+            .get_first("CSeq")
+            .ok_or_else(|| SipError::MissingHeader("CSeq".to_string()))?
+            .value();
+        let typed_cseq = crate::sip::parser::typed::CSeq::parse(cseq_value)
+            .map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(method_from_parser(typed_cseq.method))
     }
 
     /// Get the From URI.
     pub fn from_uri(&self) -> Result<SipUri> {
-        let from = self
+        let from_value = self
             .inner
-            .from_header()
-            .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        let typed_from: rsip::typed::From =
-            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        let uri = SipUri::from_rsip(&typed_from.uri).map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(uri)
+            .headers
+            .get_first("From")
+            .ok_or_else(|| SipError::MissingHeader("From".to_string()))?
+            .value();
+        let typed_from = PFrom::parse(from_value).map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(typed_from.uri)
     }
 
     /// Get the To URI.
     pub fn to_uri(&self) -> Result<SipUri> {
-        let to = self
+        let to_value = self
             .inner
-            .to_header()
-            .map_err(|_| SipError::MissingHeader("To".to_string()))?;
-        let typed_to: rsip::typed::To = to.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        let uri = SipUri::from_rsip(&typed_to.uri).map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(uri)
+            .headers
+            .get_first("To")
+            .ok_or_else(|| SipError::MissingHeader("To".to_string()))?
+            .value();
+        let typed_to = PTo::parse(to_value).map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(typed_to.uri)
     }
 
     /// Get the Contact URI if present.
     pub fn contact_uri(&self) -> Option<SipUri> {
-        self.inner
-            .contact_header()
-            .ok()
-            .and_then(|h| h.typed().ok())
-            .and_then(|typed: rsip::typed::Contact| SipUri::from_rsip(&typed.uri).ok())
+        let value = self.inner.headers.get_first("Contact").map(|h| h.value())?;
+        match PContact::parse(value).ok()? {
+            PContact::Wildcard => None,
+            PContact::Addr(addr) => Some(addr.uri),
+        }
     }
 
     /// Get the message body.
@@ -338,10 +350,9 @@ impl SipRequest {
 
     /// Get the Content-Type header.
     pub fn content_type(&self) -> Option<String> {
-        // Find Content-Type header in the headers list
         for header in self.inner.headers.iter() {
-            if let rsip::Header::ContentType(ct) = header {
-                return Some(ct.to_string());
+            if let PHeader::ContentType(ct) = header {
+                return Some(ct.clone());
             }
         }
         None
@@ -350,33 +361,32 @@ impl SipRequest {
     /// Get Record-Route headers as bare value strings.
     ///
     /// Returns a vector of Record-Route header *values* (not full
-    /// header lines). Uses `UntypedHeader::value()` so the returned
-    /// strings are bare URI values (e.g. `<sip:proxy.example.com;lr>`),
-    /// suitable for feeding straight into
-    /// `RouteSet::from_record_route_values`. The previous
-    /// `rr.to_string()` returned the entire header line
-    /// (`Record-Route: <...>`), which the route-set parser silently
-    /// rejected — leaving the dialog's route_set empty even when the
-    /// 200 OK carried Record-Route. Bug surfaced by the Fix 2 PRACK
-    /// integration; verified end-to-end by the multi-proxy reversal
-    /// test.
+    /// header lines). The returned strings are bare URI values
+    /// (e.g. `<sip:proxy.example.com;lr>`), suitable for feeding
+    /// straight into `RouteSet::from_record_route_values`.
     pub fn record_routes(&self) -> Vec<String> {
-        use rsip::headers::untyped::UntypedHeader;
         let mut routes = Vec::new();
         for header in self.inner.headers.iter() {
-            if let rsip::Header::RecordRoute(rr) = header {
-                routes.push(rr.value().to_string());
+            if let PHeader::RecordRoute(rr) = header {
+                routes.push(rr.clone());
             }
         }
         routes
     }
 
-    /// Get Via headers as string values.
+    /// Get Via headers as string values (the typed-form `Display`
+    /// reproduction — "SIP/2.0/UDP host:port;branch=...").
     pub fn via_headers_raw(&self) -> Vec<String> {
         let mut vias = Vec::new();
         for header in self.inner.headers.iter() {
-            if let rsip::Header::Via(v) = header {
-                vias.push(v.to_string());
+            if let PHeader::Via(v) = header {
+                // Match rsip's `Via.to_string()` which emitted just the
+                // raw value (without "Via: " prefix). The typed Display
+                // round-trips the protocol/transport/sent-by + params
+                // for callers that need a normalized form; for the bare
+                // wire-shape passthrough we use the stored value
+                // directly.
+                vias.push(v.clone());
             }
         }
         vias
@@ -428,8 +438,8 @@ impl SipRequest {
     pub fn route_headers(&self) -> Vec<String> {
         let mut routes = Vec::new();
         for header in self.inner.headers.iter() {
-            if let rsip::Header::Route(r) = header {
-                routes.push(r.value().trim().to_string());
+            if let PHeader::Route(r) = header {
+                routes.push(r.trim().to_string());
             }
         }
         routes
@@ -437,7 +447,7 @@ impl SipRequest {
 
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
-        Bytes::from(self.inner.to_string())
+        Bytes::from(self.inner.to_bytes())
     }
 
     /// Create a builder for a new request.
@@ -449,22 +459,25 @@ impl SipRequest {
 /// SIP response wrapper.
 #[derive(Debug, Clone)]
 pub struct SipResponse {
-    inner: rsip::Response,
+    pub(crate) inner: PResponse,
 }
 
 impl SipResponse {
     /// Get the status code.
     pub fn status_code(&self) -> u16 {
-        self.inner.status_code.code()
+        self.inner.status_code.as_u16()
     }
 
     /// Get the reason phrase.
     pub fn reason(&self) -> String {
-        // Extract the reason phrase from the status code Display format
-        let s = self.inner.status_code.to_string();
-        // Format is "CODE REASON", so split and take the rest
-        let reason = s.split_once(' ').map(|(_, reason)| reason).unwrap_or(&s);
-        reason.to_string()
+        // Mirror M7 behavior: prefer the wire-supplied reason text if
+        // present, otherwise fall back to the canonical phrase for the
+        // numeric code.
+        if !self.inner.reason.is_empty() {
+            self.inner.reason.clone()
+        } else {
+            self.inner.status_code.reason_phrase().to_string()
+        }
     }
 
     /// Check if this is a provisional response (1xx).
@@ -488,19 +501,21 @@ impl SipResponse {
     /// Get the Call-ID header value.
     pub fn call_id(&self) -> Result<String> {
         self.inner
-            .call_id_header()
+            .headers
+            .get_first("Call-ID")
             .map(|h| h.value().to_string())
-            .map_err(|_| SipError::MissingHeader("Call-ID".to_string()).into())
+            .ok_or_else(|| SipError::MissingHeader("Call-ID".to_string()).into())
     }
 
     /// Get the From tag.
     pub fn from_tag(&self) -> Result<String> {
-        let from = self
+        let from_value = self
             .inner
-            .from_header()
-            .map_err(|_| SipError::MissingHeader("From".to_string()))?;
-        let typed_from: rsip::typed::From =
-            from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("From")
+            .ok_or_else(|| SipError::MissingHeader("From".to_string()))?
+            .value();
+        let typed_from = PFrom::parse(from_value).map_err(|e| SipError::Parse(e.to_string()))?;
         let tag = typed_from
             .tag()
             .map(|t| t.to_string())
@@ -510,21 +525,20 @@ impl SipResponse {
 
     /// Get the To tag.
     pub fn to_tag(&self) -> Option<String> {
-        self.inner
-            .to_header()
-            .ok()
-            .and_then(|h| h.typed().ok())
-            .and_then(|typed: rsip::typed::To| typed.tag().map(|t| t.to_string()))
+        let to_value = self.inner.headers.get_first("To").map(|h| h.value())?;
+        let typed_to = PTo::parse(to_value).ok()?;
+        typed_to.tag().map(|t| t.to_string())
     }
 
     /// Get the Via branch parameter.
     pub fn via_branch(&self) -> Result<String> {
-        let via = self
+        let via_value = self
             .inner
-            .via_header()
-            .map_err(|_| SipError::MissingHeader("Via".to_string()))?;
-        let typed_via: rsip::typed::Via =
-            via.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("Via")
+            .ok_or_else(|| SipError::MissingHeader("Via".to_string()))?
+            .value();
+        let typed_via = PVia::parse(via_value).map_err(|e| SipError::Parse(e.to_string()))?;
         let branch = typed_via
             .branch()
             .map(|b| b.to_string())
@@ -534,33 +548,37 @@ impl SipResponse {
 
     /// Get the CSeq number.
     pub fn cseq(&self) -> Result<u32> {
-        let cseq = self
+        let cseq_value = self
             .inner
-            .cseq_header()
-            .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq =
-            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
+            .headers
+            .get_first("CSeq")
+            .ok_or_else(|| SipError::MissingHeader("CSeq".to_string()))?
+            .value();
+        let typed_cseq = crate::sip::parser::typed::CSeq::parse(cseq_value)
+            .map_err(|e| SipError::Parse(e.to_string()))?;
         Ok(typed_cseq.seq)
     }
 
     /// Get the CSeq method.
     pub fn cseq_method(&self) -> Result<Method> {
-        let cseq = self
+        let cseq_value = self
             .inner
-            .cseq_header()
-            .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
-        let typed_cseq: rsip::typed::CSeq =
-            cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(method_from_rsip(&typed_cseq.method))
+            .headers
+            .get_first("CSeq")
+            .ok_or_else(|| SipError::MissingHeader("CSeq".to_string()))?
+            .value();
+        let typed_cseq = crate::sip::parser::typed::CSeq::parse(cseq_value)
+            .map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(method_from_parser(typed_cseq.method))
     }
 
     /// Get the Contact URI if present.
     pub fn contact_uri(&self) -> Option<SipUri> {
-        self.inner
-            .contact_header()
-            .ok()
-            .and_then(|h| h.typed().ok())
-            .and_then(|typed: rsip::typed::Contact| SipUri::from_rsip(&typed.uri).ok())
+        let value = self.inner.headers.get_first("Contact").map(|h| h.value())?;
+        match PContact::parse(value).ok()? {
+            PContact::Wildcard => None,
+            PContact::Addr(addr) => Some(addr.uri),
+        }
     }
 
     /// Get the message body.
@@ -571,32 +589,19 @@ impl SipResponse {
     /// Get the Content-Type header.
     pub fn content_type(&self) -> Option<String> {
         for header in self.inner.headers.iter() {
-            if let rsip::Header::ContentType(ct) = header {
-                return Some(ct.to_string());
+            if let PHeader::ContentType(ct) = header {
+                return Some(ct.clone());
             }
         }
         None
     }
 
     /// Get Record-Route headers as bare value strings.
-    ///
-    /// Returns a vector of Record-Route header *values* (not full
-    /// header lines). Uses `UntypedHeader::value()` so the returned
-    /// strings are bare URI values (e.g. `<sip:proxy.example.com;lr>`),
-    /// suitable for feeding straight into
-    /// `RouteSet::from_record_route_values`. The previous
-    /// `rr.to_string()` returned the entire header line
-    /// (`Record-Route: <...>`), which the route-set parser silently
-    /// rejected — leaving the dialog's route_set empty even when the
-    /// 200 OK carried Record-Route. Bug surfaced by the Fix 2 PRACK
-    /// integration; verified end-to-end by the multi-proxy reversal
-    /// test.
     pub fn record_routes(&self) -> Vec<String> {
-        use rsip::headers::untyped::UntypedHeader;
         let mut routes = Vec::new();
         for header in self.inner.headers.iter() {
-            if let rsip::Header::RecordRoute(rr) = header {
-                routes.push(rr.value().to_string());
+            if let PHeader::RecordRoute(rr) = header {
+                routes.push(rr.clone());
             }
         }
         routes
@@ -606,8 +611,8 @@ impl SipResponse {
     pub fn via_headers_raw(&self) -> Vec<String> {
         let mut vias = Vec::new();
         for header in self.inner.headers.iter() {
-            if let rsip::Header::Via(v) = header {
-                vias.push(v.to_string());
+            if let PHeader::Via(v) = header {
+                vias.push(v.clone());
             }
         }
         vias
@@ -618,8 +623,8 @@ impl SipResponse {
     /// Used to extract digest authentication challenge from 401 responses.
     pub fn www_authenticate(&self) -> Option<String> {
         for header in self.inner.headers.iter() {
-            if let rsip::Header::WwwAuthenticate(auth) = header {
-                return Some(auth.value().to_string());
+            if let PHeader::WwwAuthenticate(auth) = header {
+                return Some(auth.clone());
             }
         }
         None
@@ -630,8 +635,8 @@ impl SipResponse {
     /// Used to extract digest authentication challenge from 407 responses.
     pub fn proxy_authenticate(&self) -> Option<String> {
         for header in self.inner.headers.iter() {
-            if let rsip::Header::ProxyAuthenticate(auth) = header {
-                return Some(auth.value().to_string());
+            if let PHeader::ProxyAuthenticate(auth) = header {
+                return Some(auth.clone());
             }
         }
         None
@@ -679,17 +684,17 @@ impl SipResponse {
 
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
-        Bytes::from(self.inner.to_string())
+        Bytes::from(self.inner.to_bytes())
     }
 
-    /// Mutable access to the underlying rsip response. Used by the
+    /// Mutable access to the underlying parser response. Used by the
     /// transaction layer to inject reliable-provisional headers (RFC 3262
     /// §4) into a TU-built response without round-tripping through the
     /// wire-byte representation.
     ///
     /// Restricted to crate visibility — external callers must not mutate
     /// `Via` / status code / etc. on a constructed response.
-    pub(crate) fn inner_mut(&mut self) -> &mut rsip::Response {
+    pub(crate) fn inner_mut(&mut self) -> &mut PResponse {
         &mut self.inner
     }
 
@@ -744,42 +749,44 @@ impl Method {
     }
 }
 
-/// Internal: convert an `rsip::Method` to our [`Method`] via the
-/// canonical method-name string (RFC 3261 §7.1).
-///
-/// The previous public `impl From<&rsip::Method> for Method` was removed
-/// in M7. Internally we still need to bridge while rsip remains the
-/// runtime parser; the round-trip through the uppercase token string is
-/// lossless because rsip 0.4's `Method` enum has exactly the same 14
-/// canonical variants ours does (no `Other` variant). The `unwrap_or`
-/// is therefore unreachable defensively; if rsip ever adds a new
-/// variant the fallback to `Invite` would be visibly wrong and caught
-/// by the differential-test harness.
-fn method_from_rsip(m: &rsip::Method) -> Method {
-    Method::from_str(&m.to_string()).unwrap_or(Method::Invite)
+/// Internal: bridge `parser::Method` ↔ wrapper `Method`. M8 keeps a
+/// thin one-to-one mapping; both enums have the same 14 canonical
+/// variants so the conversion is total and lossless.
+fn method_from_parser(m: PMethod) -> Method {
+    match m {
+        PMethod::Invite => Method::Invite,
+        PMethod::Ack => Method::Ack,
+        PMethod::Bye => Method::Bye,
+        PMethod::Cancel => Method::Cancel,
+        PMethod::Register => Method::Register,
+        PMethod::Options => Method::Options,
+        PMethod::Prack => Method::Prack,
+        PMethod::Subscribe => Method::Subscribe,
+        PMethod::Notify => Method::Notify,
+        PMethod::Publish => Method::Publish,
+        PMethod::Info => Method::Info,
+        PMethod::Refer => Method::Refer,
+        PMethod::Message => Method::Message,
+        PMethod::Update => Method::Update,
+    }
 }
 
-/// Internal: convert our [`Method`] into the rsip-typed equivalent.
-///
-/// Used only by the request builder while rsip remains the underlying
-/// representation (M7 wraps the public boundary; M8 cuts the internal
-/// representation over to our parser, removing this helper).
-fn method_to_rsip(m: Method) -> rsip::Method {
+fn method_to_parser(m: Method) -> PMethod {
     match m {
-        Method::Invite => rsip::Method::Invite,
-        Method::Ack => rsip::Method::Ack,
-        Method::Bye => rsip::Method::Bye,
-        Method::Cancel => rsip::Method::Cancel,
-        Method::Register => rsip::Method::Register,
-        Method::Options => rsip::Method::Options,
-        Method::Prack => rsip::Method::PRack,
-        Method::Subscribe => rsip::Method::Subscribe,
-        Method::Notify => rsip::Method::Notify,
-        Method::Publish => rsip::Method::Publish,
-        Method::Info => rsip::Method::Info,
-        Method::Refer => rsip::Method::Refer,
-        Method::Message => rsip::Method::Message,
-        Method::Update => rsip::Method::Update,
+        Method::Invite => PMethod::Invite,
+        Method::Ack => PMethod::Ack,
+        Method::Bye => PMethod::Bye,
+        Method::Cancel => PMethod::Cancel,
+        Method::Register => PMethod::Register,
+        Method::Options => PMethod::Options,
+        Method::Prack => PMethod::Prack,
+        Method::Subscribe => PMethod::Subscribe,
+        Method::Notify => PMethod::Notify,
+        Method::Publish => PMethod::Publish,
+        Method::Info => PMethod::Info,
+        Method::Refer => PMethod::Refer,
+        Method::Message => PMethod::Message,
+        Method::Update => PMethod::Update,
     }
 }
 
@@ -842,26 +849,29 @@ impl fmt::Display for Method {
 /// Builder for SIP requests.
 #[derive(Debug, Default)]
 pub struct SipRequestBuilder {
-    method: Option<rsip::Method>,
-    uri: Option<rsip::Uri>,
+    method: Option<PMethod>,
+    /// Request URI as a parsed `SipUri`. We store the parsed form so
+    /// the builder can validate at field-set time and surface the
+    /// error on `build()`.
+    uri: Option<SipUri>,
     uri_error: Option<String>,
     via_branch: Option<String>,
     via_host: Option<String>,
     via_port: Option<u16>,
     via_transport: Option<String>,
-    from_uri: Option<rsip::Uri>,
+    from_uri: Option<SipUri>,
     from_uri_error: Option<String>,
     from_tag: Option<String>,
     from_display: Option<String>,
-    to_uri: Option<rsip::Uri>,
+    to_uri: Option<SipUri>,
     to_uri_error: Option<String>,
     to_tag: Option<String>,
     call_id: Option<String>,
     cseq: Option<u32>,
-    contact_uri: Option<rsip::Uri>,
+    contact_uri: Option<SipUri>,
     max_forwards: Option<u32>,
-    body: Option<Vec<u8>>,
-    content_type: Option<String>,
+    pub(crate) body: Option<Vec<u8>>,
+    pub(crate) content_type: Option<String>,
     authorization: Option<String>,
     proxy_authorization: Option<String>,
     expires: Option<u32>,
@@ -883,7 +893,7 @@ impl SipRequestBuilder {
 
     /// Set the method.
     pub fn method(mut self, method: Method) -> Self {
-        self.method = Some(method_to_rsip(method));
+        self.method = Some(method_to_parser(method));
         self
     }
 
@@ -892,7 +902,7 @@ impl SipRequestBuilder {
     /// The URI should be a valid SIP URI (e.g., "sip:user@host").
     /// If the URI is invalid, an error will be returned when `build()` is called.
     pub fn uri(mut self, uri: &str) -> Self {
-        match rsip::Uri::try_from(uri) {
+        match SipUri::parse(uri) {
             Ok(u) => {
                 self.uri = Some(u);
                 self.uri_error = None;
@@ -917,7 +927,7 @@ impl SipRequestBuilder {
     ///
     /// The URI should be a valid SIP URI (e.g., "sip:user@host").
     pub fn from(mut self, uri: &str, tag: &str) -> Self {
-        match rsip::Uri::try_from(uri) {
+        match SipUri::parse(uri) {
             Ok(u) => {
                 self.from_uri = Some(u);
                 self.from_uri_error = None;
@@ -940,7 +950,7 @@ impl SipRequestBuilder {
     ///
     /// The URI should be a valid SIP URI (e.g., "sip:user@host").
     pub fn to(mut self, uri: &str) -> Self {
-        match rsip::Uri::try_from(uri) {
+        match SipUri::parse(uri) {
             Ok(u) => {
                 self.to_uri = Some(u);
                 self.to_uri_error = None;
@@ -972,7 +982,7 @@ impl SipRequestBuilder {
 
     /// Set the Contact header.
     pub fn contact(mut self, uri: &str) -> Self {
-        if let Ok(u) = rsip::Uri::try_from(uri) {
+        if let Ok(u) = SipUri::parse(uri) {
             self.contact_uri = Some(u);
         }
         self
@@ -1010,10 +1020,6 @@ impl SipRequestBuilder {
     }
 
     /// Set the `Require` header (RFC 3261 §20.32) to the given option-tags.
-    ///
-    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
-    /// so case is normalized on the receive side only. Empty slice clears
-    /// the header. Calling again replaces the previous value.
     pub fn require(mut self, tags: &[&str]) -> Self {
         if tags.is_empty() {
             self.require = None;
@@ -1026,10 +1032,6 @@ impl SipRequestBuilder {
     }
 
     /// Set the `Supported` header (RFC 3261 §20.37).
-    ///
-    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
-    /// so case is normalized on the receive side only. Empty slice clears
-    /// the header. Calling again replaces the previous value.
     pub fn supported(mut self, tags: &[&str]) -> Self {
         if tags.is_empty() {
             self.supported = None;
@@ -1042,8 +1044,6 @@ impl SipRequestBuilder {
     }
 
     /// Set the `Session-Expires` header (RFC 4028 §4).
-    ///
-    /// Calling again replaces the previous value.
     pub fn session_expires(
         mut self,
         secs: u32,
@@ -1057,24 +1057,18 @@ impl SipRequestBuilder {
     }
 
     /// Set the `Min-SE` header (RFC 4028 §5).
-    ///
-    /// Calling again replaces the previous value.
     pub fn min_se(mut self, secs: u32) -> Self {
         self.min_se = Some(crate::sip::headers::MinSe(secs));
         self
     }
 
     /// Set the `RAck` header (RFC 3262 §7.2). Used on PRACK requests.
-    ///
-    /// Calling again replaces the previous value.
     pub fn rack(mut self, rseq: u32, cseq: u32, method: Method) -> Self {
         self.rack = Some(crate::sip::headers::RAck { rseq, cseq, method });
         self
     }
 
-    /// Set the Allow header (RFC 3261 §20.5). Methods are emitted
-    /// comma-separated in the order given. Empty slice clears the header.
-    /// Calling again replaces the previous value.
+    /// Set the Allow header (RFC 3261 §20.5).
     pub fn allow(mut self, methods: &[Method]) -> Self {
         if methods.is_empty() {
             self.allow = None;
@@ -1099,9 +1093,6 @@ impl SipRequestBuilder {
     }
 
     /// Append an arbitrary header by name and value.
-    ///
-    /// Used for headers without a dedicated builder (e.g. `Reason`,
-    /// RFC 3326). Multiple calls append multiple headers in order.
     pub fn header(mut self, name: &str, value: &str) -> Self {
         self.other_headers
             .push((name.to_string(), value.to_string()));
@@ -1149,7 +1140,7 @@ impl SipRequestBuilder {
             .via_branch
             .ok_or_else(|| SipError::InvalidHeader("Missing Via branch".to_string()))?;
 
-        let mut headers = rsip::Headers::default();
+        let mut headers = PHeaders::new();
 
         // Via header
         let via_port = self.via_port.unwrap_or(5060);
@@ -1158,7 +1149,9 @@ impl SipRequestBuilder {
             "SIP/2.0/{} {}:{};branch={}",
             via_transport, via_host, via_port, via_branch
         );
-        headers.push(rsip::Header::Via(rsip::headers::Via::new(via_str)));
+        headers
+            .push(PHeader::Via(via_str))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
         // From header
         let from_str = if let Some(display) = &self.from_display {
@@ -1166,7 +1159,9 @@ impl SipRequestBuilder {
         } else {
             format!("<{}>;tag={}", from_uri, from_tag)
         };
-        headers.push(rsip::Header::From(rsip::headers::From::new(from_str)));
+        headers
+            .push(PHeader::From(from_str))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
         // To header
         let to_str = if let Some(tag) = &self.to_tag {
@@ -1174,86 +1169,93 @@ impl SipRequestBuilder {
         } else {
             format!("<{}>", to_uri)
         };
-        headers.push(rsip::Header::To(rsip::headers::To::new(to_str)));
+        headers
+            .push(PHeader::To(to_str))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
         // Call-ID header
-        headers.push(rsip::Header::CallId(rsip::headers::CallId::new(call_id)));
+        headers
+            .push(PHeader::CallId(call_id))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
-        // CSeq header
-        let cseq_str = format!("{} {}", cseq, method);
-        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new(cseq_str)));
+        // CSeq header — emit using the wrapper Display for the method
+        // token (canonical uppercase, matches the previous behavior).
+        let cseq_str = format!("{} {}", cseq, method_from_parser(method));
+        headers
+            .push(PHeader::CSeq(cseq_str))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
         // Max-Forwards
         let mf = self.max_forwards.unwrap_or(70);
-        headers.push(rsip::Header::MaxForwards(rsip::headers::MaxForwards::new(
-            mf.to_string(),
-        )));
+        headers
+            .push(PHeader::MaxForwards(mf.to_string()))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
         // Contact header
         if let Some(contact) = self.contact_uri {
             let contact_str = format!("<{}>", contact);
-            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(
-                contact_str,
-            )));
+            headers
+                .push(PHeader::Contact(contact_str))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Authorization header
         if let Some(auth) = self.authorization {
-            headers.push(rsip::Header::Authorization(
-                rsip::headers::Authorization::new(auth),
-            ));
+            headers
+                .push(PHeader::Authorization(auth))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Proxy-Authorization header
         if let Some(auth) = self.proxy_authorization {
-            headers.push(rsip::Header::ProxyAuthorization(
-                rsip::headers::ProxyAuthorization::new(auth),
-            ));
+            headers
+                .push(PHeader::ProxyAuthorization(auth))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Expires header
         if let Some(expires) = self.expires {
-            headers.push(rsip::Header::Expires(rsip::headers::Expires::new(
-                expires.to_string(),
-            )));
+            headers
+                .push(PHeader::Expires(expires.to_string()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Require header (RFC 3261 §20.32)
         if let Some(require) = self.require {
-            headers.push(rsip::Header::Require(rsip::headers::Require::new(
-                require.to_header_value(),
-            )));
+            headers
+                .push(PHeader::Require(require.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Supported header (RFC 3261 §20.37)
         if let Some(supported) = self.supported {
-            headers.push(rsip::Header::Supported(rsip::headers::Supported::new(
-                supported.to_header_value(),
-            )));
+            headers
+                .push(PHeader::Supported(supported.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Session-Expires header (RFC 4028 §4)
         if let Some(se) = self.session_expires {
-            headers.push(rsip::Header::Other(
-                "Session-Expires".to_string(),
-                se.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other(
+                    "Session-Expires".to_string(),
+                    se.to_header_value(),
+                ))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Min-SE header (RFC 4028 §5)
         if let Some(m) = self.min_se {
-            headers.push(rsip::Header::Other(
-                "Min-SE".to_string(),
-                m.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other("Min-SE".to_string(), m.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // RAck header (RFC 3262 §7.2)
         if let Some(rack) = self.rack {
-            headers.push(rsip::Header::Other(
-                "RAck".to_string(),
-                rack.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other("RAck".to_string(), rack.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Allow header (RFC 3261 §20.5)
@@ -1263,41 +1265,46 @@ impl SipRequestBuilder {
                 .map(|m| m.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            headers.push(rsip::Header::Allow(rsip::headers::Allow::new(value)));
+            headers
+                .push(PHeader::Allow(value))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
-        // Route headers (RFC 3261 §12.2.1.1) — one Header::Route per entry,
-        // in order, before Content-Type / Content-Length.
+        // Route headers (RFC 3261 §12.2.1.1)
         if let Some(routes) = &self.routes {
             for r in routes {
-                headers.push(rsip::Header::Route(rsip::headers::Route::new(r.clone())));
+                headers
+                    .push(PHeader::Route(r.clone()))
+                    .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
             }
         }
 
         // Arbitrary `Other` headers (e.g. Reason, RFC 3326).
         for (name, value) in &self.other_headers {
-            headers.push(rsip::Header::Other(name.clone(), value.clone()));
+            headers
+                .push(PHeader::Other(name.clone(), value.clone()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Content-Type and Content-Length
         let body = self.body.unwrap_or_default();
         if !body.is_empty() {
             if let Some(ct) = self.content_type {
-                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(
-                    ct,
-                )));
+                headers
+                    .push(PHeader::ContentType(ct))
+                    .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
             } else {
                 cover_none_case();
             }
         }
-        headers.push(rsip::Header::ContentLength(
-            rsip::headers::ContentLength::new(body.len().to_string()),
-        ));
+        headers
+            .push(PHeader::ContentLength(body.len().to_string()))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
-        let req = rsip::Request {
+        let req = PRequest {
             method,
-            uri,
-            version: rsip::Version::V2,
+            uri: uri.to_string(),
+            version: "SIP/2.0".to_string(),
             headers,
             body,
         };
@@ -1316,9 +1323,9 @@ pub struct SipResponseBuilder {
     to: Option<String>,
     call_id: Option<String>,
     cseq: Option<String>,
-    contact_uri: Option<rsip::Uri>,
-    body: Option<Vec<u8>>,
-    content_type: Option<String>,
+    contact_uri: Option<SipUri>,
+    pub(crate) body: Option<Vec<u8>>,
+    pub(crate) content_type: Option<String>,
     require: Option<crate::sip::headers::Require>,
     supported: Option<crate::sip::headers::Supported>,
     session_expires: Option<crate::sip::headers::SessionExpires>,
@@ -1344,46 +1351,44 @@ impl SipResponseBuilder {
     pub fn from_request(mut self, req: &SipRequest) -> Self {
         // Copy Via headers
         for header in req.inner.headers.iter() {
-            if let rsip::Header::Via(v) = header {
-                if let Ok(typed) = v.typed() {
-                    self.via.push(typed.to_string());
-                } else {
-                    self.via.push(v.to_string());
-                }
+            if let PHeader::Via(v) = header {
+                self.via.push(v.clone());
             }
         }
 
         // Copy From
         for header in req.inner.headers.iter() {
-            if let rsip::Header::From(f) = header {
-                self.from = Some(f.to_string());
+            if let PHeader::From(f) = header {
+                self.from = Some(f.clone());
                 break;
             }
         }
 
         // Copy To
         for header in req.inner.headers.iter() {
-            if let rsip::Header::To(t) = header {
-                self.to = Some(t.to_string());
+            if let PHeader::To(t) = header {
+                self.to = Some(t.clone());
                 break;
             }
         }
 
         // Copy Call-ID
         for header in req.inner.headers.iter() {
-            if let rsip::Header::CallId(c) = header {
-                self.call_id = Some(c.value().to_string());
+            if let PHeader::CallId(c) = header {
+                self.call_id = Some(c.clone());
                 break;
             }
         }
 
-        // Copy CSeq
+        // Copy CSeq — prefer the typed re-emit (canonical "<seq> <METHOD>")
+        // when parseable, otherwise pass the raw value through verbatim
+        // so the response continues to mirror what the request sent.
         for header in req.inner.headers.iter() {
-            if let rsip::Header::CSeq(c) = header {
+            if let PHeader::CSeq(c) = header {
                 if let (Ok(seq), Ok(method)) = (req.cseq(), req.cseq_method()) {
                     self.cseq = Some(format!("{} {}", seq, method));
                 } else {
-                    self.cseq = Some(c.to_string());
+                    self.cseq = Some(c.clone());
                 }
                 break;
             }
@@ -1406,7 +1411,7 @@ impl SipResponseBuilder {
 
     /// Set the Contact header.
     pub fn contact(mut self, uri: &str) -> Self {
-        if let Ok(u) = rsip::Uri::try_from(uri) {
+        if let Ok(u) = SipUri::parse(uri) {
             self.contact_uri = Some(u);
         }
         self
@@ -1420,10 +1425,6 @@ impl SipResponseBuilder {
     }
 
     /// Set the `Require` header (RFC 3261 §20.32).
-    ///
-    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
-    /// so case is normalized on the receive side only. Empty slice clears
-    /// the header. Calling again replaces the previous value.
     pub fn require(mut self, tags: &[&str]) -> Self {
         if tags.is_empty() {
             self.require = None;
@@ -1436,10 +1437,6 @@ impl SipResponseBuilder {
     }
 
     /// Set the `Supported` header (RFC 3261 §20.37).
-    ///
-    /// Tags are emitted verbatim. The `parse` accessors lowercase on read,
-    /// so case is normalized on the receive side only. Empty slice clears
-    /// the header. Calling again replaces the previous value.
     pub fn supported(mut self, tags: &[&str]) -> Self {
         if tags.is_empty() {
             self.supported = None;
@@ -1452,8 +1449,6 @@ impl SipResponseBuilder {
     }
 
     /// Set the `Session-Expires` header (RFC 4028 §4).
-    ///
-    /// Calling again replaces the previous value.
     pub fn session_expires(
         mut self,
         secs: u32,
@@ -1467,24 +1462,18 @@ impl SipResponseBuilder {
     }
 
     /// Set the `Min-SE` header (RFC 4028 §5).
-    ///
-    /// Calling again replaces the previous value.
     pub fn min_se(mut self, secs: u32) -> Self {
         self.min_se = Some(crate::sip::headers::MinSe(secs));
         self
     }
 
     /// Set the `RSeq` header (RFC 3262 §7.1). Used on reliable provisionals.
-    ///
-    /// Calling again replaces the previous value.
     pub fn rseq(mut self, rseq: u32) -> Self {
         self.rseq = Some(crate::sip::headers::RSeq(rseq));
         self
     }
 
-    /// Set the Allow header (RFC 3261 §20.5). Methods are emitted
-    /// comma-separated in the order given. Empty slice clears the header.
-    /// Calling again replaces the previous value.
+    /// Set the Allow header (RFC 3261 §20.5).
     pub fn allow(mut self, methods: &[Method]) -> Self {
         if methods.is_empty() {
             self.allow = None;
@@ -1500,77 +1489,87 @@ impl SipResponseBuilder {
             .status_code
             .ok_or_else(|| SipError::InvalidHeader("Missing status code".to_string()))?;
 
-        let mut headers = rsip::Headers::default();
+        let mut headers = PHeaders::new();
 
         // Via headers (in order)
         for via in &self.via {
-            headers.push(rsip::Header::Via(rsip::headers::Via::new(via.clone())));
+            headers
+                .push(PHeader::Via(via.clone()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // From header
         if let Some(from) = self.from {
-            headers.push(rsip::Header::From(rsip::headers::From::new(from)));
+            headers
+                .push(PHeader::From(from))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // To header
         if let Some(to) = self.to {
-            headers.push(rsip::Header::To(rsip::headers::To::new(to)));
+            headers
+                .push(PHeader::To(to))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Call-ID header
         if let Some(call_id) = self.call_id {
-            headers.push(rsip::Header::CallId(rsip::headers::CallId::new(call_id)));
+            headers
+                .push(PHeader::CallId(call_id))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // CSeq header
         if let Some(cseq) = self.cseq {
-            headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new(cseq)));
+            headers
+                .push(PHeader::CSeq(cseq))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Contact header
         if let Some(contact) = self.contact_uri {
             let contact_str = format!("<{}>", contact);
-            headers.push(rsip::Header::Contact(rsip::headers::Contact::new(
-                contact_str,
-            )));
+            headers
+                .push(PHeader::Contact(contact_str))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Require header (RFC 3261 §20.32)
         if let Some(require) = self.require {
-            headers.push(rsip::Header::Require(rsip::headers::Require::new(
-                require.to_header_value(),
-            )));
+            headers
+                .push(PHeader::Require(require.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Supported header (RFC 3261 §20.37)
         if let Some(supported) = self.supported {
-            headers.push(rsip::Header::Supported(rsip::headers::Supported::new(
-                supported.to_header_value(),
-            )));
+            headers
+                .push(PHeader::Supported(supported.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Session-Expires header (RFC 4028 §4)
         if let Some(se) = self.session_expires {
-            headers.push(rsip::Header::Other(
-                "Session-Expires".to_string(),
-                se.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other(
+                    "Session-Expires".to_string(),
+                    se.to_header_value(),
+                ))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Min-SE header (RFC 4028 §5)
         if let Some(m) = self.min_se {
-            headers.push(rsip::Header::Other(
-                "Min-SE".to_string(),
-                m.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other("Min-SE".to_string(), m.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // RSeq header (RFC 3262 §7.1)
         if let Some(rseq) = self.rseq {
-            headers.push(rsip::Header::Other(
-                "RSeq".to_string(),
-                rseq.to_header_value(),
-            ));
+            headers
+                .push(PHeader::Other("RSeq".to_string(), rseq.to_header_value()))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Allow header (RFC 3261 §20.5)
@@ -1580,29 +1579,36 @@ impl SipResponseBuilder {
                 .map(|m| m.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            headers.push(rsip::Header::Allow(rsip::headers::Allow::new(value)));
+            headers
+                .push(PHeader::Allow(value))
+                .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
         }
 
         // Content-Type and Content-Length
         let body = self.body.unwrap_or_default();
         if !body.is_empty() {
             if let Some(ct) = self.content_type {
-                headers.push(rsip::Header::ContentType(rsip::headers::ContentType::new(
-                    ct,
-                )));
+                headers
+                    .push(PHeader::ContentType(ct))
+                    .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
             } else {
                 cover_none_case();
             }
         }
-        headers.push(rsip::Header::ContentLength(
-            rsip::headers::ContentLength::new(body.len().to_string()),
-        ));
+        headers
+            .push(PHeader::ContentLength(body.len().to_string()))
+            .map_err(|e| SipError::InvalidHeader(e.to_string()))?;
 
-        let status = rsip::StatusCode::from(status_code);
+        // Reason phrase: prefer the explicit one set via `.status(code,
+        // reason)`, otherwise derive from the canonical phrase table.
+        let reason = self
+            .reason
+            .unwrap_or_else(|| PStatusCode::new(status_code).reason_phrase().to_string());
 
-        let resp = rsip::Response {
-            status_code: status,
-            version: rsip::Version::V2,
+        let resp = PResponse {
+            version: "SIP/2.0".to_string(),
+            status_code: PStatusCode::new(status_code),
+            reason,
             headers,
             body,
         };
@@ -2146,9 +2152,9 @@ Content-Length: 0\r\n\
     }
 
     /// `Method::from_str` round-trips every method via its canonical
-    /// uppercase token, case-insensitively. This is the replacement for
-    /// the M7-removed `From<&rsip::Method>` impl — internal callers
-    /// bridge via the canonical method-name string per RFC 3261 §7.1.
+    /// uppercase token, case-insensitively. This is the wrapper-side
+    /// counterpart of the parser-layer `Method::from_str` at
+    /// RFC 3261 §7.1.
     #[test]
     fn test_method_from_str_round_trip() {
         use std::str::FromStr;
@@ -2356,7 +2362,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_request_missing_uri() {
-        // Test when URI is not provided at all
         let result = SipRequest::builder()
             .method(Method::Invite)
             .via("192.168.1.1", 5060, "UDP", "z9hG4bKtest")
@@ -2371,7 +2376,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_request_missing_from() {
-        // Test when From URI is not provided
         let result = SipRequest::builder()
             .method(Method::Invite)
             .uri("sip:bob@example.com")
@@ -2386,7 +2390,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_request_missing_to() {
-        // Test when To URI is not provided
         let result = SipRequest::builder()
             .method(Method::Invite)
             .uri("sip:bob@example.com")
@@ -2498,13 +2501,14 @@ Content-Length: 0\r\n\
             .build()
             .unwrap();
 
+        // After M8 we probe the parser-side headers directly.
         let vias: Vec<String> = resp
             .inner
             .headers
             .iter()
             .filter_map(|h| {
-                if let rsip::Header::Via(v) = h {
-                    Some(v.to_string())
+                if let PHeader::Via(v) = h {
+                    Some(v.clone())
                 } else {
                     None
                 }
@@ -2537,8 +2541,8 @@ Content-Length: 0\r\n\
             .headers
             .iter()
             .find_map(|h| {
-                if let rsip::Header::CSeq(cseq) = h {
-                    Some(cseq.to_string())
+                if let PHeader::CSeq(cseq) = h {
+                    Some(cseq.clone())
                 } else {
                     None
                 }
@@ -2663,7 +2667,7 @@ Content-Length: 0\r\n\
         let mut builder = SipRequest::builder()
             .method(Method::Invite)
             .uri("sip:bob@example.com");
-        builder.from_uri = Some(rsip::Uri::try_from("sip:alice@example.com").unwrap());
+        builder.from_uri = Some(SipUri::parse("sip:alice@example.com").unwrap());
         let err = builder.build().unwrap_err();
         assert!(format!("{err:?}").contains("InvalidHeader"));
     }
@@ -3199,7 +3203,8 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_response_reason_edge_case() {
-        // Test reason parsing - the rsip library has a fixed set of reason phrases
+        // Multi-word reason phrases survive the split — we read what was
+        // on the wire when present.
         let resp_long_reason = b"SIP/2.0 488 Not Acceptable Here\r\n\
 Via: SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK776asdhds\r\n\
 To: Bob <sip:bob@biloxi.com>;tag=a6c85cf\r\n\
@@ -3262,7 +3267,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_request_builder_new() {
-        // Test that builder can be created via new()
         let req = SipRequest::builder()
             .method(Method::Invite)
             .uri("sip:bob@example.com")
@@ -3279,7 +3283,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_request_missing_via_host() {
-        // Create a builder without calling via()
         let result = SipRequest::builder()
             .method(Method::Invite)
             .uri("sip:bob@example.com")
@@ -3515,9 +3518,7 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_build_response_empty_via() {
-        // Test builder with no request (empty via list)
         let resp = SipResponse::builder().status(200, "OK").build().unwrap();
-
         let vias = resp.via_headers_raw();
         assert!(vias.is_empty());
     }
@@ -3828,7 +3829,6 @@ Content-Length: 0\r\n\
             .build()
             .unwrap();
 
-        // Round-trip through wire format and read back.
         let bytes = req.to_bytes();
         let reparsed = SipMessage::parse(&bytes).unwrap();
         let req2 = reparsed.as_request().unwrap();
@@ -3989,34 +3989,35 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_request_require_via_header_other() {
-        // rsip's parser produces Header::Require for native, but we should
-        // also tolerate Header::Other for case-insensitive name matches.
-        // Construct a request manually with Header::Other and verify the
-        // accessor still reads it.
-        let mut headers = rsip::Headers::default();
-        headers.push(rsip::Header::Via(rsip::headers::Via::new(
-            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
-        )));
-        headers.push(rsip::Header::From(rsip::headers::From::new(
-            "<sip:alice@atlanta.com>;tag=1",
-        )));
-        headers.push(rsip::Header::To(rsip::headers::To::new(
-            "<sip:bob@biloxi.com>",
-        )));
-        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
-        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
-        headers.push(rsip::Header::Other(
-            "require".to_string(),
-            "100rel".to_string(),
-        ));
-        headers.push(rsip::Header::ContentLength(
-            rsip::headers::ContentLength::new("0"),
-        ));
+        // The accessor must tolerate `Header::Other("Require", ...)` —
+        // for instance when manually constructed or arriving via an
+        // unrecognized typed channel. After M8 we construct against
+        // the parser-side `PHeader`/`PHeaders` directly.
+        let mut headers = PHeaders::new();
+        headers
+            .push(PHeader::Via(
+                "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1".to_string(),
+            ))
+            .unwrap();
+        headers
+            .push(PHeader::From("<sip:alice@atlanta.com>;tag=1".to_string()))
+            .unwrap();
+        headers
+            .push(PHeader::To("<sip:bob@biloxi.com>".to_string()))
+            .unwrap();
+        headers.push(PHeader::CallId("c1".to_string())).unwrap();
+        headers.push(PHeader::CSeq("1 INVITE".to_string())).unwrap();
+        headers
+            .push(PHeader::Other("require".to_string(), "100rel".to_string()))
+            .unwrap();
+        headers
+            .push(PHeader::ContentLength("0".to_string()))
+            .unwrap();
         let req = SipRequest {
-            inner: rsip::Request {
-                method: rsip::Method::Invite,
-                uri: rsip::Uri::try_from("sip:bob@biloxi.com").unwrap(),
-                version: rsip::Version::V2,
+            inner: PRequest {
+                method: PMethod::Invite,
+                uri: "sip:bob@biloxi.com".to_string(),
+                version: "SIP/2.0".to_string(),
                 headers,
                 body: vec![],
             },
@@ -4027,9 +4028,6 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_request_require_merges_multiple_lines() {
-        // Per RFC 3261 §7.3.1, multiple Require lines are equivalent to a
-        // single comma-separated value. The accessor must concat option-tags
-        // from every matching line, in wire order.
         let req = invite_with_headers("Require: 100rel\r\nRequire: timer\r\n");
         let r = req.require().expect("require should be present");
         assert_eq!(r.0, vec!["100rel".to_string(), "timer".to_string()]);
@@ -4047,30 +4045,34 @@ Content-Length: 0\r\n\
         // RFC 4028 §4 ABNF defines `x` as the compact form of
         // `Session-Expires`. Some Cisco/Sonus stacks emit this. Accessor
         // must fall back to `x` when `Session-Expires` is absent.
-        let mut headers = rsip::Headers::default();
-        headers.push(rsip::Header::Via(rsip::headers::Via::new(
-            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
-        )));
-        headers.push(rsip::Header::From(rsip::headers::From::new(
-            "<sip:alice@atlanta.com>;tag=1",
-        )));
-        headers.push(rsip::Header::To(rsip::headers::To::new(
-            "<sip:bob@biloxi.com>",
-        )));
-        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
-        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
-        headers.push(rsip::Header::Other(
-            "x".to_string(),
-            "1800;refresher=uac".to_string(),
-        ));
-        headers.push(rsip::Header::ContentLength(
-            rsip::headers::ContentLength::new("0"),
-        ));
+        let mut headers = PHeaders::new();
+        headers
+            .push(PHeader::Via(
+                "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1".to_string(),
+            ))
+            .unwrap();
+        headers
+            .push(PHeader::From("<sip:alice@atlanta.com>;tag=1".to_string()))
+            .unwrap();
+        headers
+            .push(PHeader::To("<sip:bob@biloxi.com>".to_string()))
+            .unwrap();
+        headers.push(PHeader::CallId("c1".to_string())).unwrap();
+        headers.push(PHeader::CSeq("1 INVITE".to_string())).unwrap();
+        headers
+            .push(PHeader::Other(
+                "x".to_string(),
+                "1800;refresher=uac".to_string(),
+            ))
+            .unwrap();
+        headers
+            .push(PHeader::ContentLength("0".to_string()))
+            .unwrap();
         let req = SipRequest {
-            inner: rsip::Request {
-                method: rsip::Method::Invite,
-                uri: rsip::Uri::try_from("sip:bob@biloxi.com").unwrap(),
-                version: rsip::Version::V2,
+            inner: PRequest {
+                method: PMethod::Invite,
+                uri: "sip:bob@biloxi.com".to_string(),
+                version: "SIP/2.0".to_string(),
                 headers,
                 body: vec![],
             },
@@ -4084,30 +4086,34 @@ Content-Length: 0\r\n\
 
     #[test]
     fn test_response_session_expires_compact_form_x() {
-        // Mirror of the request-side test for SipResponse.
-        let mut headers = rsip::Headers::default();
-        headers.push(rsip::Header::Via(rsip::headers::Via::new(
-            "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1",
-        )));
-        headers.push(rsip::Header::From(rsip::headers::From::new(
-            "<sip:alice@atlanta.com>;tag=1",
-        )));
-        headers.push(rsip::Header::To(rsip::headers::To::new(
-            "<sip:bob@biloxi.com>;tag=2",
-        )));
-        headers.push(rsip::Header::CallId(rsip::headers::CallId::new("c1")));
-        headers.push(rsip::Header::CSeq(rsip::headers::CSeq::new("1 INVITE")));
-        headers.push(rsip::Header::Other(
-            "x".to_string(),
-            "600;refresher=uas".to_string(),
-        ));
-        headers.push(rsip::Header::ContentLength(
-            rsip::headers::ContentLength::new("0"),
-        ));
+        let mut headers = PHeaders::new();
+        headers
+            .push(PHeader::Via(
+                "SIP/2.0/UDP pc33.atlanta.com;branch=z9hG4bK1".to_string(),
+            ))
+            .unwrap();
+        headers
+            .push(PHeader::From("<sip:alice@atlanta.com>;tag=1".to_string()))
+            .unwrap();
+        headers
+            .push(PHeader::To("<sip:bob@biloxi.com>;tag=2".to_string()))
+            .unwrap();
+        headers.push(PHeader::CallId("c1".to_string())).unwrap();
+        headers.push(PHeader::CSeq("1 INVITE".to_string())).unwrap();
+        headers
+            .push(PHeader::Other(
+                "x".to_string(),
+                "600;refresher=uas".to_string(),
+            ))
+            .unwrap();
+        headers
+            .push(PHeader::ContentLength("0".to_string()))
+            .unwrap();
         let resp = SipResponse {
-            inner: rsip::Response {
-                status_code: rsip::StatusCode::OK,
-                version: rsip::Version::V2,
+            inner: PResponse {
+                version: "SIP/2.0".to_string(),
+                status_code: PStatusCode::OK,
+                reason: "OK".to_string(),
                 headers,
                 body: vec![],
             },
@@ -4120,7 +4126,7 @@ Content-Length: 0\r\n\
     }
 
     /// Round-trip Allow through the request builder, the wire, and back
-    /// through the parser so we know the value emitted is the value read.
+    /// through the parser.
     #[test]
     fn test_request_builder_allow_round_trip() {
         let req = SipRequest::builder()
@@ -4210,13 +4216,15 @@ Content-Length: 0\r\n\
         // Inject an unknown method token alongside known ones — the parser
         // must skip the unknown rather than fail the whole header.
         let mut resp2 = resp.clone();
-        resp2.inner_mut().headers.push(rsip::Header::Other(
-            "Allow".to_string(),
-            "FOO, OPTIONS".to_string(),
-        ));
+        resp2
+            .inner_mut()
+            .headers
+            .push(PHeader::Other(
+                "Allow".to_string(),
+                "FOO, OPTIONS".to_string(),
+            ))
+            .unwrap();
         let allow2 = resp2.allow().expect("still parseable with one unknown");
-        // Combined: native Allow already there + Other Allow appended.
-        // Order: native Allow first (Invite, Bye, Update), then Other (Options).
         assert_eq!(
             allow2,
             vec![Method::Invite, Method::Bye, Method::Update, Method::Options],

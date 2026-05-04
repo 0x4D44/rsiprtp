@@ -48,14 +48,14 @@
 //! ```
 
 use crate::sip::headers::Require;
+use crate::sip::parser::header::{Header as PHeader, Headers as PHeaders};
 use crate::sip::{Method, SipRequest, SipResponse};
 use crate::transaction::client::invite::TransactionId;
 use crate::transaction::timer::{Timer, TimerValues};
-use rsip::headers::UntypedHeader;
 use std::time::Duration;
 
 /// Stamp `Require: 100rel` and `RSeq: <n>` onto a TU-built response by
-/// mutating the typed `rsip::Headers` in place, then serialize.
+/// mutating the parser-side `Headers` in place, then serialize.
 ///
 /// If the TU has already set a `Require:` header (e.g. `precondition` for
 /// early-media), the existing option-tags are preserved — `100rel` is
@@ -64,34 +64,40 @@ use std::time::Duration;
 /// produce. If `100rel` is already present the header is left untouched.
 ///
 /// `RSeq` is added unconditionally; the TU is not expected to set one.
+///
+/// M8 cuts the implementation over to the in-tree parser's
+/// `Headers` collection. The semantics are unchanged from the M7
+/// rsip-backed version.
 fn stamp_reliable_headers(response: &mut SipResponse, rseq: u32) -> bytes::Bytes {
     let inner = response.inner_mut();
 
-    // Merge 100rel into any existing Require header(s); otherwise add a
-    // fresh one. We rebuild the header list because we may mutate or
-    // remove existing Require entries.
+    // Drain the existing headers so we can rebuild in-order.
+    let existing: Vec<PHeader> = std::mem::take(&mut inner.headers)
+        .into_iter()
+        .cloned()
+        .collect();
+    let mut new_headers = PHeaders::new();
     let mut handled_require = false;
-    let mut new_headers = rsip::Headers::default();
-    let existing: Vec<rsip::Header> = std::mem::take(&mut inner.headers).into_iter().collect();
+
     for header in existing {
         match &header {
-            rsip::Header::Require(r) => {
+            PHeader::Require(value) => {
                 if handled_require {
                     // Multiple Require lines per RFC 3261 §7.3.1 are
                     // equivalent to one comma-joined value — collapse
-                    // any extras into the first by skipping them after
-                    // we've already merged once.
-                    if let Ok(extra) = Require::parse(r.value()) {
-                        // Append into the already-emitted Require entry.
+                    // any extras into the already-emitted entry.
+                    if let Ok(extra) = Require::parse(value) {
                         merge_into_last_require(&mut new_headers, &extra.0);
                     }
                     continue;
                 }
-                let merged = merge_require_with_100rel(r.value());
-                new_headers.push(rsip::Header::Require(rsip::headers::Require::new(merged)));
+                let merged = merge_require_with_100rel(value);
+                new_headers
+                    .push(PHeader::Require(merged))
+                    .expect("response header count under MAX_HEADERS");
                 handled_require = true;
             }
-            rsip::Header::Other(key, value) if key.eq_ignore_ascii_case("Require") => {
+            PHeader::Other(key, value) if key.eq_ignore_ascii_case("Require") => {
                 if handled_require {
                     if let Ok(extra) = Require::parse(value) {
                         merge_into_last_require(&mut new_headers, &extra.0);
@@ -99,28 +105,34 @@ fn stamp_reliable_headers(response: &mut SipResponse, rseq: u32) -> bytes::Bytes
                     continue;
                 }
                 let merged = merge_require_with_100rel(value);
-                new_headers.push(rsip::Header::Require(rsip::headers::Require::new(merged)));
+                new_headers
+                    .push(PHeader::Require(merged))
+                    .expect("response header count under MAX_HEADERS");
                 handled_require = true;
             }
             _ => {
-                new_headers.push(header);
+                new_headers
+                    .push(header)
+                    .expect("response header count under MAX_HEADERS");
             }
         }
     }
     if !handled_require {
-        new_headers.push(rsip::Header::Require(rsip::headers::Require::new(
-            "100rel".to_string(),
-        )));
+        new_headers
+            .push(PHeader::Require("100rel".to_string()))
+            .expect("response header count under MAX_HEADERS");
     }
 
     // RSeq must not already be present — TU isn't supposed to set it.
     debug_assert!(
         !new_headers
             .iter()
-            .any(|h| matches!(h, rsip::Header::Other(k, _) if k.eq_ignore_ascii_case("RSeq"))),
+            .any(|h| matches!(h, PHeader::Other(k, _) if k.eq_ignore_ascii_case("RSeq"))),
         "stamp_reliable_headers: RSeq already present on TU-built response"
     );
-    new_headers.push(rsip::Header::Other("RSeq".to_string(), rseq.to_string()));
+    new_headers
+        .push(PHeader::Other("RSeq".to_string(), rseq.to_string()))
+        .expect("response header count under MAX_HEADERS");
 
     inner.headers = new_headers;
     response.to_bytes()
@@ -144,22 +156,40 @@ fn merge_require_with_100rel(value: &str) -> String {
 /// Append `extra_tags` into the most recently emitted `Header::Require`
 /// in `headers`, deduplicating on case-insensitive match. Used when
 /// collapsing multiple `Require:` lines per RFC 3261 §7.3.1.
-fn merge_into_last_require(headers: &mut rsip::Headers, extra_tags: &[String]) {
-    let mut last_require: Option<&mut rsip::headers::Require> = None;
-    for h in headers.iter_mut() {
-        if let rsip::Header::Require(r) = h {
-            last_require = Some(r);
+///
+/// M8: parser-side `Headers` is `Vec<Header>`-backed but exposes only
+/// an immutable iter. To rewrite a single entry in place we drain and
+/// rebuild — the cost is O(n) but n is bounded by `MAX_HEADERS` (256).
+fn merge_into_last_require(headers: &mut PHeaders, extra_tags: &[String]) {
+    let drained: Vec<PHeader> = std::mem::take(headers).into_iter().cloned().collect();
+    let last_require_idx = drained.iter().enumerate().rev().find_map(|(i, h)| {
+        if matches!(h, PHeader::Require(_)) {
+            Some(i)
+        } else {
+            None
         }
-    }
-    if let Some(r) = last_require {
-        let mut tags = Require::parse(r.value()).map(|p| p.0).unwrap_or_default();
-        for tag in extra_tags {
-            if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
-                tags.push(tag.clone());
+    });
+    let mut rebuilt = PHeaders::new();
+    for (i, header) in drained.into_iter().enumerate() {
+        if Some(i) == last_require_idx {
+            if let PHeader::Require(value) = &header {
+                let mut tags = Require::parse(value).map(|p| p.0).unwrap_or_default();
+                for tag in extra_tags {
+                    if !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                        tags.push(tag.clone());
+                    }
+                }
+                rebuilt
+                    .push(PHeader::Require(tags.join(", ")))
+                    .expect("rebuilt header count <= original");
+                continue;
             }
         }
-        *r = rsip::headers::Require::new(tags.join(", "));
+        rebuilt
+            .push(header)
+            .expect("rebuilt header count <= original");
     }
+    *headers = rebuilt;
 }
 
 /// State of the INVITE server transaction.
