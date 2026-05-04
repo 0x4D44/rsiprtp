@@ -5,36 +5,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Deprecated
+
 ### Removed
 
-- **rsip dependency dropped from runtime deps.** rsip remains in
-  `[dev-dependencies]` indefinitely as the differential-test oracle
-  for `tests/parser_diff.rs`. The library builds and runs without
-  rsip; downstream consumers no longer pull rsip transitively.
-- **`rsiprtp::sip::RsipUri`** re-export of `rsip::Uri`. The wrapper layer
-  no longer leaks rsip types across its public boundary.
-- **`SipRequest::inner()`** and **`SipResponse::inner()`** — the
-  `&rsip::Request` / `&rsip::Response` escape hatches. They had zero
-  callers inside `rsiprtp` and were the last public rsip-typed
-  accessors.
-- **`Method::to_rsip()`** and the **`impl From<&rsip::Method> for Method`**
-  bridge. With M8's cutover to parser-native storage these no longer
-  have any in-tree caller; the previous `method_to_rsip` shim is also
-  gone. Callers that previously bridged from rsip to ours via
-  `Method::from(&rsip_method)` now round-trip via the canonical
-  method-name string with the new `Method::FromStr` impl, which is
-  lossless for all 14 variants.
+### Fixed
+
+### Security
+
+## [0.4.0] — 2026-05-03
+
+This release is the SIP parser rewrite. The third-party `rsip` 0.4
+crate has been dropped from runtime dependencies; an in-tree parser at
+`crates/rsiprtp/src/sip/parser/` is now authoritative for SIP message
+framing, header recognition, typed-form structures, and URIs. The
+`crate::sip` public API was redesigned to remove all `rsip::` type
+leakage. A differential-test harness (`tests/parser_diff.rs`) asserts
+behavioral parity with rsip 0.4 across a corpus of `mdsiprtp3`
+fixtures, hand-curated SIP message shapes, and RFC 4475 torture
+tests; eight known rsip 0.4 spec deficiencies are pinned with
+regression-firing tests. A nightly fuzz target,
+`sip_message_parse_diff`, runs both parsers on each input and panics
+on any divergence.
 
 ### Added
 
+- **In-tree SIP parser** at `crates/rsiprtp/src/sip/parser/` covering
+  request/status-line framing, header folding and recognition, typed
+  forms (`From`, `To`, `Via`, `CSeq`, `Contact`), and URI parsing.
+  Two-tier model: tier 1 is eager framing into `Header` enum variants
+  with raw `String` values; tier 2 is `.typed()`-on-demand parsing of
+  complex headers. RFC 3261 ABNF compliance for header values
+  (quoted strings, escape sequences, comments).
 - **`impl FromStr for Method`** with case-insensitive parsing per RFC
   3261 §7.1, replacing the removed rsip bridge as the canonical way to
-  reconstruct a `Method` from a string token.
+  reconstruct a `Method` from a string token. Lossless round-trip for
+  all 14 method variants.
+- **Differential-test harness** at `crates/rsiprtp/tests/parser_diff.rs`.
+  Runs the in-tree parser and rsip 0.4 (dev-dep oracle) against the
+  same input bytes and asserts a neutral `DiffMessage` representation
+  matches. Corpus: `mdsiprtp3` fixtures, hand-curated golden cases,
+  RFC 4475 torture tests, and the existing rsiprtp fuzz corpus. Eight
+  known rsip 0.4 spec deficiencies are pinned with `assert!(rs.is_err())`
+  regression-firing tests; see
+  `crates/rsiprtp/tests/fixtures/rfc4475/README.md` for the running
+  list.
 - **`sip_message_parse_diff` fuzz target** at `crates/rsiprtp/fuzz/`.
   Runs the in-tree parser and rsip 0.4 against the same input bytes
   and panics on any divergence (parse-success structural mismatch or
-  one-accepts-one-rejects). M11 overnight 8h campaign uses this; see
-  `crates/rsiprtp/fuzz/M11_LAUNCH.md` for launch instructions.
+  one-accepts-one-rejects). Used for the M11 overnight 8h campaign;
+  see `crates/rsiprtp/fuzz/M11_LAUNCH.md` for launch instructions.
 
 ### Changed
 
@@ -48,7 +72,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Internal storage of `SipRequest` / `SipResponse` is now the in-tree
   parser type** (`parser::Request` / `parser::Response`). The wrapper
   layer no longer holds rsip types — accessors project from
-  parser-native data. Public API contract from M7 is preserved.
+  parser-native data. The public API contract is preserved.
+
+### Removed
+
+- **`rsip` dropped from runtime dependencies.** `rsip = "0.4"` remains in
+  `[dev-dependencies]` indefinitely as the differential-test oracle for
+  `tests/parser_diff.rs`. The library builds and runs without rsip;
+  downstream consumers no longer pull rsip (or its transitive
+  `syn 1` / `digest 0.9` / `sha2 0.9` / `uuid 0.8` chain) into their
+  runtime tree.
+- **`rsiprtp::sip::RsipUri`** re-export of `rsip::Uri`. The wrapper layer
+  no longer leaks rsip types across its public boundary.
+- **`SipRequest::inner()`** and **`SipResponse::inner()`** — the
+  `&rsip::Request` / `&rsip::Response` escape hatches. They had zero
+  callers inside `rsiprtp` and were the last public rsip-typed
+  accessors.
+- **`Method::to_rsip()`** and the **`impl From<&rsip::Method> for Method`**
+  bridge. With the cutover to parser-native storage these no longer
+  have any in-tree caller; the previous `method_to_rsip` shim is also
+  gone. Callers that previously bridged from rsip to ours via
+  `Method::from(&rsip_method)` now round-trip via the canonical
+  method-name string with the new `Method::FromStr` impl.
 
 ### Security
 
@@ -110,6 +155,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macOS is too coarse to distinguish back-to-back calls; it now draws from
   `rand::thread_rng()`.
 
-[Unreleased]: https://github.com/0x4D44/rsiprtp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/0x4D44/rsiprtp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/0x4D44/rsiprtp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/0x4D44/rsiprtp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/0x4D44/rsiprtp/releases/tag/v0.2.0

@@ -16,6 +16,10 @@
 ## Features
 
 **Signaling**
+- **SIP message parsing and building — in-tree implementation, no
+  third-party SIP parser dependency.** Differential-tested against
+  rsip 0.4 (kept as a dev-dep oracle) on a corpus of mdsiprtp3
+  fixtures, hand-curated SIP shapes, and RFC 4475 torture tests.
 - SIP message parsing and building (RFC 3261)
 - Digest authentication, including SHA-256 (RFC 7616)
 - Sans-IO transaction state machines — all four of RFC 3261 §17 (INVITE
@@ -69,7 +73,7 @@ Or directly in `Cargo.toml`:
 
 ```toml
 [dependencies]
-rsiprtp = "0.3"
+rsiprtp = "0.4"
 tokio   = { version = "1", features = ["full"] }
 ```
 
@@ -177,7 +181,8 @@ a worked example rather than part of the public API.
 ## Acknowledgments
 
 `rsiprtp` is built on excellent work in the Rust ecosystem, including:
-[`rsip`](https://crates.io/crates/rsip) for SIP message parsing,
+[`rsip`](https://crates.io/crates/rsip) (dev-dependency, used as the
+differential-test oracle for the in-tree SIP parser),
 [`tokio`](https://crates.io/crates/tokio) and
 [`rustls`](https://crates.io/crates/rustls) for async transport and TLS,
 [`hickory-resolver`](https://crates.io/crates/hickory-resolver) for DNS,
