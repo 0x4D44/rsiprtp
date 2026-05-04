@@ -423,7 +423,8 @@ async fn resolve_from_naptr_inner<'a>(
 
 /// Internal URI parsing helper.
 fn parse_sip_uri_internal(uri: &str) -> (String, Option<u16>, Option<TransportProtocol>) {
-    // Simple URI parsing (in production, use rsip's Uri parser)
+    // Lightweight host/port/transport extractor — for full SIP URI
+    // parsing use `crate::sip::uri::SipUri`.
     let uri = uri
         .trim_start_matches("sip:")
         .trim_start_matches("sips:")

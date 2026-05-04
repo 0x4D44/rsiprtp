@@ -48,7 +48,7 @@
 //! The stack is organized into modules:
 //!
 //! - [`core`]: Common types, errors, configuration
-//! - [`sip`]: SIP message parsing and building (wraps rsip)
+//! - [`sip`]: SIP message parsing and building (in-tree parser)
 //! - [`transaction`]: RFC 3261 transaction state machines (Sans-IO)
 //! - [`dialog`]: Dialog management for INVITE sessions
 //! - [`transport`]: UDP/TCP/TLS network transport

@@ -1,7 +1,7 @@
 //! SIP message parsing and building for rsiprtp.
 //!
-//! This crate wraps the `rsip` crate and provides convenience methods
-//! for common SIP operations.
+//! Built on the in-tree parser at [`parser`]; exposes higher-level
+//! request/response value types and builders for common SIP operations.
 
 pub(crate) mod auth;
 pub(crate) mod headers;

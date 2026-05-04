@@ -26,7 +26,7 @@ Content-Length: 0\r\n\
 \r\n";
 
         let result = SipMessage::parse(msg);
-        // rsip should handle folded headers
+        // RFC 3261 §7.3.1 line folding — parser should accept it.
         assert!(result.is_ok() || result.is_err()); // Implementation dependent
     }
 

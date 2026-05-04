@@ -1,9 +1,8 @@
 //! SIP request/response value types and parser entry points.
 //!
 //! Note: this is `crate::sip::parser::message`, distinct from the
-//! wrapper layer `crate::sip::message`. The wrapper layer (M8 owns
-//! its cutover) currently builds on rsip; this module is the
-//! rsip-independent replacement.
+//! wrapper layer `crate::sip::message`. The wrapper layer is built
+//! on top of the types defined here.
 
 use super::framing::{parse_header_block, parse_request_line, parse_status_line, split_message};
 use super::header::{Header, Headers};

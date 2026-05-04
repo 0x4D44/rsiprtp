@@ -1,19 +1,19 @@
-//! In-tree SIP parser (work in progress).
+//! In-tree SIP parser.
 //!
-//! This module is the rewrite target for dropping the third-party `rsip`
-//! dependency. It is private to `crate::sip` and currently contains only
-//! the type seeds (`Method`, `StatusCode`); none of the new types are yet
-//! integrated into the rest of the crate. See
-//! `wrk_docs/2026.05.03 - HLD - sip-parser-rewrite.md` for the full plan.
+//! The runtime SIP parser used by `crate::sip`. Replaced the third-party
+//! `rsip` dependency on the parse path in the M1–M9 rewrite (HLD:
+//! `wrk_docs/2026.05.03 - HLD - sip-parser-rewrite.md`). `rsip 0.4`
+//! survives only as a dev-dependency differential-test oracle (see
+//! `tests/parser_diff.rs` and the `sip_message_parse` fuzz target).
 //!
 //! Two-tier model (per HLD):
 //! 1. Tier 1 — eager framing + header recognition.
 //! 2. Tier 2 — lazy typed parsing on demand via `.typed()`.
 //!
-//! `dead_code` is muted across the whole module because M1 lands the
-//! types unintegrated by design (M7 wires them into the public API).
-//! The `#[cfg(test)]` blocks inside each submodule still exercise every
-//! item — this is not a coverage hole.
+//! `dead_code` is muted across the whole module: a handful of typed
+//! header variants and helpers are exercised only by the `#[cfg(test)]`
+//! blocks in each submodule and are intentionally retained for symmetry
+//! with the rsip oracle.
 
 #![allow(dead_code, unused_imports)]
 
