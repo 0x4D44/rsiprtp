@@ -1227,6 +1227,34 @@ pub fn assert_equivalent(bytes: &[u8]) {
             if has_unusual_byte && rsip_err.contains("Tokenizer error") {
                 return;
             }
+            // M11 fuzz finding #17 (run-#6 triage): the LFLF-separator
+            // asymmetry. Our `find_separator` falls back to `\n\n`
+            // when no `\r\n\r\n` is present (M2-A leniency, pinned by
+            // `framing::test_split_message_lf_only_fallback`). rsip
+            // 0.4 has no such fallback: when the wire lacks CRLFCRLF
+            // and contains LFLF, rsip treats the whole input as a
+            // header section and Tokenizer-fails on whatever bytes
+            // sit after the LFLF (which we'd surface as body).
+            //
+            // The principled `has_unusual_byte` check above misses
+            // this because `find_header_separator` *also* falls back
+            // to LFLF, so the header section it inspects is just
+            // `SIP/2.0 200 OK` (pure ASCII). The asymmetry isn't
+            // about unusual bytes — it's about the separator
+            // recognition itself.
+            //
+            // Pin: `lflf_separator_only_rsip_rejects_we_accept` in
+            // `parser_diff.rs`. Symmetric to pin #6
+            // (`body_starts_with_header_like_line_rsip_misinterprets`)
+            // which handles the `(Ok, Ok)` arm of the same family.
+            // When our parser stops accepting the LFLF fallback (or
+            // rsip starts accepting it), retire this skip with the
+            // pin.
+            let has_crlfcrlf = bytes.windows(4).any(|w| w == b"\r\n\r\n");
+            let has_lflf = bytes.windows(2).any(|w| w == b"\n\n");
+            if !has_crlfcrlf && has_lflf && rsip_err.contains("Tokenizer error") {
+                return;
+            }
             panic!(
                 "ours accepted but rsip rejected:\n\
                  {b:#?}\n\

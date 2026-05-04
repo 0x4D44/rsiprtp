@@ -697,6 +697,101 @@ fn diff_fuzz_corpus() {
     }
 }
 
+/// M11 fuzz finding #16 (run-#6 triage): rsip 0.4 silently absorbs a
+/// bare LF inside a *header value*, consuming the following line's
+/// bytes as part of the value. Same rsip-side bug class as finding
+/// #13 (`header_missing_colon_rsip_accepts_we_reject`), which pins
+/// the same behavior in the **reason-phrase** position; this pin
+/// covers the **header-value** position. Future-proof: if rsip fixes
+/// one tokenizer site but not the other, the unfixed site is still
+/// caught.
+///
+/// On wire `b"SIP/2.0 200 OK\r\n6.~: 5\r-\n!S-*\x01\x0c~~~*\x0b* S54\r\n\r\n"`,
+/// rsip frames it as a single header
+/// `("6.~", "5\r-\n!S-*\u{1}\u{c}~~~*\u{b}* S54")` — bare CR and
+/// bare LF and control bytes are silently absorbed into the value.
+/// Our parser treats the bare LF as a line terminator (per
+/// `str::lines` semantics; RFC 3261 §7.3 says CRLF terminates a
+/// header), splits there, and surfaces the orphan continuation
+/// `!S-*...` as a malformed header line — `Invalid header: missing
+/// ':'`. Same downstream error string as pin #13, so the existing
+/// oracle `(Ok, Err)` skip already catches the class; this test is
+/// a regression guard for the specific position.
+///
+/// **Divergence pinned:** rsip accepts, ours rejects. Update if rsip
+/// stops absorbing bare LFs inside header values.
+#[test]
+fn header_value_with_bare_lf_rsip_accepts_we_reject() {
+    let bytes = b"SIP/2.0 200 OK\r\n6.~: 5\r-\n!S-*\x01\x0c~~~*\x0b* S54\r\n\r\n";
+    let rs = oracle::rsip_to_diff(bytes);
+    let ours = oracle::ours_to_diff(bytes);
+    assert!(rs.is_ok(), "rsip should accept (its real behavior)");
+    let err = ours.expect_err("ours should reject");
+    assert!(
+        err.contains("missing ':'"),
+        "ours error should mention missing colon (proxy for the \
+         bare-LF-into-value rsip bug); got: {err}",
+    );
+}
+
+/// M11 fuzz finding #17 (run-#6 triage): the LFLF-separator
+/// asymmetry — rsip rejects what we accept.
+///
+/// Our parser's `framing::find_separator` accepts a bare `\n\n` as a
+/// header/body separator when no `\r\n\r\n` is present (deliberate
+/// M2-A compatibility leniency, pinned by
+/// `framing::test_split_message_lf_only_fallback`). rsip 0.4 has no
+/// such fallback: when the wire lacks `\r\n\r\n`, rsip's nom-based
+/// tokenizer treats the entire input as a header section and fails
+/// on whatever can't be tokenized as SIP header syntax — typically
+/// the bytes that we'd surface as the body.
+///
+/// Trigger: any `SIP/2.0 ... \n\n <bytes that don't tokenize as
+/// headers>` shape. The body bytes are incidental — what matters is
+/// LFLF being our recognized separator but not rsip's. The original
+/// run-#6 finding's "sustained 0xb8/0xf8 bytes" was incidental: the
+/// fuzzer landed on high-bit bytes because those are the cheapest
+/// way to make rsip's tokenizer fail past the LFLF position. Any
+/// non-tokenizer-friendly bytes would trigger the same shape.
+///
+/// **Divergence pinned:** rsip rejects (Tokenizer error), ours
+/// accepts. The principled tokenizer-narrowness heuristic in
+/// `parser_diff_oracle::assert_equivalent` misses this because it
+/// scopes `header_section` via the same LFLF-fallback splitter — so
+/// the "header section" the heuristic sees is pure ASCII (`SIP/2.0
+/// 200 OK`) with no unusual bytes. The oracle now carries a separate
+/// LFLF-asymmetry skip in the `(Err, Ok)` arm. Update both this
+/// pin and the skip if our parser stops accepting the LFLF
+/// fallback, or if rsip starts accepting it.
+#[test]
+fn lflf_separator_only_rsip_rejects_we_accept() {
+    // Minimal trigger: SIP response, LFLF separator (no CRLFCRLF),
+    // body bytes that don't tokenize as headers.
+    let bytes = b"SIP/2.0 200 OK\n\n\xb8\xb8\xb8";
+    let rs = oracle::rsip_to_diff(bytes);
+    let ours = oracle::ours_to_diff(bytes);
+    let rs_err = rs.expect_err("rsip should reject (no CRLFCRLF and high-bit body)");
+    assert!(
+        rs_err.contains("Tokenizer error"),
+        "rsip rejection should be Tokenizer-class (the new LFLF \
+         skip in parser_diff_oracle keys off this); got: {rs_err}",
+    );
+    let ours = ours.expect("ours should accept (LFLF fallback per M2-A)");
+    assert_eq!(
+        ours.body, b"\xb8\xb8\xb8",
+        "ours surfaces the post-LFLF bytes as body",
+    );
+    // Sanity: the wire bytes have no CRLFCRLF, only LFLF.
+    assert!(
+        !bytes.windows(4).any(|w| w == b"\r\n\r\n"),
+        "trigger requires no CRLFCRLF",
+    );
+    assert!(
+        bytes.windows(2).any(|w| w == b"\n\n"),
+        "trigger requires LFLF",
+    );
+}
+
 // ---------------------------------------------------------------
 // Sanity tests for the harness itself
 // ---------------------------------------------------------------
