@@ -137,11 +137,28 @@ impl SipUri {
             (rest, Vec::new())
         };
 
-        // Split off parameters (after first `;`).
-        let (user_host_port, params_str) = if let Some(idx) = rest.find(';') {
-            (&rest[..idx], Some(&rest[idx + 1..]))
-        } else {
-            (rest, None)
+        // Split off parameters (after first `;` that is part of the
+        // hostport-and-params section, NOT the userinfo).
+        //
+        // RFC 3261 §19.1.1: the URI grammar is
+        //
+        //   SIP-URI = "sip:" [ userinfo ] hostport
+        //             *( ";" uri-parameter ) [ "?" headers ]
+        //   userinfo = ( user / telephone-subscriber ) [ ":" password ] "@"
+        //
+        // and `user` may legitimately contain `;` (per the
+        // user-unreserved set: `& = + $ , ; ? /`). RFC 4475 §3.1.2.8
+        // (semiuri) tortures this corner. So if there's an `@` in
+        // `rest`, parameters can only start *after* the `@`. If
+        // there's no `@`, the whole prefix is hostport and the first
+        // `;` is the param separator.
+        let userinfo_end = rest.find('@').map(|i| i + 1).unwrap_or(0);
+        let (user_host_port, params_str) = match rest[userinfo_end..].find(';') {
+            Some(rel_idx) => {
+                let abs_idx = userinfo_end + rel_idx;
+                (&rest[..abs_idx], Some(&rest[abs_idx + 1..]))
+            }
+            None => (rest, None),
         };
 
         // Resolve user / host / port. `tel:` URIs have no user and no
@@ -689,6 +706,55 @@ mod tests {
 
         let uri2 = SipUri::parse("sip:example.com").unwrap();
         assert_eq!(uri2.user_part(), None);
+    }
+
+    /// RFC 3261 §25.1 `user-unreserved` includes `;`, so a SIP URI
+    /// `sip:user;par=v@host` has user `user;par=v` and host `host` —
+    /// the `;` before the `@` is part of the user portion, NOT the
+    /// boundary between hostport and parameters. RFC 4475 §3.1.2.8
+    /// (semiuri) tortures this corner.
+    #[test]
+    fn test_semicolon_in_user_part_rfc4475_semiuri() {
+        let uri = SipUri::parse("sip:user;par=u%40example.net@example.com").unwrap();
+        assert_eq!(uri.user(), Some("user;par=u%40example.net"));
+        assert_eq!(uri.host(), "example.com");
+        assert_eq!(uri.params().count(), 0, "no URI parameters");
+    }
+
+    /// Without an `@` the first `;` IS the params boundary —
+    /// `sip:host;lr` has host `host` and a flag param `lr`.
+    #[test]
+    fn test_semicolon_with_no_user_is_param_boundary() {
+        let uri = SipUri::parse("sip:host.example.com;lr").unwrap();
+        assert_eq!(uri.user(), None);
+        assert_eq!(uri.host(), "host.example.com");
+        let params: Vec<_> = uri.params().collect();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].0, "lr");
+    }
+
+    #[test]
+    fn test_empty_host_after_at_is_lenient() {
+        // Pathological: `sip:bob@;param`. Currently parses with host = "".
+        // RFC 3261 §19.1.1 implies host MUST be present, but our parser is
+        // lenient. Pinned here so any future strict-parse change is deliberate.
+        let uri = SipUri::parse("sip:bob@;lr").unwrap();
+        assert_eq!(uri.user(), Some("bob"));
+        assert_eq!(uri.host(), "");
+    }
+
+    /// With an `@` and `;` BOTH before AND after, the user portion
+    /// captures everything up to the `@`; URI params start after.
+    #[test]
+    fn test_semicolon_in_user_and_params() {
+        let uri = SipUri::parse("sip:user;a=1@host.example.com;lr;b=2").unwrap();
+        assert_eq!(uri.user(), Some("user;a=1"));
+        assert_eq!(uri.host(), "host.example.com");
+        let params: Vec<_> = uri.params().collect();
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].0, "lr");
+        assert_eq!(params[1].0, "b");
+        assert_eq!(params[1].1, Some("2"));
     }
 
     #[test]

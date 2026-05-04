@@ -1126,6 +1126,258 @@ fn diff_handcrafted_response_with_multi_via() {
 }
 
 // ---------------------------------------------------------------
+// Tests against the RFC 4475 torture-test corpus (M6)
+// ---------------------------------------------------------------
+//
+// See `tests/fixtures/rfc4475/README.md` for the catalog. These exercise
+// the corner cases described in RFC 4475 §3 ("Valid Messages"). Each
+// fixture is a representative SIP message constructed per the torture-
+// test category — we are testing the same parser corner the RFC §3.1
+// paragraph describes, not asserting byte-perfect copies of the RFC's
+// own example bodies.
+
+/// §3.1.1 "A short tortuous INVITE": quoted display names with
+/// embedded SP / quoted-pairs, parameter-name-only forms, header
+/// values broken across lines via line folding, and heavy interior
+/// whitespace (e.g. `SIP  /   2.0  /UDP`).
+///
+/// **Divergence pinned:** rsip 0.4 rejects the entire message at
+/// tokenize-version time — the combination of folding + interior
+/// whitespace in `Via:` defeats its tokenizer. RFC 3261 §7.3.1
+/// (line folding) and §25.1 (LWS in HCOLON / param SEMI / etc.)
+/// mandate acceptance of all of these forms, so this is a real
+/// rsip-side spec deficiency. Our parser correctly accepts (see
+/// `framing::parse_header_block` folding path; `name_addr::*`
+/// surrounding-whitespace handling).
+///
+/// At M10 (rsip dropped from runtime deps), this test should be
+/// retargeted to a direct on-our-parser assertion.
+#[test]
+fn diff_rfc4475_wsinv_rsip_rejects() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/wsinv.sip");
+    let rs = rsip::SipMessage::try_from(bytes);
+    assert!(
+        rs.is_err(),
+        "rsip 0.4 rejects RFC 4475 §3.1.1 wsinv torture test; \
+         got Ok({rs:?}) — update this test if rsip changed",
+    );
+    let ours = OurMessage::parse(bytes);
+    assert!(
+        ours.is_ok(),
+        "our parser must accept RFC 4475 §3.1.1 wsinv; got Err({ours:?})",
+    );
+}
+
+#[test]
+fn diff_rfc4475_esc01() {
+    // §3.1.2.2 "Valid use of the % escaping": escaped chars in user/
+    // contact URIs.
+    let bytes = include_bytes!("fixtures/rfc4475/esc01.sip");
+    assert_equivalent(bytes);
+}
+
+#[test]
+fn diff_rfc4475_escnull() {
+    // §3.1.2.3 "Escaped nulls in URIs": `%00` in user portion.
+    let bytes = include_bytes!("fixtures/rfc4475/escnull.sip");
+    assert_equivalent(bytes);
+}
+
+#[test]
+fn diff_rfc4475_esc02() {
+    // §3.1.2.4 "Use of % when it is not an escape": `%` followed by
+    // non-hex inside header values.
+    let bytes = include_bytes!("fixtures/rfc4475/esc02.sip");
+    assert_equivalent(bytes);
+}
+
+#[test]
+fn diff_rfc4475_lwsdisp() {
+    // §3.1.2.5 "No LWS between Display Name and `<`".
+    let bytes = include_bytes!("fixtures/rfc4475/lwsdisp.sip");
+    assert_equivalent(bytes);
+}
+
+#[test]
+fn diff_rfc4475_longreq() {
+    // §3.1.2.6 "Long values in header fields": exercises size-limit
+    // path. Our defense-in-depth caps at 8192 per value; this fixture
+    // sits well below that.
+    let bytes = include_bytes!("fixtures/rfc4475/longreq.sip");
+    assert_equivalent(bytes);
+}
+
+/// §3.1.2.7 "Extra trailing octets in a UDP datagram": the first
+/// message has `Content-Length: 0` (no body), but the datagram
+/// contains a fully-formed second request after that. RFC 4475
+/// §3.1.2.7 says: *"Implementations should process the request and
+/// ignore the extra bytes."*
+///
+/// **Divergence pinned:** rsip 0.4 ignores Content-Length and
+/// captures the trailing octets as the body of the first request.
+/// Our parser correctly truncates the body to Content-Length per
+/// RFC 3261 §18.3. Both parse the framing, but produce different
+/// `body`. Pin the asymmetry; tighten when rsip is dropped at M10.
+#[test]
+fn diff_rfc4475_dblreq_rsip_keeps_trailing() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/dblreq.sip");
+    let ours = OurMessage::parse(bytes).expect("our parser accepts dblreq");
+    let our_body: &Vec<u8> = match &ours {
+        OurMessage::Request(r) => &r.body,
+        OurMessage::Response(r) => &r.body,
+    };
+    assert!(
+        our_body.is_empty(),
+        "ours: Content-Length: 0 → body must be empty; got {} bytes",
+        our_body.len(),
+    );
+    let rs = rsip::SipMessage::try_from(bytes).expect("rsip accepts dblreq framing");
+    let rs_body = match &rs {
+        rsip::SipMessage::Request(r) => &r.body,
+        rsip::SipMessage::Response(r) => &r.body,
+    };
+    assert!(
+        !rs_body.is_empty(),
+        "rsip 0.4 captures trailing octets as body; if it now \
+         truncates per Content-Length, this pin can be removed.",
+    );
+}
+
+/// §3.1.2.8 "Semicolons in URI user part": RFC 3261 §25.1
+/// `user-unreserved = "&" / "=" / "+" / "$" / "," / ";" / "?" /
+/// "/"` — so `;` is a legal user character. The Request-URI
+/// `sip:user;par=u%40example.net@example.com` therefore has user
+/// `user;par=u%40example.net` (the `;` and `@` decoded inside the
+/// user portion) and host `example.com`.
+///
+/// **Divergence pinned:** rsip 0.4 rejects the entire message —
+/// its tokenizer treats `;` as the user/params boundary without
+/// honoring the userinfo grammar. Our parser correctly splits at
+/// the `@` first per RFC 3261 §19.1.1 (this M6 milestone fixed a
+/// bug in our parser where `;` before `@` was ALSO treated as a
+/// param separator — see `crates/rsiprtp/src/sip/uri.rs`
+/// `parse()`).
+#[test]
+fn diff_rfc4475_semiuri_rsip_rejects() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/semiuri.sip");
+    let ours = OurMessage::parse(bytes).expect("ours accepts semiuri");
+    if let OurMessage::Request(r) = &ours {
+        // Verify the URI parse produced the right user/host split.
+        let uri = SipUri::parse(&r.uri).expect("our URI parses");
+        assert_eq!(uri.user(), Some("user;par=u%40example.net"));
+        assert_eq!(uri.host(), "example.com");
+    } else {
+        panic!("expected request");
+    }
+    let rs = rsip::SipMessage::try_from(bytes);
+    assert!(
+        rs.is_err(),
+        "rsip 0.4 rejects URI with `;` in user part; got Ok({rs:?}) \
+         — update this test if rsip changed",
+    );
+}
+
+/// §3.1.2.9 "Varied and unknown transport types in Via". RFC 3261
+/// §20.42 grammar: `transport-param = "transport=" ( "udp" / "tcp"
+/// / "sctp" / "tls" / other-transport )` where `other-transport =
+/// token`. Unknown but token-shaped transports MUST be accepted at
+/// parse time (consumers can route or reject as they see fit).
+///
+/// **Divergence pinned (typed-Via path only):** rsip 0.4's typed
+/// Via parser rejects unknown transport tokens (`TUNA` in our
+/// fixture). Tier-1 framing on both sides is fine; the divergence
+/// is in `rsip::headers::Via::typed()`. Our parser accepts.
+///
+/// We assert the message frames cleanly on both sides, then assert
+/// rsip's typed-Via specifically rejects the unknown-transport
+/// variant. When rsip is dropped at M10 this test is retargeted.
+#[test]
+fn diff_rfc4475_transports_rsip_rejects_unknown_transport() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/transports.sip");
+    // Tier-1 framing is clean on both sides.
+    let _ours_msg = OurMessage::parse(bytes).expect("ours frames transports");
+    let _rsip_msg = rsip::SipMessage::try_from(bytes).expect("rsip frames transports");
+    // Tier-2 typed-Via on the unknown-transport entry: rsip rejects.
+    let unknown_via = "SIP/2.0/TUNA t6.example.com;branch=z9hG4bK6";
+    let r = rsip_via_diff(unknown_via);
+    assert!(
+        r.is_err(),
+        "rsip 0.4 rejects unknown transport in typed Via; got \
+         Ok({r:?}) — update this test if rsip changed",
+    );
+    let d = ours_via_diff(unknown_via).expect("ours typed-Via accepts unknown transport");
+    assert_eq!(d.transport, "TUNA");
+}
+
+#[test]
+fn diff_rfc4475_unreason() {
+    // §3.1.2.10 "Unusual REGISTER request with binding".
+    let bytes = include_bytes!("fixtures/rfc4475/unreason.sip");
+    assert_equivalent(bytes);
+}
+
+// ---------------------------------------------------------------
+// RFC 4475 §4 — Invalid Messages: both parsers MUST reject
+// ---------------------------------------------------------------
+//
+// Per RFC 4475 §4 ("Invalid Messages"), each of these is malformed in
+// a way that any conformant parser must reject. The harness assertion
+// is "both parsers return Err" — if EITHER parser accepts, that's a
+// real bug we want to surface.
+//
+// Fixtures live in `tests/fixtures/rfc4475_invalid/` (separate dir
+// from the §3 valid set so the rejection-expectation is structurally
+// explicit).
+
+/// Helper for §4 fixtures: assert both rsip 0.4 and our parser return
+/// an error. If either accepts, panic with both shapes for triage.
+fn assert_both_reject(label: &str, bytes: &[u8]) {
+    let rs = rsip::SipMessage::try_from(bytes);
+    let ours = OurMessage::parse(bytes);
+    match (rs.is_ok(), ours.is_ok()) {
+        (false, false) => { /* expected */ }
+        (true, false) => panic!(
+            "{label}: rsip ACCEPTED but ours rejected — \
+             RFC 4475 §4 says this is invalid; rsip is wrong.\n\
+             rsip parsed: {:#?}",
+            rs.unwrap()
+        ),
+        (false, true) => panic!(
+            "{label}: ours ACCEPTED but rsip rejected — \
+             RFC 4475 §4 says this is invalid; we are too lenient.\n\
+             ours parsed: {:#?}",
+            ours.unwrap()
+        ),
+        (true, true) => panic!(
+            "{label}: BOTH parsers accepted — RFC 4475 §4 says this \
+             is invalid; both are too lenient."
+        ),
+    }
+}
+
+#[test]
+fn diff_rfc4475_invalid_no_version() {
+    // §4-style: request line missing the `SIP/2.0` token.
+    let bytes = include_bytes!("fixtures/rfc4475_invalid/badaspec_no_version.sip");
+    assert_both_reject("badaspec_no_version", bytes);
+}
+
+// NOTE: a "negative Content-Length" fixture was considered (RFC 4475
+// §4 ncl) but dropped — both parsers store header values as strings
+// and validate digits only when bounding the body, which is a
+// typed-form / body-extraction concern rather than tier-1 framing.
+// RFC 4475 §4 ncl really exercises tier-2 logic that this harness
+// does not cover.
+
+#[test]
+fn diff_rfc4475_invalid_garbage_start() {
+    // §4-style: start line is neither a valid request nor a valid
+    // status line.
+    let bytes = include_bytes!("fixtures/rfc4475_invalid/badaspec_garbage_start.sip");
+    assert_both_reject("badaspec_garbage_start", bytes);
+}
+
+// ---------------------------------------------------------------
 // Tests against the rsiprtp fuzz corpus (populated by M11)
 // ---------------------------------------------------------------
 
