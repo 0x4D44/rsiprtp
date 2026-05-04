@@ -44,7 +44,7 @@ pub struct Via {
     pub protocol: String,
     /// Transport token, e.g. `"UDP"`, `"TCP"`, `"TLS"`.
     pub transport: String,
-    /// Sent-by host[:port], verbatim from the wire (preserves
+    /// Sent-by `host[:port]`, verbatim from the wire (preserves
     /// IPv6 bracketing like `[2001:db8::1]:5060`).
     pub sent_by: String,
     /// Header parameters in wire order. `(key, Option<value>)`
