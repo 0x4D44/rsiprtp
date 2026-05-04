@@ -1,10 +1,12 @@
 //! SIP message types and wrappers.
 
 use crate::core::{Result, SipError};
+use crate::sip::uri::SipUri;
 use bytes::Bytes;
 use rsip::prelude::*;
 use std::convert::TryFrom;
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(coverage)]
 #[inline(always)]
@@ -69,7 +71,6 @@ fn find_require(headers: &rsip::Headers) -> Option<crate::sip::headers::Require>
 /// only. Returns `None` when no `Allow` header is present at all (so the
 /// caller can distinguish "absent" from "present but empty/all-unknown").
 fn find_allow(headers: &rsip::Headers) -> Option<Vec<Method>> {
-    use std::str::FromStr;
     let mut values: Vec<String> = Vec::new();
     for header in headers.iter() {
         match header {
@@ -90,11 +91,11 @@ fn find_allow(headers: &rsip::Headers) -> Option<Vec<Method>> {
             if trimmed.is_empty() {
                 continue;
             }
-            // rsip::Method::from_str is case-insensitive; map to ours.
-            if let Ok(m) = rsip::Method::from_str(&trimmed.to_ascii_uppercase()) {
-                methods.push(Method::from(&m));
+            // `Method::from_str` is case-insensitive; unknown method
+            // tokens are skipped silently per the doc above.
+            if let Ok(m) = Method::from_str(trimmed) {
+                methods.push(m);
             }
-            // Unknown methods are skipped silently per the doc above.
         }
     }
     Some(methods)
@@ -195,12 +196,21 @@ pub struct SipRequest {
 impl SipRequest {
     /// Get the request method.
     pub fn method(&self) -> Method {
-        Method::from(&self.inner.method)
+        method_from_rsip(&self.inner.method)
     }
 
     /// Get the request URI.
-    pub fn uri(&self) -> &rsip::Uri {
-        &self.inner.uri
+    ///
+    /// Returns an owned [`SipUri`]. Internally re-parsed from the
+    /// underlying rsip representation; this is a transitional shape
+    /// (M7 public-API redesign) that becomes a direct accessor once M8
+    /// makes the in-tree parser authoritative. The conversion is
+    /// expected to be infallible for any URI rsip already accepted —
+    /// our parser is at least as permissive on the SIP/SIPS/TEL set
+    /// rsip handles. A panic here would indicate an unexpected
+    /// divergence (caught by the diff-test harness in M2).
+    pub fn uri(&self) -> SipUri {
+        SipUri::from_rsip(&self.inner.uri).expect("rsip::Uri round-trips through SipUri::parse")
     }
 
     /// Get the Call-ID header value.
@@ -228,7 +238,7 @@ impl SipRequest {
     }
 
     /// Get the From tag and URI with a single parse.
-    pub fn from_tag_and_uri(&self) -> Result<(String, rsip::Uri)> {
+    pub fn from_tag_and_uri(&self) -> Result<(String, SipUri)> {
         let from = self
             .inner
             .from_header()
@@ -239,7 +249,8 @@ impl SipRequest {
             .tag()
             .map(|t| t.to_string())
             .ok_or_else(|| SipError::InvalidHeader("From header missing tag".to_string()))?;
-        Ok((tag, typed_from.uri))
+        let uri = SipUri::from_rsip(&typed_from.uri).map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok((tag, uri))
     }
 
     /// Get the To tag (may not exist in requests).
@@ -285,37 +296,39 @@ impl SipRequest {
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
         let typed_cseq: rsip::typed::CSeq =
             cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(Method::from(&typed_cseq.method))
+        Ok(method_from_rsip(&typed_cseq.method))
     }
 
     /// Get the From URI.
-    pub fn from_uri(&self) -> Result<rsip::Uri> {
+    pub fn from_uri(&self) -> Result<SipUri> {
         let from = self
             .inner
             .from_header()
             .map_err(|_| SipError::MissingHeader("From".to_string()))?;
         let typed_from: rsip::typed::From =
             from.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(typed_from.uri)
+        let uri = SipUri::from_rsip(&typed_from.uri).map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(uri)
     }
 
     /// Get the To URI.
-    pub fn to_uri(&self) -> Result<rsip::Uri> {
+    pub fn to_uri(&self) -> Result<SipUri> {
         let to = self
             .inner
             .to_header()
             .map_err(|_| SipError::MissingHeader("To".to_string()))?;
         let typed_to: rsip::typed::To = to.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(typed_to.uri)
+        let uri = SipUri::from_rsip(&typed_to.uri).map_err(|e| SipError::Parse(e.to_string()))?;
+        Ok(uri)
     }
 
     /// Get the Contact URI if present.
-    pub fn contact_uri(&self) -> Option<rsip::Uri> {
+    pub fn contact_uri(&self) -> Option<SipUri> {
         self.inner
             .contact_header()
             .ok()
             .and_then(|h| h.typed().ok())
-            .map(|typed: rsip::typed::Contact| typed.uri)
+            .and_then(|typed: rsip::typed::Contact| SipUri::from_rsip(&typed.uri).ok())
     }
 
     /// Get the message body.
@@ -425,11 +438,6 @@ impl SipRequest {
     /// Convert to bytes.
     pub fn to_bytes(&self) -> Bytes {
         Bytes::from(self.inner.to_string())
-    }
-
-    /// Get the inner rsip request (for advanced use).
-    pub fn inner(&self) -> &rsip::Request {
-        &self.inner
     }
 
     /// Create a builder for a new request.
@@ -543,16 +551,16 @@ impl SipResponse {
             .map_err(|_| SipError::MissingHeader("CSeq".to_string()))?;
         let typed_cseq: rsip::typed::CSeq =
             cseq.typed().map_err(|e| SipError::Parse(e.to_string()))?;
-        Ok(Method::from(&typed_cseq.method))
+        Ok(method_from_rsip(&typed_cseq.method))
     }
 
     /// Get the Contact URI if present.
-    pub fn contact_uri(&self) -> Option<rsip::Uri> {
+    pub fn contact_uri(&self) -> Option<SipUri> {
         self.inner
             .contact_header()
             .ok()
             .and_then(|h| h.typed().ok())
-            .map(|typed: rsip::typed::Contact| typed.uri)
+            .and_then(|typed: rsip::typed::Contact| SipUri::from_rsip(&typed.uri).ok())
     }
 
     /// Get the message body.
@@ -674,11 +682,6 @@ impl SipResponse {
         Bytes::from(self.inner.to_string())
     }
 
-    /// Get the inner rsip response (for advanced use).
-    pub fn inner(&self) -> &rsip::Response {
-        &self.inner
-    }
-
     /// Mutable access to the underlying rsip response. Used by the
     /// transaction layer to inject reliable-provisional headers (RFC 3262
     /// §4) into a TU-built response without round-tripping through the
@@ -730,26 +733,6 @@ pub enum Method {
 }
 
 impl Method {
-    /// Convert to rsip method.
-    pub fn to_rsip(&self) -> rsip::Method {
-        match self {
-            Method::Invite => rsip::Method::Invite,
-            Method::Ack => rsip::Method::Ack,
-            Method::Bye => rsip::Method::Bye,
-            Method::Cancel => rsip::Method::Cancel,
-            Method::Register => rsip::Method::Register,
-            Method::Options => rsip::Method::Options,
-            Method::Prack => rsip::Method::PRack,
-            Method::Subscribe => rsip::Method::Subscribe,
-            Method::Notify => rsip::Method::Notify,
-            Method::Publish => rsip::Method::Publish,
-            Method::Info => rsip::Method::Info,
-            Method::Refer => rsip::Method::Refer,
-            Method::Message => rsip::Method::Message,
-            Method::Update => rsip::Method::Update,
-        }
-    }
-
     /// Check if this method creates a dialog.
     pub fn creates_dialog(&self) -> bool {
         matches!(self, Method::Invite | Method::Subscribe)
@@ -761,24 +744,76 @@ impl Method {
     }
 }
 
-impl From<&rsip::Method> for Method {
-    fn from(m: &rsip::Method) -> Self {
-        match m {
-            rsip::Method::Invite => Method::Invite,
-            rsip::Method::Ack => Method::Ack,
-            rsip::Method::Bye => Method::Bye,
-            rsip::Method::Cancel => Method::Cancel,
-            rsip::Method::Register => Method::Register,
-            rsip::Method::Options => Method::Options,
-            rsip::Method::PRack => Method::Prack,
-            rsip::Method::Subscribe => Method::Subscribe,
-            rsip::Method::Notify => Method::Notify,
-            rsip::Method::Publish => Method::Publish,
-            rsip::Method::Info => Method::Info,
-            rsip::Method::Refer => Method::Refer,
-            rsip::Method::Message => Method::Message,
-            rsip::Method::Update => Method::Update,
+/// Internal: convert an `rsip::Method` to our [`Method`] via the
+/// canonical method-name string (RFC 3261 §7.1).
+///
+/// The previous public `impl From<&rsip::Method> for Method` was removed
+/// in M7. Internally we still need to bridge while rsip remains the
+/// runtime parser; the round-trip through the uppercase token string is
+/// lossless because rsip 0.4's `Method` enum has exactly the same 14
+/// canonical variants ours does (no `Other` variant). The `unwrap_or`
+/// is therefore unreachable defensively; if rsip ever adds a new
+/// variant the fallback to `Invite` would be visibly wrong and caught
+/// by the differential-test harness.
+fn method_from_rsip(m: &rsip::Method) -> Method {
+    Method::from_str(&m.to_string()).unwrap_or(Method::Invite)
+}
+
+/// Internal: convert our [`Method`] into the rsip-typed equivalent.
+///
+/// Used only by the request builder while rsip remains the underlying
+/// representation (M7 wraps the public boundary; M8 cuts the internal
+/// representation over to our parser, removing this helper).
+fn method_to_rsip(m: Method) -> rsip::Method {
+    match m {
+        Method::Invite => rsip::Method::Invite,
+        Method::Ack => rsip::Method::Ack,
+        Method::Bye => rsip::Method::Bye,
+        Method::Cancel => rsip::Method::Cancel,
+        Method::Register => rsip::Method::Register,
+        Method::Options => rsip::Method::Options,
+        Method::Prack => rsip::Method::PRack,
+        Method::Subscribe => rsip::Method::Subscribe,
+        Method::Notify => rsip::Method::Notify,
+        Method::Publish => rsip::Method::Publish,
+        Method::Info => rsip::Method::Info,
+        Method::Refer => rsip::Method::Refer,
+        Method::Message => rsip::Method::Message,
+        Method::Update => rsip::Method::Update,
+    }
+}
+
+impl FromStr for Method {
+    type Err = SipError;
+
+    /// Parse a SIP method name from its canonical token, case-insensitively.
+    ///
+    /// Matches the parser-layer `Method::from_str` semantics — RFC 3261
+    /// §7.1 declares method names case-sensitive on the wire, but liberal
+    /// acceptance on parse is the correct robustness stance.
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        const ALL: &[(Method, &str)] = &[
+            (Method::Invite, "INVITE"),
+            (Method::Ack, "ACK"),
+            (Method::Bye, "BYE"),
+            (Method::Cancel, "CANCEL"),
+            (Method::Register, "REGISTER"),
+            (Method::Options, "OPTIONS"),
+            (Method::Prack, "PRACK"),
+            (Method::Subscribe, "SUBSCRIBE"),
+            (Method::Notify, "NOTIFY"),
+            (Method::Publish, "PUBLISH"),
+            (Method::Info, "INFO"),
+            (Method::Refer, "REFER"),
+            (Method::Message, "MESSAGE"),
+            (Method::Update, "UPDATE"),
+        ];
+        for (m, name) in ALL {
+            if s.eq_ignore_ascii_case(name) {
+                return Ok(*m);
+            }
         }
+        Err(SipError::Parse(format!("unknown SIP method: {s}")))
     }
 }
 
@@ -848,7 +883,7 @@ impl SipRequestBuilder {
 
     /// Set the method.
     pub fn method(mut self, method: Method) -> Self {
-        self.method = Some(method.to_rsip());
+        self.method = Some(method_to_rsip(method));
         self
     }
 
@@ -1907,14 +1942,6 @@ Content-Length: 0\r\n\
         assert!(err.to_string().contains("Parse error"));
     }
 
-    #[test]
-    fn test_request_inner() {
-        let msg = SipMessage::parse(INVITE_MSG).unwrap();
-        let req = msg.as_request().unwrap();
-        let inner = req.inner();
-        assert_eq!(inner.method, rsip::Method::Invite);
-    }
-
     // SipResponse tests
     #[test]
     fn test_response_reason() {
@@ -2084,14 +2111,6 @@ Content-Length: 0\r\n\
         assert!(resp.proxy_authenticate().is_none());
     }
 
-    #[test]
-    fn test_response_inner() {
-        let msg = SipMessage::parse(RESPONSE_MSG).unwrap();
-        let resp = msg.as_response().unwrap();
-        let inner = resp.inner();
-        assert_eq!(inner.status_code.code(), 200);
-    }
-
     // Method tests
     #[test]
     fn test_method_display() {
@@ -2126,40 +2145,38 @@ Content-Length: 0\r\n\
         assert!(!Method::Bye.is_invite());
     }
 
+    /// `Method::from_str` round-trips every method via its canonical
+    /// uppercase token, case-insensitively. This is the replacement for
+    /// the M7-removed `From<&rsip::Method>` impl — internal callers
+    /// bridge via the canonical method-name string per RFC 3261 §7.1.
     #[test]
-    fn test_method_to_rsip() {
-        assert_eq!(Method::Invite.to_rsip(), rsip::Method::Invite);
-        assert_eq!(Method::Ack.to_rsip(), rsip::Method::Ack);
-        assert_eq!(Method::Bye.to_rsip(), rsip::Method::Bye);
-        assert_eq!(Method::Cancel.to_rsip(), rsip::Method::Cancel);
-        assert_eq!(Method::Register.to_rsip(), rsip::Method::Register);
-        assert_eq!(Method::Options.to_rsip(), rsip::Method::Options);
-        assert_eq!(Method::Prack.to_rsip(), rsip::Method::PRack);
-        assert_eq!(Method::Subscribe.to_rsip(), rsip::Method::Subscribe);
-        assert_eq!(Method::Notify.to_rsip(), rsip::Method::Notify);
-        assert_eq!(Method::Publish.to_rsip(), rsip::Method::Publish);
-        assert_eq!(Method::Info.to_rsip(), rsip::Method::Info);
-        assert_eq!(Method::Refer.to_rsip(), rsip::Method::Refer);
-        assert_eq!(Method::Message.to_rsip(), rsip::Method::Message);
-        assert_eq!(Method::Update.to_rsip(), rsip::Method::Update);
-    }
-
-    #[test]
-    fn test_method_from_rsip() {
-        assert_eq!(Method::from(&rsip::Method::Invite), Method::Invite);
-        assert_eq!(Method::from(&rsip::Method::Ack), Method::Ack);
-        assert_eq!(Method::from(&rsip::Method::Bye), Method::Bye);
-        assert_eq!(Method::from(&rsip::Method::Cancel), Method::Cancel);
-        assert_eq!(Method::from(&rsip::Method::Register), Method::Register);
-        assert_eq!(Method::from(&rsip::Method::Options), Method::Options);
-        assert_eq!(Method::from(&rsip::Method::PRack), Method::Prack);
-        assert_eq!(Method::from(&rsip::Method::Subscribe), Method::Subscribe);
-        assert_eq!(Method::from(&rsip::Method::Notify), Method::Notify);
-        assert_eq!(Method::from(&rsip::Method::Publish), Method::Publish);
-        assert_eq!(Method::from(&rsip::Method::Info), Method::Info);
-        assert_eq!(Method::from(&rsip::Method::Refer), Method::Refer);
-        assert_eq!(Method::from(&rsip::Method::Message), Method::Message);
-        assert_eq!(Method::from(&rsip::Method::Update), Method::Update);
+    fn test_method_from_str_round_trip() {
+        use std::str::FromStr;
+        const ALL: &[Method] = &[
+            Method::Invite,
+            Method::Ack,
+            Method::Bye,
+            Method::Cancel,
+            Method::Register,
+            Method::Options,
+            Method::Prack,
+            Method::Subscribe,
+            Method::Notify,
+            Method::Publish,
+            Method::Info,
+            Method::Refer,
+            Method::Message,
+            Method::Update,
+        ];
+        for m in ALL {
+            let display = m.to_string();
+            assert_eq!(Method::from_str(&display).unwrap(), *m);
+            // Case-insensitive on parse.
+            assert_eq!(Method::from_str(&display.to_lowercase()).unwrap(), *m);
+        }
+        // Unknown tokens fail.
+        assert!(Method::from_str("BOGUS").is_err());
+        assert!(Method::from_str("").is_err());
     }
 
     #[test]

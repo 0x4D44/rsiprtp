@@ -1885,6 +1885,7 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::dialog::DialogId where V: ppv
 pub fn rsiprtp::dialog::DialogId::vzip(self) -> V
 pub struct rsiprtp::dialog::DialogInfo
 pub rsiprtp::dialog::DialogInfo::id: rsiprtp::dialog::DialogId
+pub rsiprtp::dialog::DialogInfo::local_contact: alloc::string::String
 pub rsiprtp::dialog::DialogInfo::local_seq: u32
 pub rsiprtp::dialog::DialogInfo::local_uri: alloc::string::String
 pub rsiprtp::dialog::DialogInfo::remote_seq: core::option::Option<u32>
@@ -1997,8 +1998,13 @@ pub fn rsiprtp::dialog::DialogManager::vzip(self) -> V
 pub struct rsiprtp::dialog::InviteDialog
 impl rsiprtp::dialog::InviteDialog
 pub fn rsiprtp::dialog::InviteDialog::ack_sent(&mut self)
+pub fn rsiprtp::dialog::InviteDialog::build_bye_with_reason(&mut self, reason: &str) -> core::option::Option<rsiprtp::sip::SipRequest>
+pub fn rsiprtp::dialog::InviteDialog::build_prack(&mut self, to: &rsiprtp::sip::SipResponse) -> rsiprtp::sip::SipRequest
+pub fn rsiprtp::dialog::InviteDialog::build_update(&mut self, session_expires: core::option::Option<u32>) -> rsiprtp::sip::SipRequest
+pub fn rsiprtp::dialog::InviteDialog::from_dialog_info(info: rsiprtp::dialog::DialogInfo, role: rsiprtp::dialog::Role) -> Self
 pub fn rsiprtp::dialog::InviteDialog::handle_request(&mut self, request: rsiprtp::sip::SipRequest)
 pub fn rsiprtp::dialog::InviteDialog::handle_response(&mut self, response: rsiprtp::sip::SipResponse)
+pub fn rsiprtp::dialog::InviteDialog::handle_update(&self, req: &rsiprtp::sip::SipRequest) -> rsiprtp::sip::SipResponse
 pub fn rsiprtp::dialog::InviteDialog::id(&self) -> &rsiprtp::dialog::DialogId
 pub fn rsiprtp::dialog::InviteDialog::info(&self) -> &rsiprtp::dialog::DialogInfo
 pub fn rsiprtp::dialog::InviteDialog::is_ack_complete(&self) -> bool
@@ -4760,6 +4766,59 @@ impl<T> typenum::type_operators::Same for rsiprtp::media::G711Variant
 pub type rsiprtp::media::G711Variant::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::media::G711Variant where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::media::G711Variant::vzip(self) -> V
+pub enum rsiprtp::prelude::InboundSessionTimer
+pub rsiprtp::prelude::InboundSessionTimer::Accept
+pub rsiprtp::prelude::InboundSessionTimer::Accept::refresher: rsiprtp::sip::Refresher
+pub rsiprtp::prelude::InboundSessionTimer::Accept::session_expires: core::time::Duration
+pub rsiprtp::prelude::InboundSessionTimer::Disabled
+pub rsiprtp::prelude::InboundSessionTimer::Reject422
+pub rsiprtp::prelude::InboundSessionTimer::Reject422::min_se: u32
+impl core::clone::Clone for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::clone(&self) -> rsiprtp::session::InboundSessionTimer
+impl core::fmt::Debug for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::InboundSessionTimer
+impl core::marker::Send for rsiprtp::session::InboundSessionTimer
+impl core::marker::Sync for rsiprtp::session::InboundSessionTimer
+impl core::marker::Unpin for rsiprtp::session::InboundSessionTimer
+impl core::marker::UnsafeUnpin for rsiprtp::session::InboundSessionTimer
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::InboundSessionTimer
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::InboundSessionTimer
+impl<T, U> core::convert::Into<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::From<T>
+pub fn rsiprtp::session::InboundSessionTimer::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::Into<T>
+pub type rsiprtp::session::InboundSessionTimer::Error = core::convert::Infallible
+pub fn rsiprtp::session::InboundSessionTimer::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::InboundSessionTimer::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::InboundSessionTimer::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::InboundSessionTimer where T: core::clone::Clone
+pub type rsiprtp::session::InboundSessionTimer::Owned = T
+pub fn rsiprtp::session::InboundSessionTimer::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::InboundSessionTimer::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::InboundSessionTimer where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::InboundSessionTimer where T: ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::InboundSessionTimer where T: ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::InboundSessionTimer where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::InboundSessionTimer::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::InboundSessionTimer where T: core::any::Any
+pub fn rsiprtp::session::InboundSessionTimer::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InboundSessionTimer::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InboundSessionTimer::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::InboundSessionTimer::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::InboundSessionTimer where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::InboundSessionTimer::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::InboundSessionTimer
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::InboundSessionTimer
+impl<T> typenum::type_operators::Same for rsiprtp::session::InboundSessionTimer
+pub type rsiprtp::session::InboundSessionTimer::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::InboundSessionTimer where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::InboundSessionTimer::vzip(self) -> V
 pub enum rsiprtp::prelude::ManagerEvent
 pub rsiprtp::prelude::ManagerEvent::CallEvent(rsiprtp::session::call::CallId, rsiprtp::session::call::CallEvent)
 pub rsiprtp::prelude::ManagerEvent::CallStateChanged(rsiprtp::session::call::CallId, rsiprtp::session::call::CallState)
@@ -4821,14 +4880,11 @@ pub rsiprtp::prelude::Method::Update
 impl rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::creates_dialog(&self) -> bool
 pub fn rsiprtp::sip::Method::is_invite(&self) -> bool
-pub fn rsiprtp::sip::Method::to_rsip(&self) -> rsip::common::method::Method
 impl core::clone::Clone for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::clone(&self) -> rsiprtp::sip::Method
 impl core::cmp::Eq for rsiprtp::sip::Method
 impl core::cmp::PartialEq for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::eq(&self, other: &rsiprtp::sip::Method) -> bool
-impl core::convert::From<&rsip::common::method::Method> for rsiprtp::sip::Method
-pub fn rsiprtp::sip::Method::from(m: &rsip::common::method::Method) -> Self
 impl core::fmt::Debug for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for rsiprtp::sip::Method
@@ -4837,6 +4893,9 @@ impl core::hash::Hash for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
 impl core::marker::Copy for rsiprtp::sip::Method
 impl core::marker::StructuralPartialEq for rsiprtp::sip::Method
+impl core::str::traits::FromStr for rsiprtp::sip::Method
+pub type rsiprtp::sip::Method::Err = rsiprtp::core::SipError
+pub fn rsiprtp::sip::Method::from_str(s: &str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for rsiprtp::sip::Method
 impl core::marker::Send for rsiprtp::sip::Method
 impl core::marker::Sync for rsiprtp::sip::Method
@@ -4881,6 +4940,62 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::Method
 pub type rsiprtp::sip::Method::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Method where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::Method::vzip(self) -> V
+pub enum rsiprtp::prelude::OutboundRequestKind
+pub rsiprtp::prelude::OutboundRequestKind::Prack
+pub rsiprtp::prelude::OutboundRequestKind::SessionTimerExpiryBye
+pub rsiprtp::prelude::OutboundRequestKind::SessionTimerReInvite
+pub rsiprtp::prelude::OutboundRequestKind::SessionTimerUpdate
+impl core::clone::Clone for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::clone(&self) -> rsiprtp::session::OutboundRequestKind
+impl core::cmp::Eq for rsiprtp::session::OutboundRequestKind
+impl core::cmp::PartialEq for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::eq(&self, other: &rsiprtp::session::OutboundRequestKind) -> bool
+impl core::fmt::Debug for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::session::OutboundRequestKind
+impl core::marker::StructuralPartialEq for rsiprtp::session::OutboundRequestKind
+impl core::marker::Freeze for rsiprtp::session::OutboundRequestKind
+impl core::marker::Send for rsiprtp::session::OutboundRequestKind
+impl core::marker::Sync for rsiprtp::session::OutboundRequestKind
+impl core::marker::Unpin for rsiprtp::session::OutboundRequestKind
+impl core::marker::UnsafeUnpin for rsiprtp::session::OutboundRequestKind
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::OutboundRequestKind
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::OutboundRequestKind
+impl<T, U> core::convert::Into<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::From<T>
+pub fn rsiprtp::session::OutboundRequestKind::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::Into<T>
+pub type rsiprtp::session::OutboundRequestKind::Error = core::convert::Infallible
+pub fn rsiprtp::session::OutboundRequestKind::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::OutboundRequestKind::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::OutboundRequestKind::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::OutboundRequestKind where T: core::clone::Clone
+pub type rsiprtp::session::OutboundRequestKind::Owned = T
+pub fn rsiprtp::session::OutboundRequestKind::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::OutboundRequestKind::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::OutboundRequestKind where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::OutboundRequestKind where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::OutboundRequestKind where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::OutboundRequestKind where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::OutboundRequestKind::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::OutboundRequestKind where T: core::any::Any
+pub fn rsiprtp::session::OutboundRequestKind::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequestKind::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequestKind::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::OutboundRequestKind::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::OutboundRequestKind where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::OutboundRequestKind::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::OutboundRequestKind
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::OutboundRequestKind
+impl<T> typenum::type_operators::Same for rsiprtp::session::OutboundRequestKind
+pub type rsiprtp::session::OutboundRequestKind::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::OutboundRequestKind where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::OutboundRequestKind::vzip(self) -> V
 pub enum rsiprtp::prelude::PlayoutDecision
 pub rsiprtp::prelude::PlayoutDecision::Accelerate
 pub rsiprtp::prelude::PlayoutDecision::Conceal
@@ -4940,9 +5055,12 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::media::jitter::PlayoutDecisio
 pub fn rsiprtp::media::jitter::PlayoutDecision::vzip(self) -> V
 pub enum rsiprtp::prelude::RegistrationError
 pub rsiprtp::prelude::RegistrationError::AuthError(alloc::string::String)
+pub rsiprtp::prelude::RegistrationError::AuthRejected
 pub rsiprtp::prelude::RegistrationError::Failed(u16, alloc::string::String)
+pub rsiprtp::prelude::RegistrationError::Malformed(alloc::string::String)
 pub rsiprtp::prelude::RegistrationError::RequestError(alloc::string::String)
 pub rsiprtp::prelude::RegistrationError::Timeout
+pub rsiprtp::prelude::RegistrationError::Transport(alloc::string::String)
 impl core::error::Error for rsiprtp::session::RegistrationError
 impl core::fmt::Debug for rsiprtp::session::RegistrationError
 pub fn rsiprtp::session::RegistrationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -5166,6 +5284,13 @@ pub type rsiprtp::transport::TransportProtocol::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transport::TransportProtocol where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::transport::TransportProtocol::vzip(self) -> V
 pub struct rsiprtp::prelude::Call
+pub rsiprtp::prelude::Call::expiry_at: core::option::Option<std::time::Instant>
+pub rsiprtp::prelude::Call::min_se: core::time::Duration
+pub rsiprtp::prelude::Call::refresh_at: core::option::Option<std::time::Instant>
+pub rsiprtp::prelude::Call::refresher: core::option::Option<rsiprtp::sip::Refresher>
+pub rsiprtp::prelude::Call::session_expires: core::option::Option<core::time::Duration>
+pub rsiprtp::prelude::Call::uac_in_flight: bool
+pub rsiprtp::prelude::Call::update_unsupported: bool
 impl rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::can_receive_media(&self) -> bool
 pub fn rsiprtp::session::call::Call::codec(&self) -> core::option::Option<&rsiprtp::sdp::negotiation::Codec>
@@ -5188,6 +5313,7 @@ pub fn rsiprtp::session::call::Call::remote_uri(&self) -> &str
 pub fn rsiprtp::session::call::Call::set_dialog(&mut self, dialog: rsiprtp::session::call::Dialog)
 pub fn rsiprtp::session::call::Call::set_negotiated_media(&mut self, media: rsiprtp::sdp::negotiation::NegotiatedMedia, local_port: u16) -> core::result::Result<(), alloc::string::String>
 pub fn rsiprtp::session::call::Call::set_state(&mut self, state: rsiprtp::session::call::CallState)
+pub fn rsiprtp::session::call::Call::slide_deadlines(&mut self, now: std::time::Instant)
 pub fn rsiprtp::session::call::Call::state(&self) -> rsiprtp::session::call::CallState
 impl core::fmt::Debug for rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -5231,8 +5357,10 @@ pub struct rsiprtp::prelude::CallConfig
 pub rsiprtp::prelude::CallConfig::codecs: alloc::vec::Vec<rsiprtp::sdp::negotiation::Codec>
 pub rsiprtp::prelude::CallConfig::local_name: core::option::Option<alloc::string::String>
 pub rsiprtp::prelude::CallConfig::local_uri: alloc::string::String
+pub rsiprtp::prelude::CallConfig::min_se: core::time::Duration
 pub rsiprtp::prelude::CallConfig::rtp_port_end: u16
 pub rsiprtp::prelude::CallConfig::rtp_port_start: u16
+pub rsiprtp::prelude::CallConfig::session_expires: core::time::Duration
 impl core::clone::Clone for rsiprtp::session::call::CallConfig
 pub fn rsiprtp::session::call::CallConfig::clone(&self) -> rsiprtp::session::call::CallConfig
 impl core::default::Default for rsiprtp::session::call::CallConfig
@@ -5345,6 +5473,7 @@ pub fn rsiprtp::session::call::CallId::vzip(self) -> V
 pub struct rsiprtp::prelude::CallManager
 impl rsiprtp::session::CallManager
 pub fn rsiprtp::session::CallManager::accept_inbound_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<rsiprtp::session::call::CallId>
+pub fn rsiprtp::session::CallManager::accept_session_timer(&mut self, call_id: &rsiprtp::session::call::CallId, session_expires: core::time::Duration, refresher: rsiprtp::sip::Refresher, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::active_calls(&self) -> alloc::vec::Vec<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::answer_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> bool
 pub fn rsiprtp::session::CallManager::build_answer_for(&mut self, call_id: &rsiprtp::session::call::CallId, inputs: &rsiprtp::session::IceAnswerInputs<'_>) -> core::option::Option<rsiprtp::sdp::parser::SessionDescription>
@@ -5352,20 +5481,33 @@ pub fn rsiprtp::session::CallManager::call_count(&self) -> usize
 pub fn rsiprtp::session::CallManager::codecs(&self) -> &[rsiprtp::sdp::negotiation::Codec]
 pub fn rsiprtp::session::CallManager::create_call(&mut self, remote_uri: alloc::string::String) -> rsiprtp::session::call::CallId
 pub fn rsiprtp::session::CallManager::drain_events(&mut self) -> alloc::vec::Vec<rsiprtp::session::ManagerEvent>
+pub fn rsiprtp::session::CallManager::drain_outbound_requests(&mut self) -> alloc::vec::Vec<rsiprtp::session::OutboundRequest>
+pub fn rsiprtp::session::CallManager::evaluate_inbound_invite_session_timer(&self, request: &rsiprtp::sip::SipRequest) -> rsiprtp::session::InboundSessionTimer
 pub fn rsiprtp::session::CallManager::get_call(&self, id: &rsiprtp::session::call::CallId) -> core::option::Option<&rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::get_call_by_dialog(&self, dialog_id: &rsiprtp::dialog::DialogId) -> core::option::Option<&rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::get_call_mut(&mut self, id: &rsiprtp::session::call::CallId) -> core::option::Option<&mut rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::handle_bye(&mut self, dialog_id: &rsiprtp::dialog::DialogId)
+pub fn rsiprtp::session::CallManager::handle_inbound_update(&mut self, dialog_id: &rsiprtp::dialog::DialogId, request: &rsiprtp::sip::SipRequest, now: std::time::Instant) -> core::option::Option<rsiprtp::sip::SipResponse>
 pub fn rsiprtp::session::CallManager::handle_incoming_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<(rsiprtp::session::call::CallId, rsiprtp::sdp::parser::SessionDescription, u16)>
 pub fn rsiprtp::session::CallManager::handle_invite_failure(&mut self, call_id: &rsiprtp::session::call::CallId, status_code: u16)
-pub fn rsiprtp::session::CallManager::handle_invite_success(&mut self, call_id: &rsiprtp::session::call::CallId, dialog: rsiprtp::session::call::Dialog, answer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> bool
+pub fn rsiprtp::session::CallManager::handle_invite_success(&mut self, call_id: &rsiprtp::session::call::CallId, dialog: rsiprtp::session::call::Dialog, answer_sdp: &rsiprtp::sdp::parser::SessionDescription, response: core::option::Option<&rsiprtp::sip::SipResponse>, now: std::time::Instant) -> bool
 pub fn rsiprtp::session::CallManager::handle_provisional(&mut self, call_id: &rsiprtp::session::call::CallId, has_sdp: bool, sdp: core::option::Option<&rsiprtp::sdp::parser::SessionDescription>)
+pub fn rsiprtp::session::CallManager::handle_provisional_reliable(&mut self, call_id: &rsiprtp::session::call::CallId, response: &rsiprtp::sip::SipResponse) -> core::option::Option<rsiprtp::sip::SipRequest>
+pub fn rsiprtp::session::CallManager::handle_provisional_response(&mut self, call_id: &rsiprtp::session::call::CallId, response: &rsiprtp::sip::SipResponse, sdp: core::option::Option<&rsiprtp::sdp::parser::SessionDescription>, local_contact: &str)
+pub fn rsiprtp::session::CallManager::invite_offer_headers(&self) -> rsiprtp::session::InviteOfferHeaders
 pub fn rsiprtp::session::CallManager::local_rtp_addr(&self) -> &str
+pub fn rsiprtp::session::CallManager::mark_in_dialog_2xx(&mut self, call_id: &rsiprtp::session::call::CallId, method: rsiprtp::sip::Method, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::new(config: rsiprtp::session::ManagerConfig) -> Self
+pub fn rsiprtp::session::CallManager::next_deadline(&self) -> core::option::Option<std::time::Instant>
+pub fn rsiprtp::session::CallManager::note_update_unsupported(&mut self, call_id: &rsiprtp::session::call::CallId)
+pub fn rsiprtp::session::CallManager::populate_uas_dialog_routing(&mut self, call_id: &rsiprtp::session::call::CallId, invite: &rsiprtp::sip::SipRequest, local_contact: alloc::string::String)
 pub fn rsiprtp::session::CallManager::reject_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::reject_inbound_invite(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::remove_call(&mut self, call_id: &rsiprtp::session::call::CallId)
+pub fn rsiprtp::session::CallManager::set_uac_in_flight(&mut self, call_id: &rsiprtp::session::call::CallId, in_flight: bool)
+pub fn rsiprtp::session::CallManager::slide_deadlines_for_dialog(&mut self, dialog_id: &rsiprtp::dialog::DialogId, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::terminate_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
+pub fn rsiprtp::session::CallManager::tick(&mut self, now: std::time::Instant)
 impl core::marker::Freeze for rsiprtp::session::CallManager
 impl core::marker::Send for rsiprtp::session::CallManager
 impl core::marker::Sync for rsiprtp::session::CallManager
@@ -5531,12 +5673,22 @@ pub fn rsiprtp::core::CodecConfig::vzip(self) -> V
 pub struct rsiprtp::prelude::Dialog
 impl rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::id(&self) -> &rsiprtp::dialog::DialogId
+pub fn rsiprtp::session::call::Dialog::local_contact(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::local_cseq(&self) -> u32
 pub fn rsiprtp::session::call::Dialog::local_uri(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::new_uac(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::new_uas(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::next_cseq(&mut self) -> u32
+pub fn rsiprtp::session::call::Dialog::populate_uac_from_response(&mut self, response: &rsiprtp::sip::SipResponse, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::populate_uas_from_invite(&mut self, invite: &rsiprtp::sip::SipRequest, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::remote_target(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::remote_uri(&self) -> &str
+pub fn rsiprtp::session::call::Dialog::role(&self) -> rsiprtp::dialog::Role
+pub fn rsiprtp::session::call::Dialog::route_set(&self) -> &rsiprtp::dialog::RouteSet
+pub fn rsiprtp::session::call::Dialog::set_local_contact(&mut self, contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_remote_target(&mut self, target: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_route_set(&mut self, route_set: rsiprtp::dialog::RouteSet)
+pub fn rsiprtp::session::call::Dialog::set_route_set_from_record_routes(&mut self, record_routes: &[alloc::string::String], reverse: bool)
 impl core::clone::Clone for rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::clone(&self) -> rsiprtp::session::call::Dialog
 impl core::fmt::Debug for rsiprtp::session::call::Dialog
@@ -5763,7 +5915,7 @@ pub rsiprtp::prelude::DigestResponse::response: alloc::string::String
 pub rsiprtp::prelude::DigestResponse::uri: alloc::string::String
 pub rsiprtp::prelude::DigestResponse::username: alloc::string::String
 impl rsiprtp::sip::DigestResponse
-pub fn rsiprtp::sip::DigestResponse::from_challenge(challenge: &rsiprtp::sip::DigestChallenge, credentials: &rsiprtp::sip::DigestCredentials, method: &str, uri: &str, body: core::option::Option<&[u8]>) -> core::result::Result<Self, rsiprtp::sip::DigestAuthError>
+pub fn rsiprtp::sip::DigestResponse::from_challenge(challenge: &rsiprtp::sip::DigestChallenge, credentials: &rsiprtp::sip::DigestCredentials, method: &str, uri: &str, body: core::option::Option<&[u8]>, nc: core::option::Option<u32>) -> core::result::Result<Self, rsiprtp::sip::DigestAuthError>
 pub fn rsiprtp::sip::DigestResponse::to_header_value(&self) -> alloc::string::String
 impl core::clone::Clone for rsiprtp::sip::DigestResponse
 pub fn rsiprtp::sip::DigestResponse::clone(&self) -> rsiprtp::sip::DigestResponse
@@ -5870,6 +6022,57 @@ impl<T> typenum::type_operators::Same for rsiprtp::media::G711Codec
 pub type rsiprtp::media::G711Codec::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::media::G711Codec where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::media::G711Codec::vzip(self) -> V
+pub struct rsiprtp::prelude::InviteOfferHeaders
+pub rsiprtp::prelude::InviteOfferHeaders::allow_methods: alloc::vec::Vec<rsiprtp::sip::Method>
+pub rsiprtp::prelude::InviteOfferHeaders::min_se: core::option::Option<u32>
+pub rsiprtp::prelude::InviteOfferHeaders::session_expires: core::option::Option<(u32, rsiprtp::sip::Refresher)>
+pub rsiprtp::prelude::InviteOfferHeaders::supported_tags: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::clone(&self) -> rsiprtp::session::InviteOfferHeaders
+impl core::fmt::Debug for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Send for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Sync for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Unpin for rsiprtp::session::InviteOfferHeaders
+impl core::marker::UnsafeUnpin for rsiprtp::session::InviteOfferHeaders
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::InviteOfferHeaders
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::InviteOfferHeaders
+impl<T, U> core::convert::Into<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::From<T>
+pub fn rsiprtp::session::InviteOfferHeaders::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::Into<T>
+pub type rsiprtp::session::InviteOfferHeaders::Error = core::convert::Infallible
+pub fn rsiprtp::session::InviteOfferHeaders::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::InviteOfferHeaders::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::InviteOfferHeaders::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::InviteOfferHeaders where T: core::clone::Clone
+pub type rsiprtp::session::InviteOfferHeaders::Owned = T
+pub fn rsiprtp::session::InviteOfferHeaders::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::InviteOfferHeaders::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::InviteOfferHeaders where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::InviteOfferHeaders where T: ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::InviteOfferHeaders where T: ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::InviteOfferHeaders where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::InviteOfferHeaders::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::InviteOfferHeaders where T: core::any::Any
+pub fn rsiprtp::session::InviteOfferHeaders::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InviteOfferHeaders::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InviteOfferHeaders::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::InviteOfferHeaders::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::InviteOfferHeaders where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::InviteOfferHeaders::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::InviteOfferHeaders
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::InviteOfferHeaders
+impl<T> typenum::type_operators::Same for rsiprtp::session::InviteOfferHeaders
+pub type rsiprtp::session::InviteOfferHeaders::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::InviteOfferHeaders where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::InviteOfferHeaders::vzip(self) -> V
 pub struct rsiprtp::prelude::JitterBuffer
 impl rsiprtp::media::jitter::JitterBuffer
 pub fn rsiprtp::media::jitter::JitterBuffer::is_empty(&self) -> bool
@@ -6195,6 +6398,56 @@ impl<T> typenum::type_operators::Same for rsiprtp::sdp::negotiation::NegotiatedM
 pub type rsiprtp::sdp::negotiation::NegotiatedMedia::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sdp::negotiation::NegotiatedMedia where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sdp::negotiation::NegotiatedMedia::vzip(self) -> V
+pub struct rsiprtp::prelude::OutboundRequest
+pub rsiprtp::prelude::OutboundRequest::call_id: rsiprtp::session::call::CallId
+pub rsiprtp::prelude::OutboundRequest::kind: rsiprtp::session::OutboundRequestKind
+pub rsiprtp::prelude::OutboundRequest::request: rsiprtp::sip::SipRequest
+impl core::clone::Clone for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::clone(&self) -> rsiprtp::session::OutboundRequest
+impl core::fmt::Debug for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::OutboundRequest
+impl core::marker::Send for rsiprtp::session::OutboundRequest
+impl core::marker::Sync for rsiprtp::session::OutboundRequest
+impl core::marker::Unpin for rsiprtp::session::OutboundRequest
+impl core::marker::UnsafeUnpin for rsiprtp::session::OutboundRequest
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::OutboundRequest
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::OutboundRequest
+impl<T, U> core::convert::Into<U> for rsiprtp::session::OutboundRequest where U: core::convert::From<T>
+pub fn rsiprtp::session::OutboundRequest::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::OutboundRequest where U: core::convert::Into<T>
+pub type rsiprtp::session::OutboundRequest::Error = core::convert::Infallible
+pub fn rsiprtp::session::OutboundRequest::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::OutboundRequest where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::OutboundRequest::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::OutboundRequest::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::OutboundRequest where T: core::clone::Clone
+pub type rsiprtp::session::OutboundRequest::Owned = T
+pub fn rsiprtp::session::OutboundRequest::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::OutboundRequest::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::OutboundRequest where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::OutboundRequest where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::OutboundRequest where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::OutboundRequest where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::OutboundRequest::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::OutboundRequest where T: core::any::Any
+pub fn rsiprtp::session::OutboundRequest::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequest::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequest::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::OutboundRequest::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::OutboundRequest where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::OutboundRequest::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::OutboundRequest
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::OutboundRequest
+impl<T> typenum::type_operators::Same for rsiprtp::session::OutboundRequest
+pub type rsiprtp::session::OutboundRequest::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::OutboundRequest where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::OutboundRequest::vzip(self) -> V
 pub struct rsiprtp::prelude::ReceiverReport
 pub rsiprtp::prelude::ReceiverReport::report_blocks: alloc::vec::Vec<rsiprtp::rtp::rtcp::ReportBlock>
 pub rsiprtp::prelude::ReceiverReport::ssrc: u32
@@ -6317,8 +6570,10 @@ pub fn rsiprtp::session::RegistrationManager::handle_response(&mut self, respons
 pub fn rsiprtp::session::RegistrationManager::is_registered(&self) -> bool
 pub fn rsiprtp::session::RegistrationManager::needs_refresh(&self) -> bool
 pub fn rsiprtp::session::RegistrationManager::new(config: rsiprtp::session::RegistrationConfig) -> Self
+pub async fn rsiprtp::session::RegistrationManager::register(&mut self, transport: &rsiprtp::transport::UdpTransport, registrar_addr: core::net::socket_addr::SocketAddr, recv_timeout: core::time::Duration, total_timeout: core::time::Duration) -> core::result::Result<(), rsiprtp::session::RegistrationError>
 pub fn rsiprtp::session::RegistrationManager::reset(&mut self)
 pub fn rsiprtp::session::RegistrationManager::state(&self) -> rsiprtp::session::RegistrationState
+pub async fn rsiprtp::session::RegistrationManager::unregister(&mut self, transport: &rsiprtp::transport::UdpTransport, registrar_addr: core::net::socket_addr::SocketAddr, recv_timeout: core::time::Duration, total_timeout: core::time::Duration) -> core::result::Result<(), rsiprtp::session::RegistrationError>
 impl core::fmt::Debug for rsiprtp::session::RegistrationManager
 pub fn rsiprtp::session::RegistrationManager::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for rsiprtp::session::RegistrationManager
@@ -6774,23 +7029,29 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sdp::parser::SessionDescripti
 pub fn rsiprtp::sdp::parser::SessionDescription::vzip(self) -> V
 pub struct rsiprtp::prelude::SipRequest
 impl rsiprtp::sip::SipRequest
+pub fn rsiprtp::sip::SipRequest::allow(&self) -> core::option::Option<alloc::vec::Vec<rsiprtp::sip::Method>>
 pub fn rsiprtp::sip::SipRequest::body(&self) -> &[u8]
 pub fn rsiprtp::sip::SipRequest::builder() -> rsiprtp::sip::SipRequestBuilder
 pub fn rsiprtp::sip::SipRequest::call_id(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::contact_uri(&self) -> core::option::Option<rsip::common::uri::Uri>
+pub fn rsiprtp::sip::SipRequest::contact_uri(&self) -> core::option::Option<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipRequest::content_type(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipRequest::cseq(&self) -> rsiprtp::core::Result<u32>
 pub fn rsiprtp::sip::SipRequest::cseq_method(&self) -> rsiprtp::core::Result<rsiprtp::sip::Method>
 pub fn rsiprtp::sip::SipRequest::from_tag(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::from_tag_and_uri(&self) -> rsiprtp::core::Result<(alloc::string::String, rsip::common::uri::Uri)>
-pub fn rsiprtp::sip::SipRequest::from_uri(&self) -> rsiprtp::core::Result<rsip::common::uri::Uri>
-pub fn rsiprtp::sip::SipRequest::inner(&self) -> &rsip::message::request::Request
+pub fn rsiprtp::sip::SipRequest::from_tag_and_uri(&self) -> rsiprtp::core::Result<(alloc::string::String, rsiprtp::sip::SipUri)>
+pub fn rsiprtp::sip::SipRequest::from_uri(&self) -> rsiprtp::core::Result<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipRequest::method(&self) -> rsiprtp::sip::Method
+pub fn rsiprtp::sip::SipRequest::min_se(&self) -> core::option::Option<rsiprtp::sip::MinSe>
+pub fn rsiprtp::sip::SipRequest::rack(&self) -> core::option::Option<rsiprtp::sip::RAck>
 pub fn rsiprtp::sip::SipRequest::record_routes(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipRequest::require(&self) -> core::option::Option<rsiprtp::sip::Require>
+pub fn rsiprtp::sip::SipRequest::route_headers(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipRequest::session_expires(&self) -> core::option::Option<rsiprtp::sip::SessionExpires>
+pub fn rsiprtp::sip::SipRequest::supported(&self) -> core::option::Option<rsiprtp::sip::Supported>
 pub fn rsiprtp::sip::SipRequest::to_bytes(&self) -> bytes::bytes::Bytes
 pub fn rsiprtp::sip::SipRequest::to_tag(&self) -> core::option::Option<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::to_uri(&self) -> rsiprtp::core::Result<rsip::common::uri::Uri>
-pub fn rsiprtp::sip::SipRequest::uri(&self) -> &rsip::common::uri::Uri
+pub fn rsiprtp::sip::SipRequest::to_uri(&self) -> rsiprtp::core::Result<rsiprtp::sip::SipUri>
+pub fn rsiprtp::sip::SipRequest::uri(&self) -> rsiprtp::sip::SipUri
 pub fn rsiprtp::sip::SipRequest::via_branch(&self) -> rsiprtp::core::Result<alloc::string::String>
 pub fn rsiprtp::sip::SipRequest::via_headers_raw(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for rsiprtp::sip::SipRequest
@@ -6883,22 +7144,27 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transport::SipResolver where 
 pub fn rsiprtp::transport::SipResolver::vzip(self) -> V
 pub struct rsiprtp::prelude::SipResponse
 impl rsiprtp::sip::SipResponse
+pub fn rsiprtp::sip::SipResponse::allow(&self) -> core::option::Option<alloc::vec::Vec<rsiprtp::sip::Method>>
 pub fn rsiprtp::sip::SipResponse::body(&self) -> &[u8]
 pub fn rsiprtp::sip::SipResponse::builder() -> rsiprtp::sip::SipResponseBuilder
 pub fn rsiprtp::sip::SipResponse::call_id(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipResponse::contact_uri(&self) -> core::option::Option<rsip::common::uri::Uri>
+pub fn rsiprtp::sip::SipResponse::contact_uri(&self) -> core::option::Option<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipResponse::content_type(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::cseq(&self) -> rsiprtp::core::Result<u32>
 pub fn rsiprtp::sip::SipResponse::cseq_method(&self) -> rsiprtp::core::Result<rsiprtp::sip::Method>
 pub fn rsiprtp::sip::SipResponse::from_tag(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipResponse::inner(&self) -> &rsip::message::response::Response
 pub fn rsiprtp::sip::SipResponse::is_failure(&self) -> bool
 pub fn rsiprtp::sip::SipResponse::is_provisional(&self) -> bool
 pub fn rsiprtp::sip::SipResponse::is_success(&self) -> bool
+pub fn rsiprtp::sip::SipResponse::min_se(&self) -> core::option::Option<rsiprtp::sip::MinSe>
 pub fn rsiprtp::sip::SipResponse::proxy_authenticate(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::reason(&self) -> alloc::string::String
 pub fn rsiprtp::sip::SipResponse::record_routes(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipResponse::require(&self) -> core::option::Option<rsiprtp::sip::Require>
+pub fn rsiprtp::sip::SipResponse::rseq(&self) -> core::option::Option<rsiprtp::sip::RSeq>
+pub fn rsiprtp::sip::SipResponse::session_expires(&self) -> core::option::Option<rsiprtp::sip::SessionExpires>
 pub fn rsiprtp::sip::SipResponse::status_code(&self) -> u16
+pub fn rsiprtp::sip::SipResponse::supported(&self) -> core::option::Option<rsiprtp::sip::Supported>
 pub fn rsiprtp::sip::SipResponse::to_bytes(&self) -> bytes::bytes::Bytes
 pub fn rsiprtp::sip::SipResponse::to_tag(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::via_branch(&self) -> rsiprtp::core::Result<alloc::string::String>
@@ -11520,6 +11786,13 @@ pub type rsiprtp::session::call::CallState::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::call::CallState where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::call::CallState::vzip(self) -> V
 pub struct rsiprtp::session::call::Call
+pub rsiprtp::session::call::Call::expiry_at: core::option::Option<std::time::Instant>
+pub rsiprtp::session::call::Call::min_se: core::time::Duration
+pub rsiprtp::session::call::Call::refresh_at: core::option::Option<std::time::Instant>
+pub rsiprtp::session::call::Call::refresher: core::option::Option<rsiprtp::sip::Refresher>
+pub rsiprtp::session::call::Call::session_expires: core::option::Option<core::time::Duration>
+pub rsiprtp::session::call::Call::uac_in_flight: bool
+pub rsiprtp::session::call::Call::update_unsupported: bool
 impl rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::can_receive_media(&self) -> bool
 pub fn rsiprtp::session::call::Call::codec(&self) -> core::option::Option<&rsiprtp::sdp::negotiation::Codec>
@@ -11542,6 +11815,7 @@ pub fn rsiprtp::session::call::Call::remote_uri(&self) -> &str
 pub fn rsiprtp::session::call::Call::set_dialog(&mut self, dialog: rsiprtp::session::call::Dialog)
 pub fn rsiprtp::session::call::Call::set_negotiated_media(&mut self, media: rsiprtp::sdp::negotiation::NegotiatedMedia, local_port: u16) -> core::result::Result<(), alloc::string::String>
 pub fn rsiprtp::session::call::Call::set_state(&mut self, state: rsiprtp::session::call::CallState)
+pub fn rsiprtp::session::call::Call::slide_deadlines(&mut self, now: std::time::Instant)
 pub fn rsiprtp::session::call::Call::state(&self) -> rsiprtp::session::call::CallState
 impl core::fmt::Debug for rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -11585,8 +11859,10 @@ pub struct rsiprtp::session::call::CallConfig
 pub rsiprtp::session::call::CallConfig::codecs: alloc::vec::Vec<rsiprtp::sdp::negotiation::Codec>
 pub rsiprtp::session::call::CallConfig::local_name: core::option::Option<alloc::string::String>
 pub rsiprtp::session::call::CallConfig::local_uri: alloc::string::String
+pub rsiprtp::session::call::CallConfig::min_se: core::time::Duration
 pub rsiprtp::session::call::CallConfig::rtp_port_end: u16
 pub rsiprtp::session::call::CallConfig::rtp_port_start: u16
+pub rsiprtp::session::call::CallConfig::session_expires: core::time::Duration
 impl core::clone::Clone for rsiprtp::session::call::CallConfig
 pub fn rsiprtp::session::call::CallConfig::clone(&self) -> rsiprtp::session::call::CallConfig
 impl core::default::Default for rsiprtp::session::call::CallConfig
@@ -11699,12 +11975,22 @@ pub fn rsiprtp::session::call::CallId::vzip(self) -> V
 pub struct rsiprtp::session::call::Dialog
 impl rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::id(&self) -> &rsiprtp::dialog::DialogId
+pub fn rsiprtp::session::call::Dialog::local_contact(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::local_cseq(&self) -> u32
 pub fn rsiprtp::session::call::Dialog::local_uri(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::new_uac(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::new_uas(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::next_cseq(&mut self) -> u32
+pub fn rsiprtp::session::call::Dialog::populate_uac_from_response(&mut self, response: &rsiprtp::sip::SipResponse, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::populate_uas_from_invite(&mut self, invite: &rsiprtp::sip::SipRequest, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::remote_target(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::remote_uri(&self) -> &str
+pub fn rsiprtp::session::call::Dialog::role(&self) -> rsiprtp::dialog::Role
+pub fn rsiprtp::session::call::Dialog::route_set(&self) -> &rsiprtp::dialog::RouteSet
+pub fn rsiprtp::session::call::Dialog::set_local_contact(&mut self, contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_remote_target(&mut self, target: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_route_set(&mut self, route_set: rsiprtp::dialog::RouteSet)
+pub fn rsiprtp::session::call::Dialog::set_route_set_from_record_routes(&mut self, record_routes: &[alloc::string::String], reverse: bool)
 impl core::clone::Clone for rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::clone(&self) -> rsiprtp::session::call::Dialog
 impl core::fmt::Debug for rsiprtp::session::call::Dialog
@@ -12282,6 +12568,59 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::HoldState
 pub type rsiprtp::session::HoldState::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::HoldState where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::HoldState::vzip(self) -> V
+pub enum rsiprtp::session::InboundSessionTimer
+pub rsiprtp::session::InboundSessionTimer::Accept
+pub rsiprtp::session::InboundSessionTimer::Accept::refresher: rsiprtp::sip::Refresher
+pub rsiprtp::session::InboundSessionTimer::Accept::session_expires: core::time::Duration
+pub rsiprtp::session::InboundSessionTimer::Disabled
+pub rsiprtp::session::InboundSessionTimer::Reject422
+pub rsiprtp::session::InboundSessionTimer::Reject422::min_se: u32
+impl core::clone::Clone for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::clone(&self) -> rsiprtp::session::InboundSessionTimer
+impl core::fmt::Debug for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::InboundSessionTimer
+impl core::marker::Send for rsiprtp::session::InboundSessionTimer
+impl core::marker::Sync for rsiprtp::session::InboundSessionTimer
+impl core::marker::Unpin for rsiprtp::session::InboundSessionTimer
+impl core::marker::UnsafeUnpin for rsiprtp::session::InboundSessionTimer
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::InboundSessionTimer
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::InboundSessionTimer
+impl<T, U> core::convert::Into<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::From<T>
+pub fn rsiprtp::session::InboundSessionTimer::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::Into<T>
+pub type rsiprtp::session::InboundSessionTimer::Error = core::convert::Infallible
+pub fn rsiprtp::session::InboundSessionTimer::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::InboundSessionTimer where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::InboundSessionTimer::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::InboundSessionTimer::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::InboundSessionTimer where T: core::clone::Clone
+pub type rsiprtp::session::InboundSessionTimer::Owned = T
+pub fn rsiprtp::session::InboundSessionTimer::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::InboundSessionTimer::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::InboundSessionTimer where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::InboundSessionTimer where T: ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::InboundSessionTimer where T: ?core::marker::Sized
+pub fn rsiprtp::session::InboundSessionTimer::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::InboundSessionTimer where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::InboundSessionTimer::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::InboundSessionTimer
+pub fn rsiprtp::session::InboundSessionTimer::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::InboundSessionTimer where T: core::any::Any
+pub fn rsiprtp::session::InboundSessionTimer::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InboundSessionTimer::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InboundSessionTimer::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::InboundSessionTimer::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::InboundSessionTimer where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::InboundSessionTimer::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::InboundSessionTimer
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::InboundSessionTimer
+impl<T> typenum::type_operators::Same for rsiprtp::session::InboundSessionTimer
+pub type rsiprtp::session::InboundSessionTimer::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::InboundSessionTimer where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::InboundSessionTimer::vzip(self) -> V
 pub enum rsiprtp::session::ManagerEvent
 pub rsiprtp::session::ManagerEvent::CallEvent(rsiprtp::session::call::CallId, rsiprtp::session::call::CallEvent)
 pub rsiprtp::session::ManagerEvent::CallStateChanged(rsiprtp::session::call::CallId, rsiprtp::session::call::CallState)
@@ -12387,11 +12726,70 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::MediaDirection
 pub type rsiprtp::session::MediaDirection::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::MediaDirection where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::MediaDirection::vzip(self) -> V
+pub enum rsiprtp::session::OutboundRequestKind
+pub rsiprtp::session::OutboundRequestKind::Prack
+pub rsiprtp::session::OutboundRequestKind::SessionTimerExpiryBye
+pub rsiprtp::session::OutboundRequestKind::SessionTimerReInvite
+pub rsiprtp::session::OutboundRequestKind::SessionTimerUpdate
+impl core::clone::Clone for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::clone(&self) -> rsiprtp::session::OutboundRequestKind
+impl core::cmp::Eq for rsiprtp::session::OutboundRequestKind
+impl core::cmp::PartialEq for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::eq(&self, other: &rsiprtp::session::OutboundRequestKind) -> bool
+impl core::fmt::Debug for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::session::OutboundRequestKind
+impl core::marker::StructuralPartialEq for rsiprtp::session::OutboundRequestKind
+impl core::marker::Freeze for rsiprtp::session::OutboundRequestKind
+impl core::marker::Send for rsiprtp::session::OutboundRequestKind
+impl core::marker::Sync for rsiprtp::session::OutboundRequestKind
+impl core::marker::Unpin for rsiprtp::session::OutboundRequestKind
+impl core::marker::UnsafeUnpin for rsiprtp::session::OutboundRequestKind
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::OutboundRequestKind
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::OutboundRequestKind
+impl<T, U> core::convert::Into<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::From<T>
+pub fn rsiprtp::session::OutboundRequestKind::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::Into<T>
+pub type rsiprtp::session::OutboundRequestKind::Error = core::convert::Infallible
+pub fn rsiprtp::session::OutboundRequestKind::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::OutboundRequestKind where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::OutboundRequestKind::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::OutboundRequestKind::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::OutboundRequestKind where T: core::clone::Clone
+pub type rsiprtp::session::OutboundRequestKind::Owned = T
+pub fn rsiprtp::session::OutboundRequestKind::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::OutboundRequestKind::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::OutboundRequestKind where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::OutboundRequestKind where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::OutboundRequestKind where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequestKind::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::OutboundRequestKind where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::OutboundRequestKind::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::OutboundRequestKind
+pub fn rsiprtp::session::OutboundRequestKind::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::OutboundRequestKind where T: core::any::Any
+pub fn rsiprtp::session::OutboundRequestKind::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequestKind::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequestKind::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::OutboundRequestKind::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::OutboundRequestKind where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::OutboundRequestKind::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::OutboundRequestKind
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::OutboundRequestKind
+impl<T> typenum::type_operators::Same for rsiprtp::session::OutboundRequestKind
+pub type rsiprtp::session::OutboundRequestKind::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::OutboundRequestKind where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::OutboundRequestKind::vzip(self) -> V
 pub enum rsiprtp::session::RegistrationError
 pub rsiprtp::session::RegistrationError::AuthError(alloc::string::String)
+pub rsiprtp::session::RegistrationError::AuthRejected
 pub rsiprtp::session::RegistrationError::Failed(u16, alloc::string::String)
+pub rsiprtp::session::RegistrationError::Malformed(alloc::string::String)
 pub rsiprtp::session::RegistrationError::RequestError(alloc::string::String)
 pub rsiprtp::session::RegistrationError::Timeout
+pub rsiprtp::session::RegistrationError::Transport(alloc::string::String)
 impl core::error::Error for rsiprtp::session::RegistrationError
 impl core::fmt::Debug for rsiprtp::session::RegistrationError
 pub fn rsiprtp::session::RegistrationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -12799,6 +13197,13 @@ pub type rsiprtp::session::BitrateBridge::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::BitrateBridge where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::BitrateBridge::vzip(self) -> V
 pub struct rsiprtp::session::Call
+pub rsiprtp::session::Call::expiry_at: core::option::Option<std::time::Instant>
+pub rsiprtp::session::Call::min_se: core::time::Duration
+pub rsiprtp::session::Call::refresh_at: core::option::Option<std::time::Instant>
+pub rsiprtp::session::Call::refresher: core::option::Option<rsiprtp::sip::Refresher>
+pub rsiprtp::session::Call::session_expires: core::option::Option<core::time::Duration>
+pub rsiprtp::session::Call::uac_in_flight: bool
+pub rsiprtp::session::Call::update_unsupported: bool
 impl rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::can_receive_media(&self) -> bool
 pub fn rsiprtp::session::call::Call::codec(&self) -> core::option::Option<&rsiprtp::sdp::negotiation::Codec>
@@ -12821,6 +13226,7 @@ pub fn rsiprtp::session::call::Call::remote_uri(&self) -> &str
 pub fn rsiprtp::session::call::Call::set_dialog(&mut self, dialog: rsiprtp::session::call::Dialog)
 pub fn rsiprtp::session::call::Call::set_negotiated_media(&mut self, media: rsiprtp::sdp::negotiation::NegotiatedMedia, local_port: u16) -> core::result::Result<(), alloc::string::String>
 pub fn rsiprtp::session::call::Call::set_state(&mut self, state: rsiprtp::session::call::CallState)
+pub fn rsiprtp::session::call::Call::slide_deadlines(&mut self, now: std::time::Instant)
 pub fn rsiprtp::session::call::Call::state(&self) -> rsiprtp::session::call::CallState
 impl core::fmt::Debug for rsiprtp::session::call::Call
 pub fn rsiprtp::session::call::Call::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -12864,8 +13270,10 @@ pub struct rsiprtp::session::CallConfig
 pub rsiprtp::session::CallConfig::codecs: alloc::vec::Vec<rsiprtp::sdp::negotiation::Codec>
 pub rsiprtp::session::CallConfig::local_name: core::option::Option<alloc::string::String>
 pub rsiprtp::session::CallConfig::local_uri: alloc::string::String
+pub rsiprtp::session::CallConfig::min_se: core::time::Duration
 pub rsiprtp::session::CallConfig::rtp_port_end: u16
 pub rsiprtp::session::CallConfig::rtp_port_start: u16
+pub rsiprtp::session::CallConfig::session_expires: core::time::Duration
 impl core::clone::Clone for rsiprtp::session::call::CallConfig
 pub fn rsiprtp::session::call::CallConfig::clone(&self) -> rsiprtp::session::call::CallConfig
 impl core::default::Default for rsiprtp::session::call::CallConfig
@@ -13031,6 +13439,7 @@ pub fn rsiprtp::session::call::CallId::vzip(self) -> V
 pub struct rsiprtp::session::CallManager
 impl rsiprtp::session::CallManager
 pub fn rsiprtp::session::CallManager::accept_inbound_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<rsiprtp::session::call::CallId>
+pub fn rsiprtp::session::CallManager::accept_session_timer(&mut self, call_id: &rsiprtp::session::call::CallId, session_expires: core::time::Duration, refresher: rsiprtp::sip::Refresher, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::active_calls(&self) -> alloc::vec::Vec<rsiprtp::session::call::CallId>
 pub fn rsiprtp::session::CallManager::answer_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> bool
 pub fn rsiprtp::session::CallManager::build_answer_for(&mut self, call_id: &rsiprtp::session::call::CallId, inputs: &rsiprtp::session::IceAnswerInputs<'_>) -> core::option::Option<rsiprtp::sdp::parser::SessionDescription>
@@ -13038,20 +13447,33 @@ pub fn rsiprtp::session::CallManager::call_count(&self) -> usize
 pub fn rsiprtp::session::CallManager::codecs(&self) -> &[rsiprtp::sdp::negotiation::Codec]
 pub fn rsiprtp::session::CallManager::create_call(&mut self, remote_uri: alloc::string::String) -> rsiprtp::session::call::CallId
 pub fn rsiprtp::session::CallManager::drain_events(&mut self) -> alloc::vec::Vec<rsiprtp::session::ManagerEvent>
+pub fn rsiprtp::session::CallManager::drain_outbound_requests(&mut self) -> alloc::vec::Vec<rsiprtp::session::OutboundRequest>
+pub fn rsiprtp::session::CallManager::evaluate_inbound_invite_session_timer(&self, request: &rsiprtp::sip::SipRequest) -> rsiprtp::session::InboundSessionTimer
 pub fn rsiprtp::session::CallManager::get_call(&self, id: &rsiprtp::session::call::CallId) -> core::option::Option<&rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::get_call_by_dialog(&self, dialog_id: &rsiprtp::dialog::DialogId) -> core::option::Option<&rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::get_call_mut(&mut self, id: &rsiprtp::session::call::CallId) -> core::option::Option<&mut rsiprtp::session::call::Call>
 pub fn rsiprtp::session::CallManager::handle_bye(&mut self, dialog_id: &rsiprtp::dialog::DialogId)
+pub fn rsiprtp::session::CallManager::handle_inbound_update(&mut self, dialog_id: &rsiprtp::dialog::DialogId, request: &rsiprtp::sip::SipRequest, now: std::time::Instant) -> core::option::Option<rsiprtp::sip::SipResponse>
 pub fn rsiprtp::session::CallManager::handle_incoming_invite(&mut self, dialog: rsiprtp::session::call::Dialog, offer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> core::option::Option<(rsiprtp::session::call::CallId, rsiprtp::sdp::parser::SessionDescription, u16)>
 pub fn rsiprtp::session::CallManager::handle_invite_failure(&mut self, call_id: &rsiprtp::session::call::CallId, status_code: u16)
-pub fn rsiprtp::session::CallManager::handle_invite_success(&mut self, call_id: &rsiprtp::session::call::CallId, dialog: rsiprtp::session::call::Dialog, answer_sdp: &rsiprtp::sdp::parser::SessionDescription) -> bool
+pub fn rsiprtp::session::CallManager::handle_invite_success(&mut self, call_id: &rsiprtp::session::call::CallId, dialog: rsiprtp::session::call::Dialog, answer_sdp: &rsiprtp::sdp::parser::SessionDescription, response: core::option::Option<&rsiprtp::sip::SipResponse>, now: std::time::Instant) -> bool
 pub fn rsiprtp::session::CallManager::handle_provisional(&mut self, call_id: &rsiprtp::session::call::CallId, has_sdp: bool, sdp: core::option::Option<&rsiprtp::sdp::parser::SessionDescription>)
+pub fn rsiprtp::session::CallManager::handle_provisional_reliable(&mut self, call_id: &rsiprtp::session::call::CallId, response: &rsiprtp::sip::SipResponse) -> core::option::Option<rsiprtp::sip::SipRequest>
+pub fn rsiprtp::session::CallManager::handle_provisional_response(&mut self, call_id: &rsiprtp::session::call::CallId, response: &rsiprtp::sip::SipResponse, sdp: core::option::Option<&rsiprtp::sdp::parser::SessionDescription>, local_contact: &str)
+pub fn rsiprtp::session::CallManager::invite_offer_headers(&self) -> rsiprtp::session::InviteOfferHeaders
 pub fn rsiprtp::session::CallManager::local_rtp_addr(&self) -> &str
+pub fn rsiprtp::session::CallManager::mark_in_dialog_2xx(&mut self, call_id: &rsiprtp::session::call::CallId, method: rsiprtp::sip::Method, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::new(config: rsiprtp::session::ManagerConfig) -> Self
+pub fn rsiprtp::session::CallManager::next_deadline(&self) -> core::option::Option<std::time::Instant>
+pub fn rsiprtp::session::CallManager::note_update_unsupported(&mut self, call_id: &rsiprtp::session::call::CallId)
+pub fn rsiprtp::session::CallManager::populate_uas_dialog_routing(&mut self, call_id: &rsiprtp::session::call::CallId, invite: &rsiprtp::sip::SipRequest, local_contact: alloc::string::String)
 pub fn rsiprtp::session::CallManager::reject_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::reject_inbound_invite(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
 pub fn rsiprtp::session::CallManager::remove_call(&mut self, call_id: &rsiprtp::session::call::CallId)
+pub fn rsiprtp::session::CallManager::set_uac_in_flight(&mut self, call_id: &rsiprtp::session::call::CallId, in_flight: bool)
+pub fn rsiprtp::session::CallManager::slide_deadlines_for_dialog(&mut self, dialog_id: &rsiprtp::dialog::DialogId, now: std::time::Instant)
 pub fn rsiprtp::session::CallManager::terminate_call(&mut self, call_id: &rsiprtp::session::call::CallId) -> core::option::Option<rsiprtp::dialog::DialogId>
+pub fn rsiprtp::session::CallManager::tick(&mut self, now: std::time::Instant)
 impl core::marker::Freeze for rsiprtp::session::CallManager
 impl core::marker::Send for rsiprtp::session::CallManager
 impl core::marker::Sync for rsiprtp::session::CallManager
@@ -13091,12 +13513,22 @@ pub fn rsiprtp::session::CallManager::vzip(self) -> V
 pub struct rsiprtp::session::Dialog
 impl rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::id(&self) -> &rsiprtp::dialog::DialogId
+pub fn rsiprtp::session::call::Dialog::local_contact(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::local_cseq(&self) -> u32
 pub fn rsiprtp::session::call::Dialog::local_uri(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::new_uac(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::new_uas(call_id: alloc::string::String, from_tag: alloc::string::String, to_tag: alloc::string::String, local_uri: alloc::string::String, remote_uri: alloc::string::String, cseq: u32) -> Self
 pub fn rsiprtp::session::call::Dialog::next_cseq(&mut self) -> u32
+pub fn rsiprtp::session::call::Dialog::populate_uac_from_response(&mut self, response: &rsiprtp::sip::SipResponse, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::populate_uas_from_invite(&mut self, invite: &rsiprtp::sip::SipRequest, local_contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::remote_target(&self) -> &str
 pub fn rsiprtp::session::call::Dialog::remote_uri(&self) -> &str
+pub fn rsiprtp::session::call::Dialog::role(&self) -> rsiprtp::dialog::Role
+pub fn rsiprtp::session::call::Dialog::route_set(&self) -> &rsiprtp::dialog::RouteSet
+pub fn rsiprtp::session::call::Dialog::set_local_contact(&mut self, contact: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_remote_target(&mut self, target: alloc::string::String)
+pub fn rsiprtp::session::call::Dialog::set_route_set(&mut self, route_set: rsiprtp::dialog::RouteSet)
+pub fn rsiprtp::session::call::Dialog::set_route_set_from_record_routes(&mut self, record_routes: &[alloc::string::String], reverse: bool)
 impl core::clone::Clone for rsiprtp::session::call::Dialog
 pub fn rsiprtp::session::call::Dialog::clone(&self) -> rsiprtp::session::call::Dialog
 impl core::fmt::Debug for rsiprtp::session::call::Dialog
@@ -13494,6 +13926,57 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::ice_session::IceSess
 pub type rsiprtp::session::ice_session::IceSession::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::ice_session::IceSession where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::ice_session::IceSession::vzip(self) -> V
+pub struct rsiprtp::session::InviteOfferHeaders
+pub rsiprtp::session::InviteOfferHeaders::allow_methods: alloc::vec::Vec<rsiprtp::sip::Method>
+pub rsiprtp::session::InviteOfferHeaders::min_se: core::option::Option<u32>
+pub rsiprtp::session::InviteOfferHeaders::session_expires: core::option::Option<(u32, rsiprtp::sip::Refresher)>
+pub rsiprtp::session::InviteOfferHeaders::supported_tags: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::clone(&self) -> rsiprtp::session::InviteOfferHeaders
+impl core::fmt::Debug for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Send for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Sync for rsiprtp::session::InviteOfferHeaders
+impl core::marker::Unpin for rsiprtp::session::InviteOfferHeaders
+impl core::marker::UnsafeUnpin for rsiprtp::session::InviteOfferHeaders
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::InviteOfferHeaders
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::InviteOfferHeaders
+impl<T, U> core::convert::Into<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::From<T>
+pub fn rsiprtp::session::InviteOfferHeaders::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::Into<T>
+pub type rsiprtp::session::InviteOfferHeaders::Error = core::convert::Infallible
+pub fn rsiprtp::session::InviteOfferHeaders::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::InviteOfferHeaders where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::InviteOfferHeaders::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::InviteOfferHeaders::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::InviteOfferHeaders where T: core::clone::Clone
+pub type rsiprtp::session::InviteOfferHeaders::Owned = T
+pub fn rsiprtp::session::InviteOfferHeaders::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::InviteOfferHeaders::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::InviteOfferHeaders where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::InviteOfferHeaders where T: ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::InviteOfferHeaders where T: ?core::marker::Sized
+pub fn rsiprtp::session::InviteOfferHeaders::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::InviteOfferHeaders where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::InviteOfferHeaders::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::InviteOfferHeaders
+pub fn rsiprtp::session::InviteOfferHeaders::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::InviteOfferHeaders where T: core::any::Any
+pub fn rsiprtp::session::InviteOfferHeaders::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InviteOfferHeaders::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::InviteOfferHeaders::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::InviteOfferHeaders::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::InviteOfferHeaders where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::InviteOfferHeaders::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::InviteOfferHeaders
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::InviteOfferHeaders
+impl<T> typenum::type_operators::Same for rsiprtp::session::InviteOfferHeaders
+pub type rsiprtp::session::InviteOfferHeaders::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::InviteOfferHeaders where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::InviteOfferHeaders::vzip(self) -> V
 pub struct rsiprtp::session::ManagerConfig
 pub rsiprtp::session::ManagerConfig::call_config: rsiprtp::session::call::CallConfig
 pub rsiprtp::session::ManagerConfig::local_rtp_addr: alloc::string::String
@@ -13599,6 +14082,56 @@ impl<T> typenum::type_operators::Same for rsiprtp::session::call::MediaSession
 pub type rsiprtp::session::call::MediaSession::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::call::MediaSession where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::call::MediaSession::vzip(self) -> V
+pub struct rsiprtp::session::OutboundRequest
+pub rsiprtp::session::OutboundRequest::call_id: rsiprtp::session::call::CallId
+pub rsiprtp::session::OutboundRequest::kind: rsiprtp::session::OutboundRequestKind
+pub rsiprtp::session::OutboundRequest::request: rsiprtp::sip::SipRequest
+impl core::clone::Clone for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::clone(&self) -> rsiprtp::session::OutboundRequest
+impl core::fmt::Debug for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for rsiprtp::session::OutboundRequest
+impl core::marker::Send for rsiprtp::session::OutboundRequest
+impl core::marker::Sync for rsiprtp::session::OutboundRequest
+impl core::marker::Unpin for rsiprtp::session::OutboundRequest
+impl core::marker::UnsafeUnpin for rsiprtp::session::OutboundRequest
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::session::OutboundRequest
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::session::OutboundRequest
+impl<T, U> core::convert::Into<U> for rsiprtp::session::OutboundRequest where U: core::convert::From<T>
+pub fn rsiprtp::session::OutboundRequest::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::session::OutboundRequest where U: core::convert::Into<T>
+pub type rsiprtp::session::OutboundRequest::Error = core::convert::Infallible
+pub fn rsiprtp::session::OutboundRequest::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::session::OutboundRequest where U: core::convert::TryFrom<T>
+pub type rsiprtp::session::OutboundRequest::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::session::OutboundRequest::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::session::OutboundRequest where T: core::clone::Clone
+pub type rsiprtp::session::OutboundRequest::Owned = T
+pub fn rsiprtp::session::OutboundRequest::clone_into(&self, target: &mut T)
+pub fn rsiprtp::session::OutboundRequest::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::session::OutboundRequest where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::session::OutboundRequest where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::session::OutboundRequest where T: ?core::marker::Sized
+pub fn rsiprtp::session::OutboundRequest::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::session::OutboundRequest where T: core::clone::Clone
+pub unsafe fn rsiprtp::session::OutboundRequest::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::session::OutboundRequest
+pub fn rsiprtp::session::OutboundRequest::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::session::OutboundRequest where T: core::any::Any
+pub fn rsiprtp::session::OutboundRequest::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequest::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::session::OutboundRequest::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::session::OutboundRequest::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::session::OutboundRequest where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::session::OutboundRequest::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::session::OutboundRequest
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::session::OutboundRequest
+impl<T> typenum::type_operators::Same for rsiprtp::session::OutboundRequest
+pub type rsiprtp::session::OutboundRequest::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::OutboundRequest where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::session::OutboundRequest::vzip(self) -> V
 pub struct rsiprtp::session::ReferTo
 pub rsiprtp::session::ReferTo::replaces: core::option::Option<rsiprtp::session::ReplacesHeader>
 pub rsiprtp::session::ReferTo::uri: alloc::string::String
@@ -13722,8 +14255,10 @@ pub fn rsiprtp::session::RegistrationManager::handle_response(&mut self, respons
 pub fn rsiprtp::session::RegistrationManager::is_registered(&self) -> bool
 pub fn rsiprtp::session::RegistrationManager::needs_refresh(&self) -> bool
 pub fn rsiprtp::session::RegistrationManager::new(config: rsiprtp::session::RegistrationConfig) -> Self
+pub async fn rsiprtp::session::RegistrationManager::register(&mut self, transport: &rsiprtp::transport::UdpTransport, registrar_addr: core::net::socket_addr::SocketAddr, recv_timeout: core::time::Duration, total_timeout: core::time::Duration) -> core::result::Result<(), rsiprtp::session::RegistrationError>
 pub fn rsiprtp::session::RegistrationManager::reset(&mut self)
 pub fn rsiprtp::session::RegistrationManager::state(&self) -> rsiprtp::session::RegistrationState
+pub async fn rsiprtp::session::RegistrationManager::unregister(&mut self, transport: &rsiprtp::transport::UdpTransport, registrar_addr: core::net::socket_addr::SocketAddr, recv_timeout: core::time::Duration, total_timeout: core::time::Duration) -> core::result::Result<(), rsiprtp::session::RegistrationError>
 impl core::fmt::Debug for rsiprtp::session::RegistrationManager
 pub fn rsiprtp::session::RegistrationManager::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for rsiprtp::session::RegistrationManager
@@ -13979,7 +14514,6 @@ pub type rsiprtp::session::TransferProgress::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::session::TransferProgress where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::session::TransferProgress::vzip(self) -> V
 pub mod rsiprtp::sip
-pub use rsiprtp::sip::RsipUri
 pub enum rsiprtp::sip::Algorithm
 pub rsiprtp::sip::Algorithm::Md5
 pub rsiprtp::sip::Algorithm::Md5Sess
@@ -14108,14 +14642,11 @@ pub rsiprtp::sip::Method::Update
 impl rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::creates_dialog(&self) -> bool
 pub fn rsiprtp::sip::Method::is_invite(&self) -> bool
-pub fn rsiprtp::sip::Method::to_rsip(&self) -> rsip::common::method::Method
 impl core::clone::Clone for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::clone(&self) -> rsiprtp::sip::Method
 impl core::cmp::Eq for rsiprtp::sip::Method
 impl core::cmp::PartialEq for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::eq(&self, other: &rsiprtp::sip::Method) -> bool
-impl core::convert::From<&rsip::common::method::Method> for rsiprtp::sip::Method
-pub fn rsiprtp::sip::Method::from(m: &rsip::common::method::Method) -> Self
 impl core::fmt::Debug for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for rsiprtp::sip::Method
@@ -14124,6 +14655,9 @@ impl core::hash::Hash for rsiprtp::sip::Method
 pub fn rsiprtp::sip::Method::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
 impl core::marker::Copy for rsiprtp::sip::Method
 impl core::marker::StructuralPartialEq for rsiprtp::sip::Method
+impl core::str::traits::FromStr for rsiprtp::sip::Method
+pub type rsiprtp::sip::Method::Err = rsiprtp::core::SipError
+pub fn rsiprtp::sip::Method::from_str(s: &str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for rsiprtp::sip::Method
 impl core::marker::Send for rsiprtp::sip::Method
 impl core::marker::Sync for rsiprtp::sip::Method
@@ -14229,6 +14763,129 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::Qop
 pub type rsiprtp::sip::Qop::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Qop where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::Qop::vzip(self) -> V
+pub enum rsiprtp::sip::Refresher
+pub rsiprtp::sip::Refresher::Uac
+pub rsiprtp::sip::Refresher::Uas
+impl rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+impl core::clone::Clone for rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::clone(&self) -> rsiprtp::sip::Refresher
+impl core::cmp::Eq for rsiprtp::sip::Refresher
+impl core::cmp::PartialEq for rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::eq(&self, other: &rsiprtp::sip::Refresher) -> bool
+impl core::fmt::Debug for rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::sip::Refresher
+impl core::marker::StructuralPartialEq for rsiprtp::sip::Refresher
+impl core::marker::Freeze for rsiprtp::sip::Refresher
+impl core::marker::Send for rsiprtp::sip::Refresher
+impl core::marker::Sync for rsiprtp::sip::Refresher
+impl core::marker::Unpin for rsiprtp::sip::Refresher
+impl core::marker::UnsafeUnpin for rsiprtp::sip::Refresher
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::Refresher
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::Refresher
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::Refresher where U: core::convert::From<T>
+pub fn rsiprtp::sip::Refresher::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::Refresher where U: core::convert::Into<T>
+pub type rsiprtp::sip::Refresher::Error = core::convert::Infallible
+pub fn rsiprtp::sip::Refresher::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::Refresher where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::Refresher::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::Refresher::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::Refresher where T: core::clone::Clone
+pub type rsiprtp::sip::Refresher::Owned = T
+pub fn rsiprtp::sip::Refresher::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::Refresher::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::Refresher where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::Refresher::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::Refresher where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::Refresher::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::Refresher where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Refresher::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::Refresher where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Refresher::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::Refresher where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::Refresher::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::Refresher
+pub fn rsiprtp::sip::Refresher::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::Refresher where T: core::any::Any
+pub fn rsiprtp::sip::Refresher::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Refresher::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Refresher::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::Refresher::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::Refresher where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::Refresher::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::Refresher
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::Refresher
+impl<T> typenum::type_operators::Same for rsiprtp::sip::Refresher
+pub type rsiprtp::sip::Refresher::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Refresher where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::Refresher::vzip(self) -> V
+pub enum rsiprtp::sip::Scheme
+pub rsiprtp::sip::Scheme::Sip
+pub rsiprtp::sip::Scheme::Sips
+pub rsiprtp::sip::Scheme::Tel
+impl rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::as_str(&self) -> &'static str
+impl core::clone::Clone for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::clone(&self) -> rsiprtp::sip::Scheme
+impl core::cmp::Eq for rsiprtp::sip::Scheme
+impl core::cmp::PartialEq for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::eq(&self, other: &rsiprtp::sip::Scheme) -> bool
+impl core::fmt::Debug for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::hash<__H: core::hash::Hasher>(&self, state: &mut __H)
+impl core::marker::Copy for rsiprtp::sip::Scheme
+impl core::marker::StructuralPartialEq for rsiprtp::sip::Scheme
+impl core::marker::Freeze for rsiprtp::sip::Scheme
+impl core::marker::Send for rsiprtp::sip::Scheme
+impl core::marker::Sync for rsiprtp::sip::Scheme
+impl core::marker::Unpin for rsiprtp::sip::Scheme
+impl core::marker::UnsafeUnpin for rsiprtp::sip::Scheme
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::Scheme
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::Scheme
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::Scheme where U: core::convert::From<T>
+pub fn rsiprtp::sip::Scheme::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::Scheme where U: core::convert::Into<T>
+pub type rsiprtp::sip::Scheme::Error = core::convert::Infallible
+pub fn rsiprtp::sip::Scheme::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::Scheme where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::Scheme::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::Scheme::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::Scheme where T: core::clone::Clone
+pub type rsiprtp::sip::Scheme::Owned = T
+pub fn rsiprtp::sip::Scheme::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::Scheme::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::Scheme where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::Scheme::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::Scheme where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::Scheme::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::Scheme where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Scheme::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::Scheme where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Scheme::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::Scheme where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::Scheme::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::Scheme
+pub fn rsiprtp::sip::Scheme::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::Scheme where T: core::any::Any
+pub fn rsiprtp::sip::Scheme::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Scheme::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Scheme::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::Scheme::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::Scheme where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::Scheme::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::Scheme
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::Scheme
+impl<T> typenum::type_operators::Same for rsiprtp::sip::Scheme
+pub type rsiprtp::sip::Scheme::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Scheme where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::Scheme::vzip(self) -> V
 pub enum rsiprtp::sip::SipMessage
 pub rsiprtp::sip::SipMessage::Request(rsiprtp::sip::SipRequest)
 pub rsiprtp::sip::SipMessage::Response(rsiprtp::sip::SipResponse)
@@ -14465,7 +15122,7 @@ pub rsiprtp::sip::DigestResponse::response: alloc::string::String
 pub rsiprtp::sip::DigestResponse::uri: alloc::string::String
 pub rsiprtp::sip::DigestResponse::username: alloc::string::String
 impl rsiprtp::sip::DigestResponse
-pub fn rsiprtp::sip::DigestResponse::from_challenge(challenge: &rsiprtp::sip::DigestChallenge, credentials: &rsiprtp::sip::DigestCredentials, method: &str, uri: &str, body: core::option::Option<&[u8]>) -> core::result::Result<Self, rsiprtp::sip::DigestAuthError>
+pub fn rsiprtp::sip::DigestResponse::from_challenge(challenge: &rsiprtp::sip::DigestChallenge, credentials: &rsiprtp::sip::DigestCredentials, method: &str, uri: &str, body: core::option::Option<&[u8]>, nc: core::option::Option<u32>) -> core::result::Result<Self, rsiprtp::sip::DigestAuthError>
 pub fn rsiprtp::sip::DigestResponse::to_header_value(&self) -> alloc::string::String
 impl core::clone::Clone for rsiprtp::sip::DigestResponse
 pub fn rsiprtp::sip::DigestResponse::clone(&self) -> rsiprtp::sip::DigestResponse
@@ -14513,6 +15170,185 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::DigestResponse
 pub type rsiprtp::sip::DigestResponse::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::DigestResponse where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::DigestResponse::vzip(self) -> V
+pub struct rsiprtp::sip::MinSe(pub u32)
+impl rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::MinSe::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::clone(&self) -> rsiprtp::sip::MinSe
+impl core::cmp::Eq for rsiprtp::sip::MinSe
+impl core::cmp::PartialEq for rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::eq(&self, other: &rsiprtp::sip::MinSe) -> bool
+impl core::fmt::Debug for rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::sip::MinSe
+impl core::marker::StructuralPartialEq for rsiprtp::sip::MinSe
+impl core::marker::Freeze for rsiprtp::sip::MinSe
+impl core::marker::Send for rsiprtp::sip::MinSe
+impl core::marker::Sync for rsiprtp::sip::MinSe
+impl core::marker::Unpin for rsiprtp::sip::MinSe
+impl core::marker::UnsafeUnpin for rsiprtp::sip::MinSe
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::MinSe
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::MinSe
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::MinSe where U: core::convert::From<T>
+pub fn rsiprtp::sip::MinSe::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::MinSe where U: core::convert::Into<T>
+pub type rsiprtp::sip::MinSe::Error = core::convert::Infallible
+pub fn rsiprtp::sip::MinSe::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::MinSe where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::MinSe::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::MinSe::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::MinSe where T: core::clone::Clone
+pub type rsiprtp::sip::MinSe::Owned = T
+pub fn rsiprtp::sip::MinSe::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::MinSe::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::MinSe where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::MinSe::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::MinSe where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::MinSe::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::MinSe where T: ?core::marker::Sized
+pub fn rsiprtp::sip::MinSe::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::MinSe where T: ?core::marker::Sized
+pub fn rsiprtp::sip::MinSe::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::MinSe where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::MinSe::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::MinSe
+pub fn rsiprtp::sip::MinSe::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::MinSe where T: core::any::Any
+pub fn rsiprtp::sip::MinSe::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::MinSe::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::MinSe::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::MinSe::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::MinSe where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::MinSe::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::MinSe
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::MinSe
+impl<T> typenum::type_operators::Same for rsiprtp::sip::MinSe
+pub type rsiprtp::sip::MinSe::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::MinSe where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::MinSe::vzip(self) -> V
+pub struct rsiprtp::sip::RAck
+pub rsiprtp::sip::RAck::cseq: u32
+pub rsiprtp::sip::RAck::method: rsiprtp::sip::Method
+pub rsiprtp::sip::RAck::rseq: u32
+impl rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::RAck::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::clone(&self) -> rsiprtp::sip::RAck
+impl core::cmp::Eq for rsiprtp::sip::RAck
+impl core::cmp::PartialEq for rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::eq(&self, other: &rsiprtp::sip::RAck) -> bool
+impl core::fmt::Debug for rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rsiprtp::sip::RAck
+impl core::marker::Freeze for rsiprtp::sip::RAck
+impl core::marker::Send for rsiprtp::sip::RAck
+impl core::marker::Sync for rsiprtp::sip::RAck
+impl core::marker::Unpin for rsiprtp::sip::RAck
+impl core::marker::UnsafeUnpin for rsiprtp::sip::RAck
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::RAck
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::RAck
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::RAck where U: core::convert::From<T>
+pub fn rsiprtp::sip::RAck::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::RAck where U: core::convert::Into<T>
+pub type rsiprtp::sip::RAck::Error = core::convert::Infallible
+pub fn rsiprtp::sip::RAck::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::RAck where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::RAck::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::RAck::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::RAck where T: core::clone::Clone
+pub type rsiprtp::sip::RAck::Owned = T
+pub fn rsiprtp::sip::RAck::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::RAck::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::RAck where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::RAck::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::RAck where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::RAck::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::RAck where T: ?core::marker::Sized
+pub fn rsiprtp::sip::RAck::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::RAck where T: ?core::marker::Sized
+pub fn rsiprtp::sip::RAck::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::RAck where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::RAck::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::RAck
+pub fn rsiprtp::sip::RAck::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::RAck where T: core::any::Any
+pub fn rsiprtp::sip::RAck::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::RAck::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::RAck::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::RAck::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::RAck where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::RAck::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::RAck
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::RAck
+impl<T> typenum::type_operators::Same for rsiprtp::sip::RAck
+pub type rsiprtp::sip::RAck::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::RAck where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::RAck::vzip(self) -> V
+pub struct rsiprtp::sip::RSeq(pub u32)
+impl rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::RSeq::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::clone(&self) -> rsiprtp::sip::RSeq
+impl core::cmp::Eq for rsiprtp::sip::RSeq
+impl core::cmp::PartialEq for rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::eq(&self, other: &rsiprtp::sip::RSeq) -> bool
+impl core::fmt::Debug for rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::sip::RSeq
+impl core::marker::StructuralPartialEq for rsiprtp::sip::RSeq
+impl core::marker::Freeze for rsiprtp::sip::RSeq
+impl core::marker::Send for rsiprtp::sip::RSeq
+impl core::marker::Sync for rsiprtp::sip::RSeq
+impl core::marker::Unpin for rsiprtp::sip::RSeq
+impl core::marker::UnsafeUnpin for rsiprtp::sip::RSeq
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::RSeq
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::RSeq
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::RSeq where U: core::convert::From<T>
+pub fn rsiprtp::sip::RSeq::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::RSeq where U: core::convert::Into<T>
+pub type rsiprtp::sip::RSeq::Error = core::convert::Infallible
+pub fn rsiprtp::sip::RSeq::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::RSeq where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::RSeq::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::RSeq::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::RSeq where T: core::clone::Clone
+pub type rsiprtp::sip::RSeq::Owned = T
+pub fn rsiprtp::sip::RSeq::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::RSeq::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::RSeq where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::RSeq::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::RSeq where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::RSeq::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::RSeq where T: ?core::marker::Sized
+pub fn rsiprtp::sip::RSeq::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::RSeq where T: ?core::marker::Sized
+pub fn rsiprtp::sip::RSeq::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::RSeq where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::RSeq::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::RSeq
+pub fn rsiprtp::sip::RSeq::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::RSeq where T: core::any::Any
+pub fn rsiprtp::sip::RSeq::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::RSeq::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::RSeq::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::RSeq::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::RSeq where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::RSeq::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::RSeq
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::RSeq
+impl<T> typenum::type_operators::Same for rsiprtp::sip::RSeq
+pub type rsiprtp::sip::RSeq::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::RSeq where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::RSeq::vzip(self) -> V
 pub struct rsiprtp::sip::RecordRoute
 pub rsiprtp::sip::RecordRoute::lr: bool
 pub rsiprtp::sip::RecordRoute::uri: rsiprtp::sip::SipUri
@@ -14573,6 +15409,64 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::RecordRoute
 pub type rsiprtp::sip::RecordRoute::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::RecordRoute where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::RecordRoute::vzip(self) -> V
+pub struct rsiprtp::sip::Require(pub alloc::vec::Vec<alloc::string::String>)
+impl rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::Require::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::clone(&self) -> rsiprtp::sip::Require
+impl core::cmp::Eq for rsiprtp::sip::Require
+impl core::cmp::PartialEq for rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::eq(&self, other: &rsiprtp::sip::Require) -> bool
+impl core::fmt::Debug for rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rsiprtp::sip::Require
+impl core::marker::Freeze for rsiprtp::sip::Require
+impl core::marker::Send for rsiprtp::sip::Require
+impl core::marker::Sync for rsiprtp::sip::Require
+impl core::marker::Unpin for rsiprtp::sip::Require
+impl core::marker::UnsafeUnpin for rsiprtp::sip::Require
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::Require
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::Require
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::Require where U: core::convert::From<T>
+pub fn rsiprtp::sip::Require::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::Require where U: core::convert::Into<T>
+pub type rsiprtp::sip::Require::Error = core::convert::Infallible
+pub fn rsiprtp::sip::Require::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::Require where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::Require::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::Require::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::Require where T: core::clone::Clone
+pub type rsiprtp::sip::Require::Owned = T
+pub fn rsiprtp::sip::Require::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::Require::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::Require where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::Require::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::Require where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::Require::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::Require where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Require::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::Require where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Require::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::Require where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::Require::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::Require
+pub fn rsiprtp::sip::Require::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::Require where T: core::any::Any
+pub fn rsiprtp::sip::Require::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Require::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Require::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::Require::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::Require where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::Require::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::Require
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::Require
+impl<T> typenum::type_operators::Same for rsiprtp::sip::Require
+pub type rsiprtp::sip::Require::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Require where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::Require::vzip(self) -> V
 pub struct rsiprtp::sip::Route
 pub rsiprtp::sip::Route::lr: bool
 pub rsiprtp::sip::Route::uri: rsiprtp::sip::SipUri
@@ -14690,25 +15584,91 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::RouteSet
 pub type rsiprtp::sip::RouteSet::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::RouteSet where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::RouteSet::vzip(self) -> V
+pub struct rsiprtp::sip::SessionExpires
+pub rsiprtp::sip::SessionExpires::delta_seconds: u32
+pub rsiprtp::sip::SessionExpires::refresher: core::option::Option<rsiprtp::sip::Refresher>
+impl rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::SessionExpires::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::clone(&self) -> rsiprtp::sip::SessionExpires
+impl core::cmp::Eq for rsiprtp::sip::SessionExpires
+impl core::cmp::PartialEq for rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::eq(&self, other: &rsiprtp::sip::SessionExpires) -> bool
+impl core::fmt::Debug for rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rsiprtp::sip::SessionExpires
+impl core::marker::Freeze for rsiprtp::sip::SessionExpires
+impl core::marker::Send for rsiprtp::sip::SessionExpires
+impl core::marker::Sync for rsiprtp::sip::SessionExpires
+impl core::marker::Unpin for rsiprtp::sip::SessionExpires
+impl core::marker::UnsafeUnpin for rsiprtp::sip::SessionExpires
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::SessionExpires
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::SessionExpires
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::SessionExpires where U: core::convert::From<T>
+pub fn rsiprtp::sip::SessionExpires::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::SessionExpires where U: core::convert::Into<T>
+pub type rsiprtp::sip::SessionExpires::Error = core::convert::Infallible
+pub fn rsiprtp::sip::SessionExpires::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::SessionExpires where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::SessionExpires::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::SessionExpires::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::SessionExpires where T: core::clone::Clone
+pub type rsiprtp::sip::SessionExpires::Owned = T
+pub fn rsiprtp::sip::SessionExpires::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::SessionExpires::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::SessionExpires where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::SessionExpires::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::SessionExpires where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::SessionExpires::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::SessionExpires where T: ?core::marker::Sized
+pub fn rsiprtp::sip::SessionExpires::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::SessionExpires where T: ?core::marker::Sized
+pub fn rsiprtp::sip::SessionExpires::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::SessionExpires where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::SessionExpires::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::SessionExpires
+pub fn rsiprtp::sip::SessionExpires::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::SessionExpires where T: core::any::Any
+pub fn rsiprtp::sip::SessionExpires::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::SessionExpires::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::SessionExpires::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::SessionExpires::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::SessionExpires where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::SessionExpires::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::SessionExpires
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::SessionExpires
+impl<T> typenum::type_operators::Same for rsiprtp::sip::SessionExpires
+pub type rsiprtp::sip::SessionExpires::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::SessionExpires where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::SessionExpires::vzip(self) -> V
 pub struct rsiprtp::sip::SipRequest
 impl rsiprtp::sip::SipRequest
+pub fn rsiprtp::sip::SipRequest::allow(&self) -> core::option::Option<alloc::vec::Vec<rsiprtp::sip::Method>>
 pub fn rsiprtp::sip::SipRequest::body(&self) -> &[u8]
 pub fn rsiprtp::sip::SipRequest::builder() -> rsiprtp::sip::SipRequestBuilder
 pub fn rsiprtp::sip::SipRequest::call_id(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::contact_uri(&self) -> core::option::Option<rsip::common::uri::Uri>
+pub fn rsiprtp::sip::SipRequest::contact_uri(&self) -> core::option::Option<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipRequest::content_type(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipRequest::cseq(&self) -> rsiprtp::core::Result<u32>
 pub fn rsiprtp::sip::SipRequest::cseq_method(&self) -> rsiprtp::core::Result<rsiprtp::sip::Method>
 pub fn rsiprtp::sip::SipRequest::from_tag(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::from_tag_and_uri(&self) -> rsiprtp::core::Result<(alloc::string::String, rsip::common::uri::Uri)>
-pub fn rsiprtp::sip::SipRequest::from_uri(&self) -> rsiprtp::core::Result<rsip::common::uri::Uri>
-pub fn rsiprtp::sip::SipRequest::inner(&self) -> &rsip::message::request::Request
+pub fn rsiprtp::sip::SipRequest::from_tag_and_uri(&self) -> rsiprtp::core::Result<(alloc::string::String, rsiprtp::sip::SipUri)>
+pub fn rsiprtp::sip::SipRequest::from_uri(&self) -> rsiprtp::core::Result<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipRequest::method(&self) -> rsiprtp::sip::Method
+pub fn rsiprtp::sip::SipRequest::min_se(&self) -> core::option::Option<rsiprtp::sip::MinSe>
+pub fn rsiprtp::sip::SipRequest::rack(&self) -> core::option::Option<rsiprtp::sip::RAck>
 pub fn rsiprtp::sip::SipRequest::record_routes(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipRequest::require(&self) -> core::option::Option<rsiprtp::sip::Require>
+pub fn rsiprtp::sip::SipRequest::route_headers(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipRequest::session_expires(&self) -> core::option::Option<rsiprtp::sip::SessionExpires>
+pub fn rsiprtp::sip::SipRequest::supported(&self) -> core::option::Option<rsiprtp::sip::Supported>
 pub fn rsiprtp::sip::SipRequest::to_bytes(&self) -> bytes::bytes::Bytes
 pub fn rsiprtp::sip::SipRequest::to_tag(&self) -> core::option::Option<alloc::string::String>
-pub fn rsiprtp::sip::SipRequest::to_uri(&self) -> rsiprtp::core::Result<rsip::common::uri::Uri>
-pub fn rsiprtp::sip::SipRequest::uri(&self) -> &rsip::common::uri::Uri
+pub fn rsiprtp::sip::SipRequest::to_uri(&self) -> rsiprtp::core::Result<rsiprtp::sip::SipUri>
+pub fn rsiprtp::sip::SipRequest::uri(&self) -> rsiprtp::sip::SipUri
 pub fn rsiprtp::sip::SipRequest::via_branch(&self) -> rsiprtp::core::Result<alloc::string::String>
 pub fn rsiprtp::sip::SipRequest::via_headers_raw(&self) -> alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for rsiprtp::sip::SipRequest
@@ -14759,6 +15719,7 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::SipRequest where V: ppv_
 pub fn rsiprtp::sip::SipRequest::vzip(self) -> V
 pub struct rsiprtp::sip::SipRequestBuilder
 impl rsiprtp::sip::SipRequestBuilder
+pub fn rsiprtp::sip::SipRequestBuilder::allow(self, methods: &[rsiprtp::sip::Method]) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::authorization(self, auth: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::body(self, body: alloc::vec::Vec<u8>, content_type: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::build(self) -> rsiprtp::core::Result<rsiprtp::sip::SipRequest>
@@ -14768,10 +15729,17 @@ pub fn rsiprtp::sip::SipRequestBuilder::cseq(self, seq: u32) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::expires(self, seconds: u32) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::from(self, uri: &str, tag: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::from_display(self, name: &str) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::header(self, name: &str, value: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::max_forwards(self, mf: u32) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::method(self, method: rsiprtp::sip::Method) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::min_se(self, secs: u32) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::new() -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::proxy_authorization(self, auth: &str) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::rack(self, rseq: u32, cseq: u32, method: rsiprtp::sip::Method) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::require(self, tags: &[&str]) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::route(self, routes: &[alloc::string::String]) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::session_expires(self, secs: u32, refresher: core::option::Option<rsiprtp::sip::Refresher>) -> Self
+pub fn rsiprtp::sip::SipRequestBuilder::supported(self, tags: &[&str]) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::to(self, uri: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::to_tag(self, tag: &str) -> Self
 pub fn rsiprtp::sip::SipRequestBuilder::uri(self, uri: &str) -> Self
@@ -14818,22 +15786,27 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::SipRequestBuilder where 
 pub fn rsiprtp::sip::SipRequestBuilder::vzip(self) -> V
 pub struct rsiprtp::sip::SipResponse
 impl rsiprtp::sip::SipResponse
+pub fn rsiprtp::sip::SipResponse::allow(&self) -> core::option::Option<alloc::vec::Vec<rsiprtp::sip::Method>>
 pub fn rsiprtp::sip::SipResponse::body(&self) -> &[u8]
 pub fn rsiprtp::sip::SipResponse::builder() -> rsiprtp::sip::SipResponseBuilder
 pub fn rsiprtp::sip::SipResponse::call_id(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipResponse::contact_uri(&self) -> core::option::Option<rsip::common::uri::Uri>
+pub fn rsiprtp::sip::SipResponse::contact_uri(&self) -> core::option::Option<rsiprtp::sip::SipUri>
 pub fn rsiprtp::sip::SipResponse::content_type(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::cseq(&self) -> rsiprtp::core::Result<u32>
 pub fn rsiprtp::sip::SipResponse::cseq_method(&self) -> rsiprtp::core::Result<rsiprtp::sip::Method>
 pub fn rsiprtp::sip::SipResponse::from_tag(&self) -> rsiprtp::core::Result<alloc::string::String>
-pub fn rsiprtp::sip::SipResponse::inner(&self) -> &rsip::message::response::Response
 pub fn rsiprtp::sip::SipResponse::is_failure(&self) -> bool
 pub fn rsiprtp::sip::SipResponse::is_provisional(&self) -> bool
 pub fn rsiprtp::sip::SipResponse::is_success(&self) -> bool
+pub fn rsiprtp::sip::SipResponse::min_se(&self) -> core::option::Option<rsiprtp::sip::MinSe>
 pub fn rsiprtp::sip::SipResponse::proxy_authenticate(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::reason(&self) -> alloc::string::String
 pub fn rsiprtp::sip::SipResponse::record_routes(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn rsiprtp::sip::SipResponse::require(&self) -> core::option::Option<rsiprtp::sip::Require>
+pub fn rsiprtp::sip::SipResponse::rseq(&self) -> core::option::Option<rsiprtp::sip::RSeq>
+pub fn rsiprtp::sip::SipResponse::session_expires(&self) -> core::option::Option<rsiprtp::sip::SessionExpires>
 pub fn rsiprtp::sip::SipResponse::status_code(&self) -> u16
+pub fn rsiprtp::sip::SipResponse::supported(&self) -> core::option::Option<rsiprtp::sip::Supported>
 pub fn rsiprtp::sip::SipResponse::to_bytes(&self) -> bytes::bytes::Bytes
 pub fn rsiprtp::sip::SipResponse::to_tag(&self) -> core::option::Option<alloc::string::String>
 pub fn rsiprtp::sip::SipResponse::via_branch(&self) -> rsiprtp::core::Result<alloc::string::String>
@@ -14887,12 +15860,18 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::SipResponse where V: ppv
 pub fn rsiprtp::sip::SipResponse::vzip(self) -> V
 pub struct rsiprtp::sip::SipResponseBuilder
 impl rsiprtp::sip::SipResponseBuilder
+pub fn rsiprtp::sip::SipResponseBuilder::allow(self, methods: &[rsiprtp::sip::Method]) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::body(self, body: alloc::vec::Vec<u8>, content_type: &str) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::build(self) -> rsiprtp::core::Result<rsiprtp::sip::SipResponse>
 pub fn rsiprtp::sip::SipResponseBuilder::contact(self, uri: &str) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::from_request(self, req: &rsiprtp::sip::SipRequest) -> Self
+pub fn rsiprtp::sip::SipResponseBuilder::min_se(self, secs: u32) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::new() -> Self
+pub fn rsiprtp::sip::SipResponseBuilder::require(self, tags: &[&str]) -> Self
+pub fn rsiprtp::sip::SipResponseBuilder::rseq(self, rseq: u32) -> Self
+pub fn rsiprtp::sip::SipResponseBuilder::session_expires(self, secs: u32, refresher: core::option::Option<rsiprtp::sip::Refresher>) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::status(self, code: u16, reason: &str) -> Self
+pub fn rsiprtp::sip::SipResponseBuilder::supported(self, tags: &[&str]) -> Self
 pub fn rsiprtp::sip::SipResponseBuilder::to_tag(self, tag: &str) -> Self
 impl core::default::Default for rsiprtp::sip::SipResponseBuilder
 pub fn rsiprtp::sip::SipResponseBuilder::default() -> rsiprtp::sip::SipResponseBuilder
@@ -14938,14 +15917,20 @@ pub struct rsiprtp::sip::SipUri
 impl rsiprtp::sip::SipUri
 pub fn rsiprtp::sip::SipUri::builder() -> rsiprtp::sip::SipUriBuilder
 pub fn rsiprtp::sip::SipUri::effective_port(&self) -> u16
+pub fn rsiprtp::sip::SipUri::get_header(&self, name: &str) -> core::option::Option<&str>
 pub fn rsiprtp::sip::SipUri::get_param(&self, name: &str) -> core::option::Option<&str>
+pub fn rsiprtp::sip::SipUri::has_headers(&self) -> bool
 pub fn rsiprtp::sip::SipUri::has_param(&self, name: &str) -> bool
+pub fn rsiprtp::sip::SipUri::headers(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub fn rsiprtp::sip::SipUri::host(&self) -> &str
 pub fn rsiprtp::sip::SipUri::is_loose_route(&self) -> bool
 pub fn rsiprtp::sip::SipUri::is_secure(&self) -> bool
+pub fn rsiprtp::sip::SipUri::is_tel(&self) -> bool
+pub fn rsiprtp::sip::SipUri::params(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, core::option::Option<&str>)>
 pub fn rsiprtp::sip::SipUri::parse(s: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
 pub fn rsiprtp::sip::SipUri::port(&self) -> core::option::Option<u16>
 pub fn rsiprtp::sip::SipUri::scheme(&self) -> &str
+pub fn rsiprtp::sip::SipUri::scheme_enum(&self) -> rsiprtp::sip::Scheme
 pub fn rsiprtp::sip::SipUri::to_request_uri(&self) -> alloc::string::String
 pub fn rsiprtp::sip::SipUri::transport(&self) -> core::option::Option<&str>
 pub fn rsiprtp::sip::SipUri::user(&self) -> core::option::Option<&str>
@@ -15007,12 +15992,14 @@ pub struct rsiprtp::sip::SipUriBuilder
 impl rsiprtp::sip::SipUriBuilder
 pub fn rsiprtp::sip::SipUriBuilder::build(self) -> core::result::Result<rsiprtp::sip::SipUri, rsiprtp::core::SipError>
 pub fn rsiprtp::sip::SipUriBuilder::flag(self, key: &str) -> Self
+pub fn rsiprtp::sip::SipUriBuilder::header(self, key: &str, value: &str) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::host(self, host: &str) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::loose_route(self) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::new() -> Self
 pub fn rsiprtp::sip::SipUriBuilder::param(self, key: &str, value: &str) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::port(self, port: u16) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::scheme(self, scheme: &str) -> Self
+pub fn rsiprtp::sip::SipUriBuilder::scheme_enum(self, scheme: rsiprtp::sip::Scheme) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::transport(self, transport: &str) -> Self
 pub fn rsiprtp::sip::SipUriBuilder::user(self, user: &str) -> Self
 impl core::default::Default for rsiprtp::sip::SipUriBuilder
@@ -15055,6 +16042,64 @@ impl<T> typenum::type_operators::Same for rsiprtp::sip::SipUriBuilder
 pub type rsiprtp::sip::SipUriBuilder::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::SipUriBuilder where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::sip::SipUriBuilder::vzip(self) -> V
+pub struct rsiprtp::sip::Supported(pub alloc::vec::Vec<alloc::string::String>)
+impl rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::parse(value: &str) -> core::result::Result<Self, rsiprtp::core::SipError>
+pub fn rsiprtp::sip::Supported::to_header_value(&self) -> alloc::string::String
+impl core::clone::Clone for rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::clone(&self) -> rsiprtp::sip::Supported
+impl core::cmp::Eq for rsiprtp::sip::Supported
+impl core::cmp::PartialEq for rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::eq(&self, other: &rsiprtp::sip::Supported) -> bool
+impl core::fmt::Debug for rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for rsiprtp::sip::Supported
+impl core::marker::Freeze for rsiprtp::sip::Supported
+impl core::marker::Send for rsiprtp::sip::Supported
+impl core::marker::Sync for rsiprtp::sip::Supported
+impl core::marker::Unpin for rsiprtp::sip::Supported
+impl core::marker::UnsafeUnpin for rsiprtp::sip::Supported
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::sip::Supported
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::sip::Supported
+impl<T, U> core::convert::Into<U> for rsiprtp::sip::Supported where U: core::convert::From<T>
+pub fn rsiprtp::sip::Supported::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::sip::Supported where U: core::convert::Into<T>
+pub type rsiprtp::sip::Supported::Error = core::convert::Infallible
+pub fn rsiprtp::sip::Supported::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::sip::Supported where U: core::convert::TryFrom<T>
+pub type rsiprtp::sip::Supported::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::sip::Supported::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::sip::Supported where T: core::clone::Clone
+pub type rsiprtp::sip::Supported::Owned = T
+pub fn rsiprtp::sip::Supported::clone_into(&self, target: &mut T)
+pub fn rsiprtp::sip::Supported::to_owned(&self) -> T
+impl<T> alloc::string::ToString for rsiprtp::sip::Supported where T: core::fmt::Display + ?core::marker::Sized
+pub fn rsiprtp::sip::Supported::to_string(&self) -> alloc::string::String
+impl<T> core::any::Any for rsiprtp::sip::Supported where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::sip::Supported::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::sip::Supported where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Supported::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::sip::Supported where T: ?core::marker::Sized
+pub fn rsiprtp::sip::Supported::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::sip::Supported where T: core::clone::Clone
+pub unsafe fn rsiprtp::sip::Supported::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::sip::Supported
+pub fn rsiprtp::sip::Supported::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::sip::Supported where T: core::any::Any
+pub fn rsiprtp::sip::Supported::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Supported::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::sip::Supported::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::sip::Supported::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::sip::Supported where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::sip::Supported::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::sip::Supported
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::sip::Supported
+impl<T> typenum::type_operators::Same for rsiprtp::sip::Supported
+pub type rsiprtp::sip::Supported::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::sip::Supported where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::sip::Supported::vzip(self) -> V
 pub struct rsiprtp::sip::Via
 pub rsiprtp::sip::Via::branch: alloc::string::String
 pub rsiprtp::sip::Via::host: alloc::string::String
@@ -15911,6 +16956,10 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::server::invite::
 pub fn rsiprtp::transaction::server::invite::Action::vzip(self) -> V
 pub enum rsiprtp::transaction::server::invite::Event
 pub rsiprtp::transaction::server::invite::Event::AckReceived
+pub rsiprtp::transaction::server::invite::Event::PrackReceived(u32)
+pub rsiprtp::transaction::server::invite::Event::PrackTimeout
+pub rsiprtp::transaction::server::invite::Event::PrackTimeout::final_sent: rsiprtp::transaction::server::invite::FinalSent
+pub rsiprtp::transaction::server::invite::Event::PrackTimeout::rseq: u32
 pub rsiprtp::transaction::server::invite::Event::Request(alloc::boxed::Box<rsiprtp::sip::SipRequest>)
 pub rsiprtp::transaction::server::invite::Event::Timeout
 pub rsiprtp::transaction::server::invite::Event::TransportError
@@ -15960,6 +17009,61 @@ impl<T> typenum::type_operators::Same for rsiprtp::transaction::server::invite::
 pub type rsiprtp::transaction::server::invite::Event::Output = T
 impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::server::invite::Event where V: ppv_lite86::types::MultiLane<T>
 pub fn rsiprtp::transaction::server::invite::Event::vzip(self) -> V
+pub enum rsiprtp::transaction::server::invite::FinalSent
+pub rsiprtp::transaction::server::invite::FinalSent::NonTwoXx
+pub rsiprtp::transaction::server::invite::FinalSent::None
+pub rsiprtp::transaction::server::invite::FinalSent::TwoXx
+impl core::clone::Clone for rsiprtp::transaction::server::invite::FinalSent
+pub fn rsiprtp::transaction::server::invite::FinalSent::clone(&self) -> rsiprtp::transaction::server::invite::FinalSent
+impl core::cmp::Eq for rsiprtp::transaction::server::invite::FinalSent
+impl core::cmp::PartialEq for rsiprtp::transaction::server::invite::FinalSent
+pub fn rsiprtp::transaction::server::invite::FinalSent::eq(&self, other: &rsiprtp::transaction::server::invite::FinalSent) -> bool
+impl core::fmt::Debug for rsiprtp::transaction::server::invite::FinalSent
+pub fn rsiprtp::transaction::server::invite::FinalSent::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::StructuralPartialEq for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::Freeze for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::Send for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::Sync for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::Unpin for rsiprtp::transaction::server::invite::FinalSent
+impl core::marker::UnsafeUnpin for rsiprtp::transaction::server::invite::FinalSent
+impl core::panic::unwind_safe::RefUnwindSafe for rsiprtp::transaction::server::invite::FinalSent
+impl core::panic::unwind_safe::UnwindSafe for rsiprtp::transaction::server::invite::FinalSent
+impl<T, U> core::convert::Into<U> for rsiprtp::transaction::server::invite::FinalSent where U: core::convert::From<T>
+pub fn rsiprtp::transaction::server::invite::FinalSent::into(self) -> U
+impl<T, U> core::convert::TryFrom<U> for rsiprtp::transaction::server::invite::FinalSent where U: core::convert::Into<T>
+pub type rsiprtp::transaction::server::invite::FinalSent::Error = core::convert::Infallible
+pub fn rsiprtp::transaction::server::invite::FinalSent::try_from(value: U) -> core::result::Result<T, <T as core::convert::TryFrom<U>>::Error>
+impl<T, U> core::convert::TryInto<U> for rsiprtp::transaction::server::invite::FinalSent where U: core::convert::TryFrom<T>
+pub type rsiprtp::transaction::server::invite::FinalSent::Error = <U as core::convert::TryFrom<T>>::Error
+pub fn rsiprtp::transaction::server::invite::FinalSent::try_into(self) -> core::result::Result<U, <U as core::convert::TryFrom<T>>::Error>
+impl<T> alloc::borrow::ToOwned for rsiprtp::transaction::server::invite::FinalSent where T: core::clone::Clone
+pub type rsiprtp::transaction::server::invite::FinalSent::Owned = T
+pub fn rsiprtp::transaction::server::invite::FinalSent::clone_into(&self, target: &mut T)
+pub fn rsiprtp::transaction::server::invite::FinalSent::to_owned(&self) -> T
+impl<T> core::any::Any for rsiprtp::transaction::server::invite::FinalSent where T: 'static + ?core::marker::Sized
+pub fn rsiprtp::transaction::server::invite::FinalSent::type_id(&self) -> core::any::TypeId
+impl<T> core::borrow::Borrow<T> for rsiprtp::transaction::server::invite::FinalSent where T: ?core::marker::Sized
+pub fn rsiprtp::transaction::server::invite::FinalSent::borrow(&self) -> &T
+impl<T> core::borrow::BorrowMut<T> for rsiprtp::transaction::server::invite::FinalSent where T: ?core::marker::Sized
+pub fn rsiprtp::transaction::server::invite::FinalSent::borrow_mut(&mut self) -> &mut T
+impl<T> core::clone::CloneToUninit for rsiprtp::transaction::server::invite::FinalSent where T: core::clone::Clone
+pub unsafe fn rsiprtp::transaction::server::invite::FinalSent::clone_to_uninit(&self, dest: *mut u8)
+impl<T> core::convert::From<T> for rsiprtp::transaction::server::invite::FinalSent
+pub fn rsiprtp::transaction::server::invite::FinalSent::from(t: T) -> T
+impl<T> downcast_rs::Downcast for rsiprtp::transaction::server::invite::FinalSent where T: core::any::Any
+pub fn rsiprtp::transaction::server::invite::FinalSent::as_any(&self) -> &(dyn core::any::Any + 'static)
+pub fn rsiprtp::transaction::server::invite::FinalSent::as_any_mut(&mut self) -> &mut (dyn core::any::Any + 'static)
+pub fn rsiprtp::transaction::server::invite::FinalSent::into_any(self: alloc::boxed::Box<T>) -> alloc::boxed::Box<dyn core::any::Any>
+pub fn rsiprtp::transaction::server::invite::FinalSent::into_any_rc(self: alloc::rc::Rc<T>) -> alloc::rc::Rc<dyn core::any::Any>
+impl<T> downcast_rs::DowncastSync for rsiprtp::transaction::server::invite::FinalSent where T: core::any::Any + core::marker::Send + core::marker::Sync
+pub fn rsiprtp::transaction::server::invite::FinalSent::into_any_arc(self: alloc::sync::Arc<T>) -> alloc::sync::Arc<(dyn core::any::Any + core::marker::Send + core::marker::Sync)>
+impl<T> tracing::instrument::Instrument for rsiprtp::transaction::server::invite::FinalSent
+impl<T> tracing::instrument::WithSubscriber for rsiprtp::transaction::server::invite::FinalSent
+impl<T> typenum::type_operators::Same for rsiprtp::transaction::server::invite::FinalSent
+pub type rsiprtp::transaction::server::invite::FinalSent::Output = T
+impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::server::invite::FinalSent where V: ppv_lite86::types::MultiLane<T>
+pub fn rsiprtp::transaction::server::invite::FinalSent::vzip(self) -> V
 pub enum rsiprtp::transaction::server::invite::State
 pub rsiprtp::transaction::server::invite::State::Completed
 pub rsiprtp::transaction::server::invite::State::Confirmed
@@ -16018,14 +17122,17 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::server::invite::
 pub fn rsiprtp::transaction::server::invite::State::vzip(self) -> V
 pub struct rsiprtp::transaction::server::invite::InviteServerTransaction
 impl rsiprtp::transaction::server::invite::InviteServerTransaction
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_event(&mut self, event: rsiprtp::transaction::server::invite::Event)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_request(&mut self, request: rsiprtp::sip::SipRequest)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_timeout(&mut self, timer: rsiprtp::transaction::timer::Timer)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_transport_error(&mut self)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::id(&self) -> &rsiprtp::transaction::client::invite::TransactionId
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::is_terminated(&self) -> bool
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::matches_invite_dialog(&self, call_id: &str, from_tag: &str) -> bool
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::new(request: rsiprtp::sip::SipRequest, reliable: bool) -> core::option::Option<Self>
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::poll_actions(&mut self) -> alloc::vec::Vec<rsiprtp::transaction::server::invite::Action>
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::request(&self) -> &rsiprtp::sip::SipRequest
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::send_provisional_reliable(&mut self, response: rsiprtp::sip::SipResponse)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::send_response(&mut self, response: rsiprtp::sip::SipResponse)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::state(&self) -> rsiprtp::transaction::server::invite::State
 impl core::fmt::Debug for rsiprtp::transaction::server::invite::InviteServerTransaction
@@ -16286,6 +17393,7 @@ pub rsiprtp::transaction::timer::Timer::H
 pub rsiprtp::transaction::timer::Timer::I
 pub rsiprtp::transaction::timer::Timer::J
 pub rsiprtp::transaction::timer::Timer::K
+pub rsiprtp::transaction::timer::Timer::N
 impl core::clone::Clone for rsiprtp::transaction::timer::Timer
 pub fn rsiprtp::transaction::timer::Timer::clone(&self) -> rsiprtp::transaction::timer::Timer
 impl core::cmp::Eq for rsiprtp::transaction::timer::Timer
@@ -16675,6 +17783,10 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::server::invite::
 pub fn rsiprtp::transaction::server::invite::Action::vzip(self) -> V
 pub enum rsiprtp::transaction::InviteServerEvent
 pub rsiprtp::transaction::InviteServerEvent::AckReceived
+pub rsiprtp::transaction::InviteServerEvent::PrackReceived(u32)
+pub rsiprtp::transaction::InviteServerEvent::PrackTimeout
+pub rsiprtp::transaction::InviteServerEvent::PrackTimeout::final_sent: rsiprtp::transaction::server::invite::FinalSent
+pub rsiprtp::transaction::InviteServerEvent::PrackTimeout::rseq: u32
 pub rsiprtp::transaction::InviteServerEvent::Request(alloc::boxed::Box<rsiprtp::sip::SipRequest>)
 pub rsiprtp::transaction::InviteServerEvent::Timeout
 pub rsiprtp::transaction::InviteServerEvent::TransportError
@@ -16839,6 +17951,9 @@ pub rsiprtp::transaction::ManagerEvent::InviteSuccess(rsiprtp::sip::SipResponse)
 pub rsiprtp::transaction::ManagerEvent::NonInviteFinalResponse(rsiprtp::sip::SipResponse)
 pub rsiprtp::transaction::ManagerEvent::NonInviteProvisional(rsiprtp::sip::SipResponse)
 pub rsiprtp::transaction::ManagerEvent::NonInviteRequest(rsiprtp::sip::SipRequest)
+pub rsiprtp::transaction::ManagerEvent::PrackTimeout
+pub rsiprtp::transaction::ManagerEvent::PrackTimeout::final_sent: rsiprtp::transaction::server::invite::FinalSent
+pub rsiprtp::transaction::ManagerEvent::PrackTimeout::rseq: u32
 pub rsiprtp::transaction::ManagerEvent::Provisional(rsiprtp::sip::SipResponse)
 pub rsiprtp::transaction::ManagerEvent::Timeout
 pub rsiprtp::transaction::ManagerEvent::TransportError
@@ -17214,6 +18329,7 @@ pub rsiprtp::transaction::Timer::H
 pub rsiprtp::transaction::Timer::I
 pub rsiprtp::transaction::Timer::J
 pub rsiprtp::transaction::Timer::K
+pub rsiprtp::transaction::Timer::N
 impl core::clone::Clone for rsiprtp::transaction::timer::Timer
 pub fn rsiprtp::transaction::timer::Timer::clone(&self) -> rsiprtp::transaction::timer::Timer
 impl core::cmp::Eq for rsiprtp::transaction::timer::Timer
@@ -17430,14 +18546,17 @@ impl<V, T> ppv_lite86::types::VZip<V> for rsiprtp::transaction::client::invite::
 pub fn rsiprtp::transaction::client::invite::InviteClientTransaction::vzip(self) -> V
 pub struct rsiprtp::transaction::InviteServerTransaction
 impl rsiprtp::transaction::server::invite::InviteServerTransaction
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_event(&mut self, event: rsiprtp::transaction::server::invite::Event)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_request(&mut self, request: rsiprtp::sip::SipRequest)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_timeout(&mut self, timer: rsiprtp::transaction::timer::Timer)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::handle_transport_error(&mut self)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::id(&self) -> &rsiprtp::transaction::client::invite::TransactionId
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::is_terminated(&self) -> bool
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::matches_invite_dialog(&self, call_id: &str, from_tag: &str) -> bool
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::new(request: rsiprtp::sip::SipRequest, reliable: bool) -> core::option::Option<Self>
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::poll_actions(&mut self) -> alloc::vec::Vec<rsiprtp::transaction::server::invite::Action>
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::request(&self) -> &rsiprtp::sip::SipRequest
+pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::send_provisional_reliable(&mut self, response: rsiprtp::sip::SipResponse)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::send_response(&mut self, response: rsiprtp::sip::SipResponse)
 pub fn rsiprtp::transaction::server::invite::InviteServerTransaction::state(&self) -> rsiprtp::transaction::server::invite::State
 impl core::fmt::Debug for rsiprtp::transaction::server::invite::InviteServerTransaction

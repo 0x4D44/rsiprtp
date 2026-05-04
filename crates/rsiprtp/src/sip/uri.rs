@@ -350,6 +350,13 @@ impl SipUri {
     pub fn builder() -> SipUriBuilder {
         SipUriBuilder::new()
     }
+
+    /// Internal: convert from rsip's URI form. Used by the wrapper layer
+    /// during M7-M9 transition; will be removed in M10 when rsip leaves
+    /// the runtime deps and the parser layer becomes authoritative.
+    pub(crate) fn from_rsip(rsip_uri: &rsip::Uri) -> Result<Self, SipError> {
+        Self::parse(&rsip_uri.to_string())
+    }
 }
 
 impl fmt::Display for SipUri {

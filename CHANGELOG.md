@@ -5,6 +5,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`rsiprtp::sip::RsipUri`** re-export of `rsip::Uri`. The wrapper layer
+  no longer leaks rsip types across its public boundary.
+- **`SipRequest::inner()`** and **`SipResponse::inner()`** — the
+  `&rsip::Request` / `&rsip::Response` escape hatches. They had zero
+  callers inside `rsiprtp` and were the last public rsip-typed
+  accessors.
+- **`Method::to_rsip()`** and the **`impl From<&rsip::Method> for Method`**
+  bridge. The internal request builder still needs an rsip method
+  while rsip remains the underlying parser (M7-M9 transition); a
+  private `method_to_rsip` helper covers that. Callers that previously
+  bridged from rsip to ours via `Method::from(&rsip_method)` now
+  round-trip via the canonical method-name string with the new
+  `Method::FromStr` impl, which is lossless for all 14 variants.
+
+### Added
+
+- **`impl FromStr for Method`** with case-insensitive parsing per RFC
+  3261 §7.1, replacing the removed rsip bridge as the canonical way to
+  reconstruct a `Method` from a string token.
+
+### Changed
+
+- **`SipRequest::uri`**, **`from_uri`**, **`to_uri`**, **`contact_uri`**,
+  **`from_tag_and_uri`**, and **`SipResponse::contact_uri`** now return
+  `SipUri` (owned) instead of `rsip::Uri` (`&rsip::Uri` for `uri`,
+  `Result<rsip::Uri>` / `Option<rsip::Uri>` for the others). The
+  `Display` impl is identical, so call sites that did `.to_string()` on
+  the old return value need no change. Test sites that asserted on
+  `rsip::Uri`'s structural fields move to `SipUri`'s accessors.
+
 ## [0.3.0] — 2026-05-02
 
 ### Removed

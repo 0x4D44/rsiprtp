@@ -212,33 +212,24 @@ Content-Length: 0\r\n\r\n";
 
 #[test]
 fn test_method_conversions_for_coverage() {
-    let prack = Method::Prack.to_rsip();
-    assert_eq!(prack.to_string(), "PRACK");
-    assert_eq!(Method::from(&prack), Method::Prack);
+    use std::str::FromStr;
 
-    let subscribe = Method::Subscribe.to_rsip();
-    assert_eq!(subscribe.to_string(), "SUBSCRIBE");
-    assert_eq!(Method::from(&subscribe), Method::Subscribe);
-
-    let notify = Method::Notify.to_rsip();
-    assert_eq!(notify.to_string(), "NOTIFY");
-    assert_eq!(Method::from(&notify), Method::Notify);
-
-    let publish = Method::Publish.to_rsip();
-    assert_eq!(publish.to_string(), "PUBLISH");
-    assert_eq!(Method::from(&publish), Method::Publish);
-
-    let refer = Method::Refer.to_rsip();
-    assert_eq!(refer.to_string(), "REFER");
-    assert_eq!(Method::from(&refer), Method::Refer);
-
-    let message = Method::Message.to_rsip();
-    assert_eq!(message.to_string(), "MESSAGE");
-    assert_eq!(Method::from(&message), Method::Message);
-
-    let update = Method::Update.to_rsip();
-    assert_eq!(update.to_string(), "UPDATE");
-    assert_eq!(Method::from(&update), Method::Update);
+    // M7 removed `Method::to_rsip()` and `From<&rsip::Method> for Method`
+    // from the public surface — they were the rsip-bridge escape hatches.
+    // The replacement is the canonical method-name round-trip via
+    // `Display` + `FromStr`, which is lossless for all 14 variants.
+    for m in [
+        Method::Prack,
+        Method::Subscribe,
+        Method::Notify,
+        Method::Publish,
+        Method::Refer,
+        Method::Message,
+        Method::Update,
+    ] {
+        let s = m.to_string();
+        assert_eq!(Method::from_str(&s).unwrap(), m);
+    }
 
     assert_eq!(format!("{}", Method::Ack), "ACK");
     assert_eq!(format!("{}", Method::Prack), "PRACK");
