@@ -9,6 +9,14 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+# `rsip` 0.4 is the differential-test oracle for the
+# `sip_message_parse_diff` target. It is a regular dependency of the
+# fuzz crate (and only of the fuzz crate) — `crates/rsiprtp` itself
+# carries `rsip` solely as a `[dev-dependencies]` entry, since M10 of
+# the parser rewrite removed it from the runtime deps. The fuzz target
+# pulls in `tests/parser_diff_oracle/mod.rs` via `#[path]`, and that
+# file references `rsip::SipMessage` directly.
+rsip = "0.4"
 
 [dependencies.rsiprtp]
 path = ".."
@@ -24,6 +32,13 @@ debug = 1
 [[bin]]
 name = "sip_message_parse"
 path = "fuzz_targets/sip_message_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sip_message_parse_diff"
+path = "fuzz_targets/sip_message_parse_diff.rs"
 test = false
 doc = false
 bench = false

@@ -165,7 +165,8 @@ pub fn parse_request_line(line: &str) -> Result<(Method, String, String), SipErr
     let method = Method::from_str(parts[0])?;
     let uri_str = parts[1];
     let version = parts[2].to_string();
-    if !version.starts_with("SIP/") {
+    // RFC 3261 §7.1: version must be exactly "SIP/2.0".
+    if version != "SIP/2.0" {
         return Err(SipError::Parse(format!(
             "invalid SIP version in request line: {version}",
         )));
@@ -197,7 +198,8 @@ pub fn parse_status_line(line: &str) -> Result<(String, StatusCode, String), Sip
         .ok_or_else(|| SipError::Parse(format!("status line missing code: {line:?}")))?;
     let reason = parts.next().unwrap_or("");
 
-    if !version.starts_with("SIP/") {
+    // RFC 3261 §7.1: version must be exactly "SIP/2.0".
+    if version != "SIP/2.0" {
         return Err(SipError::Parse(format!(
             "invalid SIP version in status line: {version}",
         )));
@@ -205,6 +207,10 @@ pub fn parse_status_line(line: &str) -> Result<(String, StatusCode, String), Sip
     let code: u16 = code_str
         .parse()
         .map_err(|_| SipError::Parse(format!("invalid status code: {code_str}")))?;
+    // RFC 3261 §7.2: status codes are in [100, 699].
+    if !(100..=699).contains(&code) {
+        return Err(SipError::Parse(format!("status code out of range: {code}")));
+    }
     Ok((
         version.to_string(),
         StatusCode::new(code),
@@ -431,5 +437,55 @@ mod tests {
         let line = "SIP/2.0 200 ".to_string() + &"x".repeat(MAX_START_LINE_LEN);
         let err = parse_status_line(&line).unwrap_err();
         assert!(matches!(err, SipError::Parse(_)));
+    }
+
+    #[test]
+    fn test_status_code_zero_rejected() {
+        // RFC 3261 §7.2: status codes are 100-699. Per M11 fuzz finding.
+        let line = "SIP/2.0 0 OK";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_status_code_too_high_rejected() {
+        let line = "SIP/2.0 700 ?";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_status_code_max_rejected() {
+        let line = "SIP/2.0 65535 ?";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_status_code_99_rejected() {
+        let line = "SIP/2.0 99 ?";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_version_sip0_rejected() {
+        // RFC 3261 §7.1: version must be exactly SIP/2.0. Per M11 fuzz finding.
+        let line = "SIP/0 200 OK";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_version_sip3_rejected() {
+        let line = "SIP/3.0 200 OK";
+        assert!(parse_status_line(line).is_err());
+    }
+
+    #[test]
+    fn test_request_version_sip0_rejected() {
+        let line = "INVITE sip:bob@x SIP/0";
+        assert!(parse_request_line(line).is_err());
+    }
+
+    #[test]
+    fn test_request_version_garbage_rejected() {
+        let line = "INVITE sip:bob@x SIP/garbage";
+        assert!(parse_request_line(line).is_err());
     }
 }

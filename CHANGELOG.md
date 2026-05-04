@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`impl FromStr for Method`** with case-insensitive parsing per RFC
   3261 §7.1, replacing the removed rsip bridge as the canonical way to
   reconstruct a `Method` from a string token.
+- **`sip_message_parse_diff` fuzz target** at `crates/rsiprtp/fuzz/`.
+  Runs the in-tree parser and rsip 0.4 against the same input bytes
+  and panics on any divergence (parse-success structural mismatch or
+  one-accepts-one-rejects). M11 overnight 8h campaign uses this; see
+  `crates/rsiprtp/fuzz/M11_LAUNCH.md` for launch instructions.
 
 ### Changed
 

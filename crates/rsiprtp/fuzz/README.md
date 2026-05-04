@@ -6,13 +6,23 @@ into the main `rsiprtp` workspace.
 
 ## Targets
 
-| target              | entry point                   | what it covers                                                                                  |
-| ------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------- |
-| `sip_message_parse` | `rsiprtp::sip::SipMessage::parse` | full SIP request/response wire parser, plus the typed-header accessors in `sip/{message,headers,uri}.rs` |
+| target                   | entry point                              | what it covers                                                                                                              |
+| ------------------------ | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `sip_message_parse`      | `rsiprtp::sip::SipMessage::parse`        | full SIP request/response wire parser, plus the typed-header accessors in `sip/{message,headers,uri}.rs`                    |
+| `sip_message_parse_diff` | `oracle::assert_equivalent` (M11)        | runs in-tree parser AND `rsip` 0.4 against the same input bytes and panics on any divergence — see [M11_LAUNCH.md](M11_LAUNCH.md) |
 
-The harness round-trips every successful parse via `to_bytes()` and walks
-the cheap accessors (`method`, `uri`, `cseq`, `via_branch`, `from_tag`,
-`to_tag`, `call_id`, `body`, `content_type`, response status helpers).
+The `sip_message_parse` harness round-trips every successful parse via
+`to_bytes()` and walks the cheap accessors (`method`, `uri`, `cseq`,
+`via_branch`, `from_tag`, `to_tag`, `call_id`, `body`, `content_type`,
+response status helpers).
+
+The `sip_message_parse_diff` harness shares its oracle with the
+integration test at `crates/rsiprtp/tests/parser_diff.rs` (Tier-1
+framing equivalence + Tier-2 typed From/To/Via/CSeq/Contact equivalence,
+all under a neutral `DiffMessage` / `DiffNameAddr` / etc.
+representation). The shared module lives at
+`crates/rsiprtp/tests/parser_diff_oracle/mod.rs` and is included via
+`#[path]` from both consumers — the test file and this fuzz target.
 
 ## Prerequisites
 
