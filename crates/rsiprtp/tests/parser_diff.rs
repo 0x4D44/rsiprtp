@@ -492,6 +492,44 @@ fn header_missing_colon_rsip_accepts_we_reject() {
     );
 }
 
+/// M11 round-trip oracle finding (round-trip #1): RFC 3261 §25.1's
+/// `Reason-Phrase` grammar excludes CTL bytes (`%x00-1F / %x7F`)
+/// other than HTAB. The parser previously accepted bare CR / NUL /
+/// other CTL bytes that survived the framing layer (i.e. when not
+/// recognised as line terminators); the serializer emitted them
+/// verbatim onto the start line; the re-parse then broke because
+/// the round-tripped bytes shifted framing. The round-trip oracle
+/// caught this on the first run.
+///
+/// Fix: `parse_status_line` now rejects the full §25.1-disallowed
+/// byte set. Companion to pin #13 — same RFC clause, different
+/// detection surface (round-trip oracle vs. differential oracle).
+///
+/// **Divergence pinned:** rsip accepts, ours rejects. The fuzz
+/// oracle's `(Ok, Err)` arm carries a
+/// `"reason phrase contains forbidden control byte"` skip to keep
+/// libfuzzer from rediscovering this every run. Update if rsip
+/// tightens its tokenizer to match the §25.1 grammar.
+#[test]
+fn status_line_reason_ctl_byte_rsip_accepts_we_reject() {
+    // Bare CR in the reason phrase. Survives `find_separator` (no
+    // `\r\n`) and `split_first_line` (no `\r\n`, no bare `\n`), so
+    // it reaches `parse_status_line`. RFC 3261 §25.1 disallows it.
+    let bytes: &[u8] = b"SIP/2.0 200 ab\rcd\r\n\r\n";
+    let rs = oracle::rsip_to_diff(bytes);
+    let ours = oracle::ours_to_diff(bytes);
+    assert!(
+        rs.is_ok(),
+        "rsip should accept (lenient §25.1): {:?}",
+        rs.err()
+    );
+    let err = ours.expect_err("ours should reject CTL byte in reason");
+    assert!(
+        err.contains("reason phrase contains forbidden control byte"),
+        "ours error should mention CTL byte in reason; got: {err}",
+    );
+}
+
 /// M11 fuzz finding #14: a NUL byte (`0x00`) inside a header NAME
 /// token in the header section. rsip 0.4's nom-based tokenizer
 /// rejects it with a `Tokenizer error`; our parser accepts per the

@@ -245,6 +245,24 @@ pub fn parse_status_line(line: &str) -> Result<(String, StatusCode, String), Sip
     if !(100..=699).contains(&code) {
         return Err(SipError::Parse(format!("status code out of range: {code}")));
     }
+    // RFC 3261 §25.1: `Reason-Phrase = *(reserved / unreserved /
+    // escaped / UTF8-NONASCII / UTF8-CONT / SP / HTAB)` — CTL bytes
+    // (`%x00-1F` and `%x7F`) are excluded except HTAB. M11 round-trip
+    // oracle finding: bare CR / NUL / other CTL bytes survive the
+    // framing layer (they are not recognised as line terminators)
+    // and are emitted verbatim by the serializer onto the start
+    // line, breaking re-parse. Reject at parse time so the parsed
+    // form's `to_bytes()` is always re-parseable.
+    if let Some(b) = reason
+        .as_bytes()
+        .iter()
+        .copied()
+        .find(|&b| b == 0x7F || (b < 0x20 && b != 0x09))
+    {
+        return Err(SipError::Parse(format!(
+            "reason phrase contains forbidden control byte 0x{b:02X}",
+        )));
+    }
     Ok((
         version.to_string(),
         StatusCode::new(code),
@@ -468,6 +486,61 @@ mod tests {
         let (_, code, reason) = result.unwrap();
         assert_eq!(code, StatusCode::OK);
         assert_eq!(reason, "");
+    }
+
+    /// RFC 3261 §25.1: the Reason-Phrase grammar excludes CTL bytes
+    /// (`%x00-1F / %x7F`) other than HTAB. M11 round-trip oracle
+    /// finding: the parser previously accepted bare CR / NUL / other
+    /// CTL bytes here, the serializer emitted them verbatim, and the
+    /// re-parse broke. Now rejected at parse time.
+    #[test]
+    fn test_parse_status_line_reason_with_bare_cr_rejects() {
+        let err = parse_status_line("SIP/2.0 200 a\rb").unwrap_err();
+        match err {
+            SipError::Parse(m) => assert!(m.contains("0x0D"), "got: {m}"),
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_status_line_reason_with_bare_lf_rejects() {
+        let err = parse_status_line("SIP/2.0 200 a\nb").unwrap_err();
+        match err {
+            SipError::Parse(m) => assert!(m.contains("0x0A"), "got: {m}"),
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_status_line_reason_with_nul_rejects() {
+        let err = parse_status_line("SIP/2.0 200 a\0b").unwrap_err();
+        match err {
+            SipError::Parse(m) => assert!(m.contains("0x00"), "got: {m}"),
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_status_line_reason_with_del_rejects() {
+        let err = parse_status_line("SIP/2.0 200 a\x7fb").unwrap_err();
+        match err {
+            SipError::Parse(m) => assert!(m.contains("0x7F"), "got: {m}"),
+            other => panic!("expected Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_status_line_reason_with_htab_accepts() {
+        // HTAB (0x09) is explicitly allowed by the §25.1 grammar.
+        let (_, _, reason) = parse_status_line("SIP/2.0 200 hi\tthere").unwrap();
+        assert_eq!(reason, "hi\tthere");
+    }
+
+    #[test]
+    fn test_parse_status_line_reason_with_high_bit_accepts() {
+        // UTF8-NONASCII / UTF8-CONT — high-bit bytes are allowed.
+        let (_, _, reason) = parse_status_line("SIP/2.0 200 café").unwrap();
+        assert_eq!(reason, "café");
     }
 
     #[test]

@@ -1170,6 +1170,14 @@ pub fn assert_equivalent(bytes: &[u8]) {
             //    error is the proxy for this rsip-side issue. Pin:
             //    `header_missing_colon_rsip_accepts_we_reject` (M11 fuzz
             //    finding #13).
+            // 5. Reason-Phrase with bare CR / NUL / other CTL bytes
+            //    (excluding HTAB): RFC 3261 §25.1 grammar excludes CTL
+            //    from `Reason-Phrase`. The M11 round-trip oracle
+            //    surfaced these because the parser was lenient, the
+            //    serializer emitted them verbatim, and the re-parse
+            //    broke. We now reject at parse time. rsip 0.4 still
+            //    accepts. Pin:
+            //    `status_line_reason_ctl_byte_rsip_accepts_we_reject`.
             //
             // None of these are genuine divergences for fuzz purposes.
             // When rsip is dropped from runtime deps at M10, this skip
@@ -1179,6 +1187,7 @@ pub fn assert_equivalent(bytes: &[u8]) {
                 || msg.contains("status code out of range")
                 || msg.contains("invalid Request-URI")
                 || msg.contains("missing ':'")
+                || msg.contains("reason phrase contains forbidden control byte")
             {
                 return;
             }
