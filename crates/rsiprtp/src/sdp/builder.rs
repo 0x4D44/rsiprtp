@@ -351,8 +351,12 @@ fn write_media(f: &mut std::fmt::Formatter<'_>, media: &MediaDescription) -> std
         writeln!(f, "c={} {} {}", conn.net_type, conn.addr_type, conn.address)?;
     }
 
-    // Bandwidth
-    for (btype, bw) in &media.bandwidth {
+    // Bandwidth — sort by key for deterministic serialization (HashMap
+    // iteration order is randomized per instance, which would flake the
+    // round-trip oracle's bytes-equality assertion for ≥2 entries).
+    let mut bw: Vec<_> = media.bandwidth.iter().collect();
+    bw.sort_by(|a, b| a.0.cmp(b.0));
+    for (btype, bw) in bw {
         writeln!(f, "b={}:{}", btype, bw)?;
     }
 
