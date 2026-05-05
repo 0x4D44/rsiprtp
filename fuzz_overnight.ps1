@@ -27,7 +27,8 @@ param(
     "sip_via_typed",
     "sip_contact",
     "sip_name_addr",
-    "sip_cseq"
+    "sip_cseq",
+    "sdp_session_roundtrip"
   )
 )
 
@@ -43,11 +44,12 @@ New-Item -ItemType Directory -Path $TriageDir -Force | Out-Null
 # `fuzz/` crate that defines that target's bin stanza, since
 # `cargo +nightly fuzz run` walks up from cwd to find it.
 $TargetCwd = @{
-  "sip_message_roundtrip" = (Join-Path $RepoRoot "crates\rsiprtp")
-  "sip_via_typed"         = $RepoRoot
-  "sip_contact"           = $RepoRoot
-  "sip_name_addr"         = $RepoRoot
-  "sip_cseq"              = $RepoRoot
+  "sip_message_roundtrip"  = $RepoRoot
+  "sip_via_typed"          = $RepoRoot
+  "sip_contact"            = $RepoRoot
+  "sip_name_addr"          = $RepoRoot
+  "sip_cseq"               = $RepoRoot
+  "sdp_session_roundtrip"  = $RepoRoot
 }
 
 # Verify every target in the rotation has a cwd mapping. Fail loud if not.
