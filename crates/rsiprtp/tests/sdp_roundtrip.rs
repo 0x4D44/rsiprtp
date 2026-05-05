@@ -59,6 +59,79 @@ fn rt_sdp_compact_whitespace() {
 }
 
 // ---------------------------------------------------------------
+// Lossy-normalization corpus — fixtures targeting individual entries
+// from the HLD's "What we already absorb on the first round-trip"
+// list. Each verifies the s2 fixed-point survives a specific
+// normalization, even when that normalization drops information.
+// ---------------------------------------------------------------
+
+#[test]
+fn rt_sdp_media_type_other() {
+    // m=image ... → MediaType::Other → emitted as `m=other ...` on s1.
+    // Fixed point holds at s2 after the literal-collapse.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/media_type_other.sdp"));
+}
+
+#[test]
+fn rt_sdp_num_ports() {
+    // m=audio 49170/2 RTP/AVP 0 — port pair. Parser stores num_ports:
+    // Some(2) but write_media drops it (HLD calls this a latent
+    // semantic bug). Fixed point still holds at s2.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/num_ports.sdp"));
+}
+
+#[test]
+fn rt_sdp_lossy_timing() {
+    // t=abc def — non-numeric timing values lossy-parse to (0, 0)
+    // via parse().unwrap_or(0); s1 emits `t=0 0`. Fixed at s2.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/lossy_timing.sdp"));
+}
+
+#[test]
+fn rt_sdp_multi_c_per_media() {
+    // Two c= lines on a single m=audio block: parser overwrites
+    // (last-wins via `m.connection = Some(...)`); the first c= is
+    // silently dropped. Fixed point holds at s2.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/multi_c_per_media.sdp"));
+}
+
+#[test]
+fn rt_sdp_misordered_after_m() {
+    // s=, v=, o= appearing AFTER an m= line are dropped by the
+    // current_media routing branch (only c/b/a are accepted there;
+    // anything else falls through `_ => {}` and is consumed by the
+    // `continue`). Fixed point holds at s2.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/misordered_after_m.sdp"));
+}
+
+#[test]
+fn rt_sdp_session_b_dropped() {
+    // Session-level b=AS:1024 / b=CT:2048 — parser has no `'b'` arm
+    // in the session-level match (parser.rs:89-98), so both are
+    // silently dropped on s1. Fixed point holds at s2.
+    assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/session_b_dropped.sdp"));
+}
+
+#[test]
+fn rt_sdp_bandwidth_sort_is_deterministic() {
+    // Determinism regression for the builder.rs sort fix: HashMap
+    // iteration order is randomized per-instance via RandomState, so
+    // a serializer that iterates `media.bandwidth` directly will
+    // (with non-zero probability per parse) emit b= lines in a
+    // different order than the previous serialization. The s2/s3
+    // bytes-equality assertion catches that.
+    //
+    // Five bandwidth keys per m-line (TIAS, AS, CT, RR, RS) make
+    // non-sorted iteration overwhelmingly likely on at least one of
+    // the 20 fresh-HashMap iterations below.
+    for _ in 0..20 {
+        assert_roundtrip_fixed_point(include_bytes!(
+            "fixtures/sdp/bandwidth_collision.sdp"
+        ));
+    }
+}
+
+// ---------------------------------------------------------------
 // Sanity checks on the oracle itself
 // ---------------------------------------------------------------
 

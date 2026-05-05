@@ -160,16 +160,28 @@ fn rt_oracle_skips_parse_failures() {
 #[test]
 fn rt_oracle_holds_on_canonical_input() {
     // Already-canonical message: no normalization on first round-trip,
-    // so the fixed point holds immediately.
+    // so the fixed point holds immediately at m1. The `\` line
+    // continuations consume the indentation so the raw bytes start at
+    // column 0 — otherwise the parser's per-line trim would strip the
+    // leading whitespace and normalize on m1→m2, defeating the test's
+    // claim that the input is canonical.
     let canonical: &[u8] = b"INVITE sip:bob@example.com SIP/2.0\r\n\
-        Via: SIP/2.0/UDP pc33.example.com;branch=z9hG4bK776asdhds\r\n\
-        From: Alice <sip:alice@example.com>;tag=1928301774\r\n\
-        To: Bob <sip:bob@example.com>\r\n\
-        Call-ID: a84b4c76e66710@pc33.example.com\r\n\
-        CSeq: 314159 INVITE\r\n\
-        Max-Forwards: 70\r\n\
-        Content-Length: 0\r\n\
-        \r\n";
+Via: SIP/2.0/UDP pc33.example.com;branch=z9hG4bK776asdhds\r\n\
+From: Alice <sip:alice@example.com>;tag=1928301774\r\n\
+To: Bob <sip:bob@example.com>\r\n\
+Call-ID: a84b4c76e66710@pc33.example.com\r\n\
+CSeq: 314159 INVITE\r\n\
+Max-Forwards: 70\r\n\
+Content-Length: 0\r\n\
+\r\n";
+    // Sanity: input is a true fixed point of parse∘serialize (m1 == input).
+    let m1 = rsiprtp::sip::parser::Message::parse(canonical)
+        .expect("canonical fixture must parse");
+    assert_eq!(
+        m1.to_bytes().as_slice(),
+        canonical,
+        "fixture is not actually canonical — first round-trip mutates it",
+    );
     assert_roundtrip_fixed_point(canonical);
 }
 
