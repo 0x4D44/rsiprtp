@@ -1,0 +1,4 @@
+v=0
+o=- 1 1 IN IP4 1.2.3.4 extra1 extra2
+s=Lossy Origin Tail
+t=0 0

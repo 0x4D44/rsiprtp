@@ -113,6 +113,101 @@ fn rt_sdp_session_b_dropped() {
 }
 
 #[test]
+fn rt_sdp_missing_session_name() {
+    // Omitted s= line. Parser defaults session_name to "-"
+    // (parser.rs:109). s1 emits `s=-`. Fixed point holds at s2.
+    // Sanity-asserts the first parse succeeds because the oracle
+    // silently no-ops on parse failure.
+    let bytes = include_bytes!("fixtures/sdp/missing_session_name.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    assert_eq!(parsed.session_name, "-");
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_version_normalize() {
+    // `v=00` parses as u8 → 0; serializer emits `v=0`. First round-trip
+    // collapses the leading zero; fixed point holds at s2.
+    let bytes = include_bytes!("fixtures/sdp/version_normalize.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    assert_eq!(parsed.version, 0);
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_lossy_bandwidth_value() {
+    // `b=AS:abc` at media level — non-numeric bandwidth value falls
+    // back to 0 via `unwrap_or(0)` (parser.rs:69). s1 emits `b=AS:0`.
+    // Fixed point holds at s2. (Session-level b= would be dropped
+    // outright; we use a media-block b= to exercise the lossy parse.)
+    let bytes = include_bytes!("fixtures/sdp/lossy_bandwidth_value.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    let audio = parsed.audio_media().expect("audio media");
+    assert_eq!(audio.bandwidth.get("AS"), Some(&0));
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_lossy_origin_tail() {
+    // o= line with >6 whitespace-separated fields. Parser indexes
+    // parts[0..6] and discards everything after the 6th token
+    // (parser.rs:149-163). s1 emits a 6-field origin. Fixed at s2.
+    let bytes = include_bytes!("fixtures/sdp/lossy_origin_tail.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    assert_eq!(parsed.origin.unicast_address, "1.2.3.4");
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_duplicate_b_same_key() {
+    // Two `b=AS:` lines under one m= block. Parser uses HashMap insert,
+    // so the second value overwrites the first (last-wins). Distinct
+    // from `bandwidth_collision.sdp` which exercises multi-key sort
+    // determinism. s1 emits a single `b=AS:128`. Fixed at s2.
+    let bytes = include_bytes!("fixtures/sdp/duplicate_b_same_key.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    let audio = parsed.audio_media().expect("audio media");
+    assert_eq!(audio.bandwidth.len(), 1);
+    assert_eq!(audio.bandwidth.get("AS"), Some(&128));
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_trim_corners() {
+    // Per-line trim normalization: trailing spaces on `v=` and `o=`,
+    // a trailing tab on `t=`, and a tab-prefixed `c=` line. Parser
+    // calls `.trim()` on each line (parser.rs:45) before further
+    // parsing, so all whitespace corners normalize on s1. Fixed at s2.
+    let bytes = include_bytes!("fixtures/sdp/trim_corners.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    assert_eq!(parsed.version, 0);
+    assert!(parsed.connection.is_some(), "tab-indented c= must parse");
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
+fn rt_sdp_unknown_types_media_level() {
+    // Media-block i=, r=, z=, k= lines all hit the `_ => {}` arm at
+    // parser.rs:73 and are dropped on s1. Session-level r= and z= are
+    // similarly dropped at the session-level match (parser.rs:97).
+    // Fixed point holds at s2 once the dropped types are gone.
+    let bytes = include_bytes!("fixtures/sdp/unknown_types_media_level.sdp");
+    let parsed = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(bytes).unwrap())
+        .expect("fixture must parse");
+    let audio = parsed.audio_media().expect("audio media");
+    // Media-level i= is dropped (not retained on MediaDescription),
+    // and there are no parsed attributes on this media block.
+    assert!(audio.attributes.is_empty());
+    assert_roundtrip_fixed_point(bytes);
+}
+
+#[test]
 fn rt_sdp_bandwidth_sort_is_deterministic() {
     // Determinism regression for the builder.rs sort fix: HashMap
     // iteration order is randomized per-instance via RandomState, so
