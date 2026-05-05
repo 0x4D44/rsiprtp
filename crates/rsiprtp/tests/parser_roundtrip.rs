@@ -46,7 +46,9 @@ fn rt_handcrafted_register_with_contact() {
 
 #[test]
 fn rt_handcrafted_invite_compact_via() {
-    assert_roundtrip_fixed_point(include_bytes!("fixtures/handcrafted/invite_compact_via.sip"));
+    assert_roundtrip_fixed_point(include_bytes!(
+        "fixtures/handcrafted/invite_compact_via.sip"
+    ));
 }
 
 /// Folded-header fixture: rsip 0.4 rejects RFC 3261 §7.3.1 line
@@ -175,8 +177,7 @@ Max-Forwards: 70\r\n\
 Content-Length: 0\r\n\
 \r\n";
     // Sanity: input is a true fixed point of parse∘serialize (m1 == input).
-    let m1 = rsiprtp::sip::parser::Message::parse(canonical)
-        .expect("canonical fixture must parse");
+    let m1 = rsiprtp::sip::parser::Message::parse(canonical).expect("canonical fixture must parse");
     assert_eq!(
         m1.to_bytes().as_slice(),
         canonical,

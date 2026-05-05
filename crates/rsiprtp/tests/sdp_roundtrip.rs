@@ -125,9 +125,7 @@ fn rt_sdp_bandwidth_sort_is_deterministic() {
     // non-sorted iteration overwhelmingly likely on at least one of
     // the 20 fresh-HashMap iterations below.
     for _ in 0..20 {
-        assert_roundtrip_fixed_point(include_bytes!(
-            "fixtures/sdp/bandwidth_collision.sdp"
-        ));
+        assert_roundtrip_fixed_point(include_bytes!("fixtures/sdp/bandwidth_collision.sdp"));
     }
 }
 
@@ -161,10 +159,8 @@ m=audio 49170 RTP/AVP 0\n\
 a=rtpmap:0 PCMU/8000\n\
 a=sendrecv\n";
     // Sanity: input is a true fixed point of parse∘serialize (s1 == input).
-    let s1 = rsiprtp::sdp::SessionDescription::parse(
-        std::str::from_utf8(canonical).unwrap(),
-    )
-    .expect("canonical fixture must parse");
+    let s1 = rsiprtp::sdp::SessionDescription::parse(std::str::from_utf8(canonical).unwrap())
+        .expect("canonical fixture must parse");
     assert_eq!(
         s1.to_string().as_bytes(),
         canonical,
