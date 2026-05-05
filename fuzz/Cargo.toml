@@ -206,3 +206,10 @@ path = "fuzz_targets/sip_cseq.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "sdp_session_roundtrip"
+path = "fuzz_targets/sdp_session_roundtrip.rs"
+test = false
+doc = false
+bench = false
