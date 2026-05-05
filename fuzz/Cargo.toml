@@ -213,3 +213,10 @@ path = "fuzz_targets/sdp_session_roundtrip.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "sip_message_roundtrip"
+path = "fuzz_targets/sip_message_roundtrip.rs"
+test = false
+doc = false
+bench = false
