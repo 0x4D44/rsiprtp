@@ -35,7 +35,9 @@ fn list_target_names(dir: &Path) -> Vec<String> {
 
 fn collect_wrappers(root: &Path) -> Vec<PathBuf> {
     let mut out = vec![];
-    // Repo-root wrappers: any *.ps1 with "fuzz" in the filename.
+    // Repo-root wrappers: any *.ps1 with "fuzz" in the filename. After the
+    // followup-C consolidation (single root fuzz/ crate), this is the only
+    // location where wrapper scripts live.
     if let Ok(rd) = fs::read_dir(root) {
         for e in rd.flatten() {
             let p = e.path();
@@ -44,16 +46,6 @@ fn collect_wrappers(root: &Path) -> Vec<PathBuf> {
                     .and_then(|s| s.to_str())
                     .is_some_and(|n| n.contains("fuzz"))
             {
-                out.push(p);
-            }
-        }
-    }
-    // crates/rsiprtp/fuzz/*.ps1 — the supervisor + launchers all live here.
-    let supervisor_dir = root.join("crates").join("rsiprtp").join("fuzz");
-    if let Ok(rd) = fs::read_dir(&supervisor_dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.extension().and_then(|s| s.to_str()) == Some("ps1") {
                 out.push(p);
             }
         }
@@ -93,23 +85,16 @@ fn every_fuzz_target_is_scheduled_in_some_wrapper() {
 
     let mut targets: BTreeSet<String> = BTreeSet::new();
     targets.extend(list_target_names(&root.join("fuzz").join("fuzz_targets")));
-    targets.extend(list_target_names(
-        &root
-            .join("crates")
-            .join("rsiprtp")
-            .join("fuzz")
-            .join("fuzz_targets"),
-    ));
     assert!(
         !targets.is_empty(),
-        "no fuzz targets found under {}/fuzz/fuzz_targets or crates/rsiprtp/fuzz/fuzz_targets",
+        "no fuzz targets found under {}/fuzz/fuzz_targets",
         root.display()
     );
 
     let wrappers = collect_wrappers(&root);
     assert!(
         !wrappers.is_empty(),
-        "no fuzz wrapper .ps1 files found at {} or crates/rsiprtp/fuzz",
+        "no fuzz wrapper .ps1 files found at {}",
         root.display()
     );
 
