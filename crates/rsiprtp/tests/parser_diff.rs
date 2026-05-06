@@ -149,6 +149,46 @@ fn diff_rfc4475_wsinv_rsip_rejects() {
     );
 }
 
+/// §3.1.1.2 "Wide Range of Valid Characters": exotic but
+/// token-grammar-legal characters in the method, Request-URI,
+/// header field names, header field values, and parameters. The
+/// method on this fixture is `` `!interesting-Method0123456789_*+`.%indeed'~` ``
+/// — every byte legal under RFC 3261 §25.1 `token`, but not one of
+/// the RFC 3261 §7.1 named methods.
+///
+/// **Both reject — for different reasons:**
+/// * **Ours**: RFC 3261 §7.1 lists a closed set of method names
+///   (REGISTER, INVITE, ACK, BYE, CANCEL, OPTIONS, plus extension
+///   methods registered later); our `Method` enum mirrors that
+///   closed set, so any token the enum doesn't know is rejected
+///   with `Parse error: unknown method`. Per RFC 3261 §7.1 method
+///   tokens MUST be tokens (which this fixture satisfies) but a
+///   parser is entitled to reject method names it does not
+///   understand — that's the "501 Not Implemented" path described
+///   in RFC 4475 §3.1.1.2's prose.
+/// * **rsip 0.4**: rejects at tokenize-version time
+///   (`failed to tokenize version`) because its method tokenizer
+///   doesn't accept the full §25.1 `token` character set (`!`,
+///   `` ` ``, `'`, `~`, `*`, `+`, etc.). Same family as wsinv —
+///   rsip's tokenizer is narrower than the RFC grammar.
+///
+/// The two rejections are equally valid responses to this fixture:
+/// rsip's is a tokenize-time spec deficiency, ours is a deliberate
+/// closed-set-of-known-methods policy. The honest assertion is
+/// "both reject"; the asymmetry is in *why*, not in the answer.
+/// If our `Method` enum ever opens up to accept arbitrary tokens
+/// this test will need to flip into an asymmetric pin.
+///
+/// Note: the layer distinction (rsip = tokenizer; ours = semantic
+/// policy) is documentary; the test body asserts only that both
+/// parsers reject, consistent with the rest of this file's pin-test
+/// style.
+#[test]
+fn diff_rfc4475_intmeth_both_reject() {
+    let bytes = include_bytes!("fixtures/rfc4475/intmeth.sip");
+    assert_both_reject("rfc4475_intmeth", bytes);
+}
+
 /// §3.1.2.2 "Valid use of the % escaping": escaped chars in user/
 /// contact URIs.
 ///
@@ -348,6 +388,28 @@ fn diff_rfc4475_transports_rsip_rejects_unknown_transport() {
 fn diff_rfc4475_unreason() {
     // §3.1.2.10 "Unusual REGISTER request with binding".
     let bytes = include_bytes!("fixtures/rfc4475/unreason.sip");
+    assert_equivalent(bytes);
+}
+
+/// §3.1.1.13 "Empty Reason Phrase": a `SIP/2.0 100 \r\n` status
+/// line where the Reason-Phrase is empty (just the trailing SP
+/// after the status code, then CRLF). RFC 3261 §7.2 BNF
+/// `Status-Line = SIP-Version SP Status-Code SP Reason-Phrase
+/// CRLF` and §25.1 `Reason-Phrase = *(reserved / unreserved / ...)`
+/// — the `*` makes the reason phrase legitimately empty. RFC 4475
+/// §3.1.1.13 prose: *"A parser must accept this message."*
+///
+/// Companion to the existing `status_line_missing_sp_after_code_both_reject`
+/// pin (which covers `SIP/2.0 202\r\n` — no SP, no reason). That
+/// shape is invalid per the BNF; this one is valid (the SP is
+/// present, the reason is just zero-length).
+///
+/// Both parsers accept this — `assert_equivalent` covers it. The
+/// fixture's value is the explicit RFC 4475 §3.1.1.13 conformance
+/// claim, byte-for-byte from §A.1.
+#[test]
+fn diff_rfc4475_noreason() {
+    let bytes = include_bytes!("fixtures/rfc4475/noreason.sip");
     assert_equivalent(bytes);
 }
 
