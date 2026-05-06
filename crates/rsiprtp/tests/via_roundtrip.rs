@@ -120,16 +120,12 @@ fn rt_via_rport_with_value() {
 
 #[test]
 fn rt_via_maddr_ttl() {
-    assert_via_roundtrip_fixed_point(
-        b"SIP/2.0/UDP host;branch=z9hG4bK1;maddr=224.0.1.1;ttl=16",
-    );
+    assert_via_roundtrip_fixed_point(b"SIP/2.0/UDP host;branch=z9hG4bK1;maddr=224.0.1.1;ttl=16");
 }
 
 #[test]
 fn rt_via_received() {
-    assert_via_roundtrip_fixed_point(
-        b"SIP/2.0/UDP host;branch=z9hG4bK1;received=192.0.2.1",
-    );
+    assert_via_roundtrip_fixed_point(b"SIP/2.0/UDP host;branch=z9hG4bK1;received=192.0.2.1");
 }
 
 #[test]
@@ -156,9 +152,7 @@ fn rt_via_quoted_param_value_with_space() {
 #[test]
 fn rt_via_quoted_param_with_semicolon_inside() {
     // `;` inside quoted string must not split the param.
-    assert_via_roundtrip_fixed_point(
-        b"SIP/2.0/UDP host;branch=z9hG4bK1;custom=\"a;b\"",
-    );
+    assert_via_roundtrip_fixed_point(b"SIP/2.0/UDP host;branch=z9hG4bK1;custom=\"a;b\"");
 }
 
 // ---------------------------------------------------------------
@@ -181,9 +175,7 @@ fn rt_via_leading_trailing_whitespace() {
 #[test]
 fn rt_via_inter_param_whitespace() {
     // parse_params trims each chunk (`via.rs:282`).
-    assert_via_roundtrip_fixed_point(
-        b"SIP/2.0/UDP host ; branch=z9hG4bK1 ; rport",
-    );
+    assert_via_roundtrip_fixed_point(b"SIP/2.0/UDP host ; branch=z9hG4bK1 ; rport");
 }
 
 #[test]
@@ -204,7 +196,5 @@ fn rt_via_realistic_ua() {
 
 #[test]
 fn rt_via_ws_transport() {
-    assert_via_roundtrip_fixed_point(
-        b"SIP/2.0/WS df7jal23ls0d.invalid;branch=z9hG4bK-7531",
-    );
+    assert_via_roundtrip_fixed_point(b"SIP/2.0/WS df7jal23ls0d.invalid;branch=z9hG4bK-7531");
 }
