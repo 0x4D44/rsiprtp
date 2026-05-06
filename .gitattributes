@@ -1,0 +1,3 @@
+crates/rsiprtp/tests/fixtures/rfc4475/*.sip   -text
+crates/rsiprtp/tests/fixtures/rfc4475_invalid/*.sip   -text
+crates/rsiprtp/tests/fixtures/handcrafted/*.sip   -text

@@ -6,7 +6,7 @@ from   : "J Rosenberg \\\""       <sip:jdrosen@example.com>
   tag = 98asjd8
 MaX-fOrWaRdS: 0068
 Call-ID: wsinv.ndaksdj@192.0.2.1
-Content-Length   : 0
+Content-Length   : 150
 cseq: 0009
   INVITE
 Via  : SIP  /   2.0
@@ -27,3 +27,11 @@ m:"Quoted string \"\"" <sip:jdrosen@example.com> ; newparam =
       newvalue ;
   secondparam ; q = 0.33
 
+v=0
+o=mhandley 29739 7272939 IN IP4 192.0.2.3
+s=-
+c=IN IP4 192.0.2.4
+t=0 0
+m=audio 49217 RTP/AVP 0 12
+m=video 3227 RTP/AVP 31
+a=rtpmap:31 LPC
