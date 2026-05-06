@@ -326,7 +326,10 @@ fn invite_allocation_budgets() {
     for case in BUDGET_CASES {
         let stats = count_parse_allocs(case.bytes);
         let (budget, constant) = if under_cov {
-            (case.budget_under_coverage, case.constant_name_under_coverage)
+            (
+                case.budget_under_coverage,
+                case.constant_name_under_coverage,
+            )
         } else {
             (case.budget, case.constant_name)
         };
@@ -342,12 +345,7 @@ fn invite_allocation_budgets() {
                 "  {} ({}): SipMessage::parse allocated {} times; budget is {}. \
                  If this regression is intentional, refresh the baseline via \
                  `{}` and update {}.",
-                case.name,
-                case.fixture_path,
-                stats.allocations,
-                budget,
-                refresh_cmd,
-                constant,
+                case.name, case.fixture_path, stats.allocations, budget, refresh_cmd, constant,
             ));
         }
     }
