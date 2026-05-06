@@ -94,6 +94,10 @@ rsip = "0.4"
 # emit structurally-valid SIP/SDP inputs and feed them to the existing
 # round-trip oracles, complementing the libfuzzer corpus under `fuzz/`.
 proptest = "1"
+# Allocation accounting — drives `tests/allocations_sip_parse.rs`,
+# which locks in per-INVITE allocation budgets so the in-tree parser
+# rewrite's perf gains can't silently regress.
+stats_alloc = "0.1"
 
 [[example]]
 name = "basic_call"
