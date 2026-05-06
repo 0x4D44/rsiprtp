@@ -102,10 +102,13 @@ New-Item -ItemType Directory -Path $TriageDir -Force | Out-Null
 # `cargo +nightly fuzz run` walks up from cwd to find it.
 #
 # Auto-discovered from the filesystem: targets in <repo>/fuzz/fuzz_targets/
-# run with cwd = repo root; targets in <repo>/crates/rsiprtp/fuzz/fuzz_targets/
-# run with cwd = crates/rsiprtp. Adding a new target file therefore needs
+# run with cwd = repo root. Adding a new target file therefore needs
 # no edit here — it just needs a profile slot above (and the inventory test
 # will tell you if you forget).
+#
+# (Pre-followup-C, a second tree under <repo>/crates/rsiprtp/fuzz/fuzz_targets/
+# also held targets; that nested crate is gone. The discovery loop below
+# is intentionally a no-op when its path is missing.)
 $TargetCwd = @{}
 $TopFuzzDir   = Join-Path $RepoRoot "fuzz\fuzz_targets"
 $CrateFuzzDir = Join-Path $RepoRoot "crates\rsiprtp\fuzz\fuzz_targets"
@@ -124,7 +127,7 @@ if (Test-Path $CrateFuzzDir) {
 # Verify every target in the rotation has a cwd mapping. Fail loud if not.
 foreach ($t in $Targets) {
   if (-not $TargetCwd.ContainsKey($t)) {
-    throw "No fuzz target file found for '$t' under fuzz/fuzz_targets/ or crates/rsiprtp/fuzz/fuzz_targets/."
+    throw "No fuzz target file found for '$t' under fuzz/fuzz_targets/."
   }
 }
 

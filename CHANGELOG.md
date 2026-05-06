@@ -54,11 +54,11 @@ on any divergence.
   regression-firing tests; see
   `crates/rsiprtp/tests/fixtures/rfc4475/README.md` for the running
   list.
-- **`sip_message_parse_diff` fuzz target** at `crates/rsiprtp/fuzz/`.
+- **`sip_message_parse_diff` fuzz target** in the root `fuzz/` crate.
   Runs the in-tree parser and rsip 0.4 against the same input bytes
   and panics on any divergence (parse-success structural mismatch or
   one-accepts-one-rejects). Used for the M11 overnight 8h campaign;
-  see `crates/rsiprtp/fuzz/M11_LAUNCH.md` for launch instructions.
+  see `fuzz/README.md` for launch instructions.
 
 ### Changed
 
