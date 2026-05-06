@@ -77,12 +77,14 @@
 //!
 //! For each fixture, apply
 //! `max(measured + 4 + spread, ceil(measured * 1.15))` to set the
-//! budget. On Windows MSVC + cargo-llvm-cov 0.8.5 today, the two
-//! budgets coincide because the coverage runtime emits static
-//! counters that don't allocate; on a future toolchain the
-//! under-coverage value may shift (HLD §6 R1). If the under-coverage
-//! ratio diverges sharply (more than ~5x the no-coverage value),
-//! suspect a coverage-tool change rather than a parser regression.
+//! budget. The expected ratio between the two budgets is
+//! toolchain-dependent: Windows MSVC + cargo-llvm-cov 0.8.5 yields
+//! ~1x today (the coverage runtime emits static counters that don't
+//! allocate). The HLD anticipated up to ~5x on toolchains where the
+//! profile runtime allocates per-counter. A future toolchain that
+//! flips the ratio is exactly the design's reason for existing;
+//! a sudden jump beyond the prevailing baseline (e.g. 10x+) is
+//! more likely tool-version drift than parser drift (HLD §6 R1).
 //!
 //! A maintainer who refreshes only one of the two will get a sharp
 //! failure on the next test bar run — the failure message names the
