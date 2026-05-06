@@ -149,12 +149,39 @@ fn diff_rfc4475_wsinv_rsip_rejects() {
     );
 }
 
+/// §3.1.2.2 "Valid use of the % escaping": escaped chars in user/
+/// contact URIs.
+///
+/// **Divergence pinned (byte-perfect §A.1):** the canonical RFC 4475
+/// `esc01` bytes line-fold the `Contact:` header — the URI sits on
+/// the next line indented with two spaces, per RFC 3261 §7.3.1. rsip
+/// 0.4's tokenizer rejects the SP-led continuation as a malformed
+/// header line (the same wsinv/folding deficiency pinned by
+/// `diff_rfc4475_wsinv_rsip_rejects`). Our parser correctly accepts
+/// and merges the fold (see `framing::parse_header_block`'s folding
+/// path).
+///
+/// The pre-Stage-A representative fixture had no folding so this was
+/// a plain `assert_equivalent`; the byte-perfect §A.1 form exposes
+/// the same rsip line-folding deficiency we already pin on wsinv.
+/// When rsip is dropped at M10 this test should be retargeted to a
+/// direct on-our-parser assertion.
 #[test]
-fn diff_rfc4475_esc01() {
-    // §3.1.2.2 "Valid use of the % escaping": escaped chars in user/
-    // contact URIs.
-    let bytes = include_bytes!("fixtures/rfc4475/esc01.sip");
-    assert_equivalent(bytes);
+fn diff_rfc4475_esc01_rsip_rejects_folding() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/esc01.sip");
+    let rs = rsip::SipMessage::try_from(bytes);
+    assert!(
+        rs.is_err(),
+        "rsip 0.4 rejects RFC 4475 §3.1.2.2 esc01 (canonical bytes \
+         line-fold the Contact header); got Ok({rs:?}) — update this \
+         test if rsip changed",
+    );
+    let ours = OurMessage::parse(bytes);
+    assert!(
+        ours.is_ok(),
+        "our parser must accept RFC 4475 §3.1.2.2 esc01; got \
+         Err({ours:?})",
+    );
 }
 
 #[test]
@@ -179,13 +206,40 @@ fn diff_rfc4475_lwsdisp() {
     assert_equivalent(bytes);
 }
 
+/// §3.1.2.6 "Long values in header fields": exercises size-limit
+/// path. Our defense-in-depth caps at 8192 per value; this fixture
+/// sits well below that.
+///
+/// **Divergence pinned (byte-perfect §A.1):** the canonical RFC 4475
+/// `longreq` bytes carry a Via-stack that includes entries with
+/// interior whitespace around HCOLON (`V :  SIP/2.0/TCP …`,
+/// `V  : SIP/2.0/TCP …`, `Via : …`, `Via  : …`) — RFC 3261 §25.1
+/// `HCOLON = *( SP / HTAB ) ":" SWS` mandates acceptance of all of
+/// these forms. rsip 0.4's tokenizer rejects them with the same
+/// `failed to tokenize version` error pinned on wsinv (see
+/// `diff_rfc4475_wsinv_rsip_rejects`). Our parser correctly accepts.
+///
+/// The pre-Stage-A representative fixture had a simpler Via-stack so
+/// this was a plain `assert_equivalent`; the byte-perfect §A.1 form
+/// exposes the same rsip HCOLON-whitespace deficiency we already pin
+/// on wsinv. When rsip is dropped at M10 this test should be
+/// retargeted to a direct on-our-parser assertion.
 #[test]
-fn diff_rfc4475_longreq() {
-    // §3.1.2.6 "Long values in header fields": exercises size-limit
-    // path. Our defense-in-depth caps at 8192 per value; this fixture
-    // sits well below that.
-    let bytes = include_bytes!("fixtures/rfc4475/longreq.sip");
-    assert_equivalent(bytes);
+fn diff_rfc4475_longreq_rsip_rejects_hcolon_whitespace() {
+    let bytes: &[u8] = include_bytes!("fixtures/rfc4475/longreq.sip");
+    let rs = rsip::SipMessage::try_from(bytes);
+    assert!(
+        rs.is_err(),
+        "rsip 0.4 rejects RFC 4475 §3.1.2.6 longreq (canonical bytes \
+         carry HCOLON-with-interior-whitespace forms in the Via \
+         stack); got Ok({rs:?}) — update this test if rsip changed",
+    );
+    let ours = OurMessage::parse(bytes);
+    assert!(
+        ours.is_ok(),
+        "our parser must accept RFC 4475 §3.1.2.6 longreq; got \
+         Err({ours:?})",
+    );
 }
 
 /// §3.1.2.7 "Extra trailing octets in a UDP datagram": the first
