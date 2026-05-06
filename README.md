@@ -214,10 +214,12 @@ notes.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
-for the development workflow, lint/test expectations, and PR guidelines,
-and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
-Security issues should follow [SECURITY.md](SECURITY.md).
+`rsiprtp` is a personal project — shared in the hope it's a useful base
+to fork, vendor, or learn from. Issues and pull requests are welcome,
+but I make no commitment to triage, review, or merge them; if you need
+support, please fork. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+maintenance posture and PR conventions, and [SECURITY.md](SECURITY.md)
+for vulnerability reports.
 
 ## License
 
