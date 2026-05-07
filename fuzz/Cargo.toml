@@ -56,7 +56,7 @@ doc = false
 bench = false
 
 [[bin]]
-name = "rtcp_pli"
+name = "rtcp_sdes"
 path = "fuzz_targets/rtcp_sdes.rs"
 test = false
 doc = false
