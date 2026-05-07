@@ -9,7 +9,7 @@ instrumented builds don't propagate into the main `rsiprtp` workspace.
 
 ## Targets
 
-29 targets in total — see `[[bin]]` stanzas in `Cargo.toml`. The fuzz
+31 targets in total — see `[[bin]]` stanzas in `Cargo.toml`. The fuzz
 target inventory test (`crates/rsiprtp/tests/fuzz_inventory.rs`)
 asserts every target file is referenced by at least one wrapper
 profile in `fuzz_overnight.ps1`.
