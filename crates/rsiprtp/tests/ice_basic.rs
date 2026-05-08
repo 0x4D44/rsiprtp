@@ -30,8 +30,13 @@ use rsiprtp::session::{
 const SHORT: Duration = Duration::from_millis(500);
 
 /// Hard upper bound on the whole `run_checks` join — if both sides
-/// haven't reported within this, something is genuinely wrong.
-const RUN_CHECKS_BUDGET: Duration = Duration::from_secs(2);
+/// haven't reported within this, something is genuinely wrong. The
+/// happy-path completes sub-millisecond on dev loopback; the
+/// bad-credentials path involves retry timeouts on the rejecting
+/// side and is slower under contention. 5s is generous enough for
+/// GitHub Actions Ubuntu/macOS runners (which the 2s budget didn't
+/// always make) while still fast-failing on a real wedge.
+const RUN_CHECKS_BUDGET: Duration = Duration::from_secs(5);
 
 /// Hard upper bound on a probe `recv_from`. Loopback round-trips are
 /// sub-millisecond in practice; the headroom here is purely so a
