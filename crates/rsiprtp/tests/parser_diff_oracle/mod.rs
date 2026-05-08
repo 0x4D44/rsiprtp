@@ -1303,9 +1303,10 @@ pub fn assert_equivalent(bytes: &[u8]) {
             // bare LF anywhere in framing (or rsip starts accepting
             // bare LF as a line break), retire this skip with the
             // pin.
-            let has_bare_lf = bytes.iter().enumerate().any(|(i, &b)| {
-                b == 0x0A && (i == 0 || bytes[i - 1] != 0x0D)
-            });
+            let has_bare_lf = bytes
+                .iter()
+                .enumerate()
+                .any(|(i, &b)| b == 0x0A && (i == 0 || bytes[i - 1] != 0x0D));
             if has_bare_lf && rsip_err.contains("Tokenizer error") {
                 return;
             }

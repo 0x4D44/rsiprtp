@@ -188,11 +188,13 @@ impl VoicemailServer {
                 call.state = VoicemailState::PlayingGreeting;
                 call.record_start = None;
             }
-            '1' => {
+            '1' if matches!(
+                call.state,
+                VoicemailState::Recording | VoicemailState::Ending,
+            ) =>
+            {
                 // Play back recording
-                if call.state == VoicemailState::Recording || call.state == VoicemailState::Ending {
-                    call.state = VoicemailState::Playback;
-                }
+                call.state = VoicemailState::Playback;
             }
             _ => {}
         }

@@ -138,18 +138,18 @@ async fn outbound_call_choreography(
             tokio::select! {
                 msg = recv_msg() => {
                     match msg? {
-                        SipMessage::Response(resp) if resp.is_provisional() => {
+                        SipMessage::Response(resp)
+                            if resp.is_provisional()
+                                && resp
+                                    .require()
+                                    .map(|r| r.0.iter().any(|t| t == "100rel"))
+                                    .unwrap_or(false) =>
+                        {
                             // 18x with Require: 100rel + RSeq -> PRACK.
-                            if resp
-                                .require()
-                                .map(|r| r.0.iter().any(|t| t == "100rel"))
-                                .unwrap_or(false)
-                            {
-                                manager.handle_provisional_response(
-                                    call_id, &resp, None, local_contact,
-                                );
-                                let _ = manager.handle_provisional_reliable(call_id, &resp);
-                            }
+                            manager.handle_provisional_response(
+                                call_id, &resp, None, local_contact,
+                            );
+                            let _ = manager.handle_provisional_reliable(call_id, &resp);
                         }
                         SipMessage::Response(resp) if resp.status_code() == 200 => {
                             // 200 OK to INVITE establishes the call and

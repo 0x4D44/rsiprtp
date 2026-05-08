@@ -730,11 +730,9 @@ impl TurnClient {
                 ATTR_XOR_MAPPED_ADDRESS => {
                     mapped_addr = parse_xor_address(attr_data, &self.transaction_id);
                 }
-                ATTR_LIFETIME => {
-                    if attr_len >= 4 {
-                        let mut lb = attr_data;
-                        lifetime = lb.get_u32();
-                    }
+                ATTR_LIFETIME if attr_len >= 4 => {
+                    let mut lb = attr_data;
+                    lifetime = lb.get_u32();
                 }
                 _ => {}
             }

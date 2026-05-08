@@ -458,13 +458,10 @@ impl StackInstance {
                     });
                 }
             }
-            ManagerEvent::NonInviteRequest(request) => {
-                // Handle BYE
-                if request.method() == Method::Bye {
-                    // Find the call and end it
-                    for (call_id, _) in self.established_calls.drain() {
-                        self.events.push(StackEvent::CallEnded { call_id });
-                    }
+            ManagerEvent::NonInviteRequest(request) if request.method() == Method::Bye => {
+                // Handle BYE: find any established call and end it
+                for (call_id, _) in self.established_calls.drain() {
+                    self.events.push(StackEvent::CallEnded { call_id });
                 }
             }
             ManagerEvent::NonInviteFinalResponse(_) => {

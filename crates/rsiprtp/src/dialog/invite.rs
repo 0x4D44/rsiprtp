@@ -265,27 +265,25 @@ impl InviteDialog {
                     TerminationReason::ByeReceived,
                 )));
             }
-            Method::Invite => {
+            Method::Invite
+                if self.info.state == DialogState::Confirmed
+                    && self.info.update_remote_seq(cseq) =>
+            {
                 // Re-INVITE
-                if self.info.state == DialogState::Confirmed && self.info.update_remote_seq(cseq) {
-                    self.actions.push(Action::Event(Event::ReInvite(request)));
-                }
-                // else: reject with 500 (CSeq out of order)
+                self.actions.push(Action::Event(Event::ReInvite(request)));
+                // else: reject with 500 (CSeq out of order) — handled at the
+                // wildcard arm below by doing nothing.
             }
-            Method::Ack => {
+            Method::Ack if self.role == Role::Uas && self.info.state == DialogState::Confirmed => {
                 // ACK for 2xx (UAS side)
-                if self.role == Role::Uas && self.info.state == DialogState::Confirmed {
-                    self.ack_sent = true;
-                }
+                self.ack_sent = true;
             }
-            Method::Cancel => {
+            Method::Cancel if self.info.state == DialogState::Early && self.role == Role::Uas => {
                 // CANCEL only applies to early dialogs
-                if self.info.state == DialogState::Early && self.role == Role::Uas {
-                    self.info.state = DialogState::Terminated;
-                    self.actions.push(Action::Event(Event::Terminated(
-                        TerminationReason::Cancelled,
-                    )));
-                }
+                self.info.state = DialogState::Terminated;
+                self.actions.push(Action::Event(Event::Terminated(
+                    TerminationReason::Cancelled,
+                )));
             }
             _ => {
                 // Other in-dialog requests (INFO, UPDATE, etc.)
