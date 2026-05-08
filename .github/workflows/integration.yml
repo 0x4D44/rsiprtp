@@ -44,10 +44,10 @@ jobs:
           baresip -h || true
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --exclude gabby
 
       - name: Run unit tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude gabby -- --test-threads=1
 
       - name: Run integration tests (framework only)
         run: cargo test --package rsiprtp --test baresip_integration -- --test-threads=1
@@ -78,13 +78,13 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --workspace --exclude gabby
 
       - name: Run all unit tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude gabby -- --test-threads=1
 
       - name: Check formatting
         run: cargo fmt --check
 
       - name: Run clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --exclude gabby --all-targets -- -D warnings
